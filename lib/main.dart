@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/routing/app_router.dart';
 import 'package:watch_nook/core/theme/watchnook_theme.dart';
 import 'package:watch_nook/features/settings/data/shared_preferences_provider.dart';
@@ -19,9 +22,18 @@ Future<void> main() async {
   // land in M4; the M4 restore should also pre-set the onboarding flag here).
   final prefs = await SharedPreferences.getInstance();
 
+  final container = ProviderContainer(
+    overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+  );
+
+  // ADR-2 / "remote config never blocks boot": first paint uses the synchronous
+  // current() (cached-prefs → baked-in). The network refresh is fire-and-forget
+  // and self-guarded (`on Object`), so it can never throw onto the boot path.
+  unawaited(container.read(remoteConfigServiceProvider).refresh());
+
   runApp(
-    ProviderScope(
-      overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+    UncontrolledProviderScope(
+      container: container,
       child: const WatchnookApp(),
     ),
   );
