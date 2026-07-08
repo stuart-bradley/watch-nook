@@ -4,6 +4,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:watch_nook/features/home/presentation/home_screen.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_screen.dart';
+import 'package:watch_nook/features/search/presentation/search_screen.dart';
 
 part 'app_router.g.dart';
 
@@ -15,6 +16,7 @@ final List<RouteBase> appRoutes = <RouteBase>[
     path: '/onboarding',
     builder: (context, state) => const OnboardingScreen(),
   ),
+  GoRoute(path: '/search', builder: (context, state) => const SearchScreen()),
 ];
 
 /// Pure first-run redirect decision, gated on the onboarding flag **alone** (no
