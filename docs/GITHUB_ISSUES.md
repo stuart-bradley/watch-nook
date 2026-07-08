@@ -22,7 +22,7 @@ Thin caller workflows `.github/workflows/{ci,e2e,release}.yml` on `stuart-bradle
 - **Acceptance:** DB opens; migration test passes.
 
 ### #4 — go_router + onboarding redirect + Material 3 theme · `feat`
-Router provider with first-run onboarding redirect; Material 3 `ThemeData` builder (light+dark) + optional `DynamicColorBuilder`.
+Router provider with first-run onboarding redirect; Material 3 `ThemeData` builder (light+dark) + optional `DynamicColorBuilder`. **Theme is delivered** — lift `docs/design/flutter/lib/core/theme/{watchnook_theme,watchnook_tokens}.dart` (Honey · gold) into `lib/core/theme/`; add `google_fonts`; swap `withOpacity`→`withValues`.
 - **Tests:** redirect logic unit test.
 - **Acceptance:** onboarding → home navigates; theme applied.
 
@@ -187,8 +187,8 @@ Settings: export/backup, theme, about + attribution.
 - **Tests:** widget tests.
 - **Acceptance:** first-run + empty states polished.
 
-### #36 — Apply Claude-designed theme / design system · `feat` `needs-human`
-Needs the human's Claude Design output (see `docs/DESIGN_BRIEF.md`).
+### #36 — Apply Claude-designed theme / design system · `feat`
+**Design output delivered** at `docs/design/flutter/` (the `needs-human` blocker is resolved). Port `theme/`, `tokens`, `poster_placeholder` into `lib/core/`; the `features/*` screens are `setState` mockups — reimplement with Riverpod + go_router + real data (reference only). Swap `withOpacity`→`withValues`. See `docs/DESIGN_BRIEF.md` → "Delivered".
 - **Acceptance:** design applied.
 
 ### #37 — ASO listing (`docs/ASO_LISTING.md`) · `docs` `needs-human`
