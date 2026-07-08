@@ -10,21 +10,57 @@ void main() {
   setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));
   tearDown(() => db.close());
 
+  final now = DateTime(2026);
+
   LibraryItemsCompanion aShow({
     String title = 'Severance',
     int? tmdbId = 95396,
-  }) {
-    final now = DateTime(2026);
-    return LibraryItemsCompanion.insert(
-      mediaType: MediaType.tv,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: title,
-      trackStatus: TrackStatus.watching,
-      addedAt: now,
-      updatedAt: now,
-      tmdbId: Value(tmdbId),
-    );
-  }
+    int? tvdbId,
+    String? imdbId,
+    int? year,
+    TrackStatus status = TrackStatus.watching,
+  }) => LibraryItemsCompanion.insert(
+    mediaType: MediaType.tv,
+    recordedSource: MetadataSourceKind.tmdb,
+    title: title,
+    trackStatus: status,
+    addedAt: now,
+    updatedAt: now,
+    tmdbId: Value(tmdbId),
+    tvdbId: Value(tvdbId),
+    imdbId: Value(imdbId),
+    year: Value(year),
+  );
+
+  LibraryItemsCompanion aMovie({
+    String title = 'Dune',
+    int? tmdbId = 438631,
+    TrackStatus status = TrackStatus.completed,
+  }) => LibraryItemsCompanion.insert(
+    mediaType: MediaType.movie,
+    recordedSource: MetadataSourceKind.tmdb,
+    title: title,
+    trackStatus: status,
+    addedAt: now,
+    updatedAt: now,
+    tmdbId: Value(tmdbId),
+  );
+
+  Future<void> insertWatch(
+    int itemId, {
+    int? season,
+    int? episode,
+    bool rewatch = false,
+  }) => db
+      .into(db.watchEvents)
+      .insert(
+        WatchEventsCompanion.insert(
+          libraryItemId: itemId,
+          seasonNumber: Value(season),
+          episodeNumber: Value(episode),
+          isRewatch: Value(rewatch),
+        ),
+      );
 
   group('LibraryDao round-trip', () {
     test('insert → getAll reads the row back with defaults applied', () async {
@@ -47,6 +83,233 @@ void main() {
       await db.libraryDao.insertItem(aShow());
       final items = await db.libraryDao.watchAll().first;
       expect(items.map((i) => i.title), ['Severance']);
+    });
+
+    test('getItem returns the row, or null for an unknown id', () async {
+      final id = await db.libraryDao.insertItem(aShow());
+      expect((await db.libraryDao.getItem(id))?.title, 'Severance');
+      expect(await db.libraryDao.getItem(999999), isNull);
+    });
+  });
+
+  group('recomputeDenormalized (AD-4 — the join-free progress primitive)', () {
+    test(
+      'watchedCount counts non-rewatch rows only; a rewatch never inflates it '
+      'nor moves lastWatched forward',
+      () async {
+        final id = await db.libraryDao.insertItem(aShow());
+        await insertWatch(id, season: 1, episode: 1);
+        await insertWatch(id, season: 1, episode: 2);
+        // A rewatch of a LATER episode: must not raise the count nor advance
+        // lastWatched* — it is not a first watch.
+        await insertWatch(id, season: 1, episode: 5, rewatch: true);
+
+        await db.libraryDao.recomputeDenormalized(id);
+
+        final item = (await db.libraryDao.getItem(id))!;
+        expect(item.watchedCount, 2);
+        expect(item.lastWatchedSeason, 1);
+        expect(item.lastWatchedEpisode, 2);
+      },
+    );
+
+    test(
+      'lastWatched* is the max AIRED coord — season beats episode',
+      () async {
+        final id = await db.libraryDao.insertItem(aShow());
+        await insertWatch(id, season: 1, episode: 10);
+        await insertWatch(id, season: 2, episode: 1);
+
+        await db.libraryDao.recomputeDenormalized(id);
+
+        final item = (await db.libraryDao.getItem(id))!;
+        // A naive episode-only max would pick S1E10; the correct max is S2E1.
+        expect(item.lastWatchedSeason, 2);
+        expect(item.lastWatchedEpisode, 1);
+        expect(item.watchedCount, 2);
+      },
+    );
+
+    test('a partial unwatch moves lastWatched* back to the new max', () async {
+      final id = await db.libraryDao.insertItem(aShow());
+      await insertWatch(id, season: 1, episode: 1);
+      await insertWatch(id, season: 1, episode: 2);
+      await insertWatch(id, season: 1, episode: 3);
+      await db.libraryDao.recomputeDenormalized(id);
+      expect((await db.libraryDao.getItem(id))!.lastWatchedEpisode, 3);
+
+      // Simulate an unwatch of the latest episode, then recompute.
+      await (db.delete(
+        db.watchEvents,
+      )..where((t) => t.episodeNumber.equals(3))).go();
+      await db.libraryDao.recomputeDenormalized(id);
+
+      final item = (await db.libraryDao.getItem(id))!;
+      expect(item.watchedCount, 2);
+      expect(item.lastWatchedSeason, 1);
+      expect(item.lastWatchedEpisode, 2);
+    });
+
+    test('a movie watch counts once and leaves lastWatched* null', () async {
+      final id = await db.libraryDao.insertItem(aMovie());
+      await insertWatch(id); // null season/episode
+
+      await db.libraryDao.recomputeDenormalized(id);
+
+      final item = (await db.libraryDao.getItem(id))!;
+      expect(item.watchedCount, 1);
+      expect(item.lastWatchedSeason, isNull);
+      expect(item.lastWatchedEpisode, isNull);
+    });
+
+    test('an empty history resets progress to zero/null', () async {
+      final id = await db.libraryDao.insertItem(aShow());
+      await insertWatch(id, season: 1, episode: 1);
+      await db.libraryDao.recomputeDenormalized(id);
+      expect((await db.libraryDao.getItem(id))!.watchedCount, 1);
+
+      await (db.delete(
+        db.watchEvents,
+      )..where((t) => t.libraryItemId.equals(id))).go();
+      await db.libraryDao.recomputeDenormalized(id);
+
+      final item = (await db.libraryDao.getItem(id))!;
+      expect(item.watchedCount, 0);
+      expect(item.lastWatchedSeason, isNull);
+      expect(item.lastWatchedEpisode, isNull);
+    });
+  });
+
+  group('watchLibrary (filtered grid stream)', () {
+    test('narrows to the requested status and type', () async {
+      await db.libraryDao.insertItem(aShow(title: 'Watching TV'));
+      await db.libraryDao.insertItem(
+        aShow(
+          title: 'On watchlist',
+          tmdbId: 111,
+          status: TrackStatus.watchlist,
+        ),
+      );
+      await db.libraryDao.insertItem(aMovie(title: 'Completed Movie'));
+
+      expect(
+        (await db.libraryDao.watchLibrary(status: TrackStatus.watching).first)
+            .map((i) => i.title),
+        ['Watching TV'],
+      );
+      expect(
+        (await db.libraryDao.watchLibrary(type: MediaType.movie).first).map(
+          (i) => i.title,
+        ),
+        ['Completed Movie'],
+      );
+      // No filter → everything.
+      expect(await db.libraryDao.watchLibrary().first, hasLength(3));
+    });
+
+    test('repaints when a row is written', () async {
+      final stream = db.libraryDao.watchLibrary(status: TrackStatus.watching);
+      final emissions = <int>[];
+      final sub = stream.listen((rows) => emissions.add(rows.length));
+
+      await db.libraryDao.insertItem(aShow());
+      await pumpEventQueue();
+
+      expect(emissions.last, 1);
+      await sub.cancel();
+    });
+  });
+
+  group('findByIdentity + addOrGetItem (add-dedupe)', () {
+    test('addOrGetItem inserts, then re-adding the title is a no-op', () async {
+      final first = await db.libraryDao.addOrGetItem(aShow());
+      final second = await db.libraryDao.addOrGetItem(
+        aShow(title: 'Severance (re-add)'),
+      );
+
+      expect(second.id, first.id); // same row returned
+      expect(await db.libraryDao.getAll(), hasLength(1)); // not duplicated
+      // The original title wins — the existing row is returned untouched.
+      expect(second.title, 'Severance');
+    });
+
+    test('findByIdentity matches by imdbId even when tmdbId differs', () async {
+      await db.libraryDao.insertItem(
+        aShow(tmdbId: 1, imdbId: 'tt1234'),
+      );
+      final hit = await db.libraryDao.findByIdentity(
+        mediaType: MediaType.tv,
+        tmdbId: 99, // wrong tmdb id
+        imdbId: 'tt1234', // right imdb id
+      );
+      expect(hit, isNotNull);
+    });
+
+    test('same source id under a different mediaType is NOT a match', () async {
+      await db.libraryDao.insertItem(aShow(tmdbId: 500));
+      final hit = await db.libraryDao.findByIdentity(
+        mediaType: MediaType.movie, // different type, same id
+        tmdbId: 500,
+      );
+      expect(hit, isNull);
+    });
+
+    test('falls back to (mediaType, title, year) when no ids match', () async {
+      await db.libraryDao.insertItem(
+        aShow(title: 'Idless', tmdbId: null, year: 2020),
+      );
+      final hit = await db.libraryDao.findByIdentity(
+        mediaType: MediaType.tv,
+        title: 'Idless',
+        year: 2020,
+      );
+      expect(hit?.title, 'Idless');
+      // A different year is a different title.
+      expect(
+        await db.libraryDao.findByIdentity(
+          mediaType: MediaType.tv,
+          title: 'Idless',
+          year: 1999,
+        ),
+        isNull,
+      );
+    });
+  });
+
+  group('status/rating/delete writes', () {
+    test('updateStatus changes the status and stamps updatedAt', () async {
+      final id = await db.libraryDao.insertItem(aShow());
+      final later = DateTime(2026, 7, 8);
+      await db.libraryDao.updateStatus(id, TrackStatus.completed, now: later);
+
+      final item = (await db.libraryDao.getItem(id))!;
+      expect(item.trackStatus, TrackStatus.completed);
+      expect(item.updatedAt, later);
+    });
+
+    test('updateRating sets then clears rating + ratedAt', () async {
+      final id = await db.libraryDao.insertItem(aShow());
+      final rated = DateTime(2026, 7, 8);
+      await db.libraryDao.updateRating(id, 8, now: rated);
+
+      var item = (await db.libraryDao.getItem(id))!;
+      expect(item.rating, 8);
+      expect(item.ratedAt, rated);
+
+      await db.libraryDao.updateRating(id, null, now: DateTime(2026, 7, 9));
+      item = (await db.libraryDao.getItem(id))!;
+      expect(item.rating, isNull);
+      expect(item.ratedAt, isNull);
+    });
+
+    test('deleteItem removes the row and cascades its WatchEvents', () async {
+      final id = await db.libraryDao.insertItem(aShow());
+      await insertWatch(id, season: 1, episode: 1);
+
+      await db.libraryDao.deleteItem(id);
+
+      expect(await db.libraryDao.getItem(id), isNull);
+      expect(await db.select(db.watchEvents).get(), isEmpty);
     });
   });
 
