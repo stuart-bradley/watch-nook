@@ -1,6 +1,7 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
+import 'package:watch_nook/core/database/media_cache_dao.dart';
 
 part 'database_provider.g.dart';
 
@@ -21,3 +22,9 @@ AppDatabase appDatabase(Ref ref) {
 /// The [LibraryDao] for the singleton database.
 @Riverpod(keepAlive: true)
 LibraryDao libraryDao(Ref ref) => ref.watch(appDatabaseProvider).libraryDao;
+
+/// The [MediaCacheDao] for the singleton database — backs the SWR metadata
+/// cache (`CachingMetadataRepository`, #13). `keepAlive` to match the DB.
+@Riverpod(keepAlive: true)
+MediaCacheDao mediaCacheDao(Ref ref) =>
+    ref.watch(appDatabaseProvider).mediaCacheDao;

@@ -159,3 +159,95 @@ class WatchEvents extends Table {
   /// True for a logged rewatch (appended); false for the first watch.
   BoolColumn get isRewatch => boolean().withDefault(const Constant(false))();
 }
+
+// ---------------------------------------------------------------------------
+// CACHE DOMAIN (ADR-3/ADR-7) — landed at schema v2 (#13).
+//
+// INVARIANT: these two tables are **disposable**. They are re-fetchable from
+// the metadata API and are NEVER exported or auto-backed-up (`ExportData` reads
+// only the user-owned tables above — see the "two data domains" invariant in
+// CLAUDE.md). Wiping them loses nothing the user owns. Keep it that way: do not
+// join user data into them, and do not add either to any export/backup path.
+// ---------------------------------------------------------------------------
+
+/// Stale-while-revalidate cache of one movie/show's normalized details. The
+/// full `MediaDetails` JSON lives in [payload] (round-tripped for the detail
+/// screen); the promoted columns duplicate the few fields list/grid queries
+/// need so they never have to decode JSON per row (ADR-7).
+///
+/// Identity is the backend's own id: `(source, mediaType, sourceId)` — a title
+/// recorded against TMDB and the same title against TVDB are distinct cache
+/// rows (different ids), joined only by [imdbId] on a backend switch.
+class CachedMedia extends Table {
+  /// Which backend this row was fetched from.
+  TextColumn get source => textEnum<MetadataSourceKind>()();
+
+  /// Movie or TV show.
+  TextColumn get mediaType => textEnum<MediaType>()();
+
+  /// The backend's own id for this title (TMDB id or TVDB id per [source]).
+  IntColumn get sourceId => integer()();
+
+  /// IMDb id (universal join key), if the backend supplied one.
+  TextColumn get imdbId => text().nullable()();
+
+  /// Raw `MediaDetails.toJson()` — the source of truth the detail screen
+  /// deserializes. The promoted columns below are derived from this at write.
+  TextColumn get payload => text()();
+
+  /// When this row was fetched — the SWR TTL clock reads this (ADR-7).
+  DateTimeColumn get fetchedAt => dateTime()();
+
+  // Promoted (denormalized) fields — cheap list/grid reads without decoding
+  // [payload]. Populated from [MediaDetails] on every upsert.
+  TextColumn get title => text()();
+  IntColumn get year => integer().nullable()();
+  TextColumn get posterPath => text().nullable()();
+  TextColumn get backdropPath => text().nullable()();
+  TextColumn get overview => text().nullable()();
+  TextColumn get showStatus => text().nullable()();
+
+  /// Next episode's air date (promoted from `nextEpisode.airDate`) — drives the
+  /// "airing vs ended" TTL tier and upcoming lists without decoding [payload].
+  DateTimeColumn get nextAirDate => dateTime().nullable()();
+  IntColumn get runtimeMinutes => integer().nullable()();
+  TextColumn get genresCsv => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {source, mediaType, sourceId};
+}
+
+/// Stale-while-revalidate cache of a show's **aired-order** episodes (ADR-4).
+/// Keyed by the backend's own show id + aired `(season, episode)` — the same
+/// coordinates `WatchEvents` stores, so a cached episode lines up with its
+/// watched marker without translation.
+@TableIndex(name: 'cached_episodes_show', columns: {#source, #showSourceId})
+class CachedEpisodes extends Table {
+  /// Which backend this row was fetched from.
+  TextColumn get source => textEnum<MetadataSourceKind>()();
+
+  /// The backend's own show id.
+  IntColumn get showSourceId => integer()();
+
+  /// Aired-order season number (ADR-4). Season 0 is specials.
+  IntColumn get seasonNumber => integer()();
+
+  /// Aired-order episode number within the season.
+  IntColumn get episodeNumber => integer()();
+
+  TextColumn get title => text().nullable()();
+  DateTimeColumn get airDate => dateTime().nullable()();
+  TextColumn get overview => text().nullable()();
+  IntColumn get runtimeMinutes => integer().nullable()();
+
+  /// When this row was fetched — the SWR TTL clock reads this (ADR-7).
+  DateTimeColumn get fetchedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {
+    source,
+    showSourceId,
+    seasonNumber,
+    episodeNumber,
+  };
+}

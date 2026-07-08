@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
@@ -51,11 +51,26 @@ void main() {
   });
 
   group('schema & integrity (migration scaffold)', () {
-    test('opens at schemaVersion 1 and passes integrity_check', () async {
-      expect(db.schemaVersion, 1);
+    test('opens at schemaVersion 2 with the cache tables present', () async {
+      expect(db.schemaVersion, 2);
       // Forces onCreate + beforeOpen to run, then verifies the file is sound.
       final result = await db.customSelect('PRAGMA integrity_check').get();
       expect(result.single.data.values.first, 'ok');
+      // v2 (#13) added the disposable cache tables; a fresh open builds them
+      // (createAll). Querying each proves the table exists (a missing table
+      // would throw) and starts empty.
+      expect(
+        await db.mediaCacheDao.getMedia(
+          MetadataSourceKind.tmdb,
+          MediaType.tv,
+          1,
+        ),
+        isNull,
+      );
+      expect(
+        await db.mediaCacheDao.getEpisodes(MetadataSourceKind.tmdb, 1, 1),
+        isEmpty,
+      );
     });
 
     test(
