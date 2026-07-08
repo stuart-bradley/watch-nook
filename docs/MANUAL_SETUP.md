@@ -1,12 +1,12 @@
 # Manual setup — do this BEFORE `/autopilot-start`
 
-Autopilot builds Watchnook from the GitHub milestones/issues, but a few things need a human first. Work top-to-bottom. Items 1–2 are also tracked as `needs-human` GitHub issues (#6, #7).
+Autopilot builds Watchnook from the GitHub milestones/issues, but a few things need a human first. Work top-to-bottom. Items 1–2 are also tracked as `needs-human` GitHub issues (**#7 fixtures — ✅ done**, #6 API keys).
 
-## 1. ⚠️ Pull real service exports into `test/fixtures/` (TIME-CRITICAL)
-The M3 import parsers are TDD'd against real files. Pull, then drop into `test/fixtures/` per its README:
-- **TV Time — before 2026-07-15** (`https://gdpr.tvtime.com/gdpr/self-service`). Irreplaceable after shutdown.
-- **IMDb** (Your Ratings / Watchlist → Export), **Letterboxd** (Settings → Import & Export), **Trakt** (Settings → Data → Export).
-- Keep one deliberately **malformed** sample per source (truncated / wrong-typed field).
+## 1. ✅ DONE — Real service exports in `test/fixtures/` (closed #7 via PR #39, 2026-07-08)
+The M3 import parsers TDD against these files, now committed under `test/fixtures/` (see its README):
+- **TV Time** — a **real** GDPR export, curated to ~23 shows / ~300 watched-episode rows / ~10 movies, **PII-stripped** (only the 5 import tables; `user_id` scrubbed). Regenerate from a fresh export with `test/fixtures/tvtime/trim_from_gdpr_export.py`.
+- **IMDb / Letterboxd / Trakt** — synthesized from real, cross-referenced ids (imdb `tt` / tmdb / tvdb), with cross-source overlap anchors for MergeApplier dedup tests.
+- One deliberately **malformed** sample per source under `test/fixtures/malformed/` (structurally-valid-but-wrong, for the `as`-cast `TypeError` guard).
 
 ## 2. Metadata API keys
 - **TMDB** (default backend): create an account → API → request a key (instant). 
