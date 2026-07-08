@@ -76,8 +76,9 @@ void main() {
     ),
   );
 
-  Future<void> watch(int itemId, int season, int episode) =>
-      db.into(db.watchEvents).insert(
+  Future<void> watch(int itemId, int season, int episode) => db
+      .into(db.watchEvents)
+      .insert(
         WatchEventsCompanion.insert(
           libraryItemId: itemId,
           seasonNumber: Value(season),
@@ -106,37 +107,39 @@ void main() {
       (await db.libraryDao.getAll()).firstWhere((i) => i.id == id);
 
   group('happy path — relink + reconcile', () {
-    test('remaps ids to the new backend, keeps watched coords, clears flag',
-        () async {
-      final id = await addShow();
-      await watch(id, 1, 1);
-      await watch(id, 1, 2);
+    test(
+      'remaps ids to the new backend, keeps watched coords, clears flag',
+      () async {
+        final id = await addShow();
+        await watch(id, 1, 1);
+        await watch(id, 1, 2);
 
-      final report = await service(
-        _FakeTvdb(
-          resolve: {'tt11280740': tvdbHit(555)},
-          episodes: {
-            (555, 1): [ep(1, 1), ep(1, 2), ep(1, 3)],
-          },
-        ),
-      ).switchAll();
+        final report = await service(
+          _FakeTvdb(
+            resolve: {'tt11280740': tvdbHit(555)},
+            episodes: {
+              (555, 1): [ep(1, 1), ep(1, 2), ep(1, 3)],
+            },
+          ),
+        ).switchAll();
 
-      expect(report.relinked, 1);
-      expect(report.flagged, 0);
+        expect(report.relinked, 1);
+        expect(report.flagged, 0);
 
-      final item = await reload(id);
-      expect(item.recordedSource, MetadataSourceKind.tvdb);
-      expect(item.tvdbId, 555);
-      expect(item.tmdbId, 95396, reason: 'old id kept, not wiped');
-      expect(item.relinkFailed, isFalse);
+        final item = await reload(id);
+        expect(item.recordedSource, MetadataSourceKind.tvdb);
+        expect(item.tvdbId, 555);
+        expect(item.tmdbId, 95396, reason: 'old id kept, not wiped');
+        expect(item.relinkFailed, isFalse);
 
-      // Watched coordinates are untouched — the whole point of the switch.
-      final events = await db.libraryDao.watchEventsFor(id);
-      expect(
-        events.map((e) => (e.seasonNumber, e.episodeNumber)).toSet(),
-        {(1, 1), (1, 2)},
-      );
-    });
+        // Watched coordinates are untouched — the whole point of the switch.
+        final events = await db.libraryDao.watchEventsFor(id);
+        expect(
+          events.map((e) => (e.seasonNumber, e.episodeNumber)).toSet(),
+          {(1, 1), (1, 2)},
+        );
+      },
+    );
 
     test('air-dates that agree with the old cache reconcile cleanly', () async {
       final id = await addShow();
@@ -183,7 +186,9 @@ void main() {
           imdbId: const Value('tt6710474'),
         ),
       );
-      await db.into(db.watchEvents).insert(
+      await db
+          .into(db.watchEvents)
+          .insert(
             WatchEventsCompanion.insert(libraryItemId: id),
           );
 
@@ -230,9 +235,9 @@ void main() {
       _FakeTvdb source, {
       required bool idsRelinked,
     }) async {
-      final before = (await db.libraryDao.watchEventsFor(id))
-          .map((e) => (e.seasonNumber, e.episodeNumber))
-          .toSet();
+      final before = (await db.libraryDao.watchEventsFor(
+        id,
+      )).map((e) => (e.seasonNumber, e.episodeNumber)).toSet();
 
       final report = await service(source).switchAll();
       expect(report.flagged, 1);
@@ -242,14 +247,17 @@ void main() {
       if (idsRelinked) {
         expect(item.recordedSource, MetadataSourceKind.tvdb);
       } else {
-        expect(item.recordedSource, MetadataSourceKind.tmdb,
-            reason: 'cannot relink → ids/source left intact');
+        expect(
+          item.recordedSource,
+          MetadataSourceKind.tmdb,
+          reason: 'cannot relink → ids/source left intact',
+        );
         expect(item.tvdbId, isNull);
       }
 
-      final after = (await db.libraryDao.watchEventsFor(id))
-          .map((e) => (e.seasonNumber, e.episodeNumber))
-          .toSet();
+      final after = (await db.libraryDao.watchEventsFor(
+        id,
+      )).map((e) => (e.seasonNumber, e.episodeNumber)).toSet();
       expect(after, before, reason: 'watch history must be untouched');
     }
 
@@ -283,22 +291,24 @@ void main() {
       );
     });
 
-    test('episode-count divergence (watched ep missing upstream) → flagged',
-        () async {
-      final id = await addShow();
-      await watch(id, 1, 1);
-      await watch(id, 1, 3); // new backend only has eps 1 & 2
-      await expectFlaggedAndUntouched(
-        id,
-        _FakeTvdb(
-          resolve: {'tt11280740': tvdbHit(555)},
-          episodes: {
-            (555, 1): [ep(1, 1), ep(1, 2)],
-          },
-        ),
-        idsRelinked: true,
-      );
-    });
+    test(
+      'episode-count divergence (watched ep missing upstream) → flagged',
+      () async {
+        final id = await addShow();
+        await watch(id, 1, 1);
+        await watch(id, 1, 3); // new backend only has eps 1 & 2
+        await expectFlaggedAndUntouched(
+          id,
+          _FakeTvdb(
+            resolve: {'tt11280740': tvdbHit(555)},
+            episodes: {
+              (555, 1): [ep(1, 1), ep(1, 2)],
+            },
+          ),
+          idsRelinked: true,
+        );
+      },
+    );
 
     test('a watched special (season 0) → flagged', () async {
       final id = await addShow();
