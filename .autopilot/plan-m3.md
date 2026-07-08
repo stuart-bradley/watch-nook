@@ -67,8 +67,10 @@ needs them, so they are built first, inside #16.
   All `keepAlive`. UI always goes through these — never an HTTP client directly.
 - **AD-3** **Snapshot-at-add** (stats invariant): the add-flow fetches
   `movie/showDetails` **once** on add to snapshot `genresCsv`, `runtimeMinutes`,
-  `episodeCountTotal`, `showStatus`, `year`, `posterPath` onto `LibraryItems`.
-  Stats/grid then never depend on the disposable cache.
+  `episodeCountTotal`, `showStatus`, `year`, `posterPath` onto `LibraryItems` —
+  **plus the two required-non-null columns `recordedSource` (= active backend)
+  and the matching id column (`tmdbId` when TMDB active, `tvdbId` when TVDB)**,
+  and `imdbId` when known. Stats/grid then never depend on the disposable cache.
 - **AD-4** **Denormalized maintenance is one function** — `recomputeDenormalized(itemId)`
   in `LibraryDao`, called inside the same transaction after **every** `WatchEvents`
   write. Single source of truth for `watchedCount` (non-rewatch rows only) and
@@ -172,11 +174,24 @@ DB only, no UI. Extend `LibraryDao`:
 ### #21 — Upcoming/calendar (tracked only) · `feat`
 - Up Next tab. Show ids = tracked shows only (status in
   watching/watchlist/on-hold; **skip dropped and ended-completed** per the caching
-  invariant). `source.upcomingForTracked(showIds)` → episodes **grouped by day**
-  (this week). Tracked **movie** releases with a future date grouped alongside.
+  invariant; **also skip a row whose `recordedSource != activeMetadataBackend`** —
+  a post-switch `relinkFailed` title would otherwise pass a wrong-backend id).
+  `source.upcomingForTracked(showIds)` → episodes **grouped by day** (this week).
+- **SCOPE (per review):** **shows-only for M2.** US-5 (the acceptance story) is
+  shows-only. A **movie release date does not exist in the model** —
+  `LibraryItems`/`CachedMedia`/`MediaDetails` carry only `year` (an int) and
+  `MetadataSource` has no movie-release method — so implementing "upcoming movie
+  releases" would need a new field/method and would break the "no schema change"
+  claim. De-scoped to a **follow-up issue** (M4/M5); do **not** attempt it here.
+- **Offline/error path:** `upcomingForTracked` is **not** wrapped by
+  `CachingMetadataRepository` (no cache-first stream). On a fetch error/offline,
+  degrade to a **graceful empty/error state** — never a blank crash. Optional
+  offline parity (US-13): derive the list from the already-promoted
+  `CachedMedia.nextAirDate` of tracked shows when the live fetch fails.
 - **Tests:** an untracked show's upcoming episode does **not** appear; a dropped/
-  ended-completed tracked show is skipped; this-week grouping. Inject a `Clock`.
-  **Acceptance:** this-week view populated.
+  ended-completed tracked show is skipped; a wrong-backend row is skipped;
+  this-week grouping; a throwing source yields the empty/error state (not a crash).
+  Inject a `Clock`. **Acceptance:** this-week view populated.
 
 ### #22 — Widget tests (bulk, filters, idempotency) · `test`
 - Widget-layer coverage tying the flows together (`ProviderScope` overrides, **never
@@ -211,7 +226,8 @@ DB only, no UI. Extend `LibraryDao`:
   deviation; flagged in the PR.
 - **Add-flow** does one details fetch to satisfy the snapshot invariant (AD-3);
   if offline at add-time, snapshot what the search result carries and leave
-  `genresCsv`/`runtimeMinutes` null (backfilled on next detail view).
-- **Upcoming movies** use `LibraryItems.year`/cached release date; if absent, the
-  movie is simply omitted from Up Next.
+  `genresCsv`/`runtimeMinutes` null (backfilled on next detail view). It still
+  sets `recordedSource` + the id column (available offline from the search hit).
+- **Upcoming = shows-only for M2** (#21) — movie release dates don't exist in the
+  model; de-scoped to a follow-up issue (see #21).
 - **"Watch up to here"** is a long-press / overflow action on an episode row.
