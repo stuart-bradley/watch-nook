@@ -45,8 +45,9 @@ MOVIES = {
 
 
 def scrub(row):
-    # global replace covers the user_id column and any field that embeds it
-    return [c.replace(REAL_UID, DUMMY_UID) if REAL_UID else c for c in row]
+    # REAL_UID is guaranteed non-empty before any scrub() call (see the guard in __main__),
+    # so this global replace catches the user_id column and any field that embeds it.
+    return [c.replace(REAL_UID, DUMMY_UID) for c in row]
 
 
 def read(zf, name):
@@ -72,7 +73,11 @@ def filtered(zf, name, keep):
 with zipfile.ZipFile(ZIP) as zf:
     # discover the real user_id from the export (the user_id column) — never hardcoded
     _h, *_body = read(zf, "followed_tv_show.csv")
-    REAL_UID = _body[0][_h.index("user_id")]
+    REAL_UID = (_body[0][_h.index("user_id")] if _body else "").strip()
+    # Fail LOUD, never open: with no real id to scrub, DON'T write unscrubbed PII to a public repo.
+    if not REAL_UID.isdigit():
+        sys.exit("refusing to write fixtures: no scrubbable numeric user_id in "
+                 f"followed_tv_show.csv (got {REAL_UID!r}) — would leak real PII")
 
     write("followed_tv_show.csv",
           *filtered(zf, "followed_tv_show.csv", lambda r, c: r[c["tv_show_name"]] in SHOWS))
