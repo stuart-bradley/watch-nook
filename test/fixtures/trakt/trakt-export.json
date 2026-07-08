@@ -1,0 +1,113 @@
+{
+  "watched": {
+    "movies": [
+      {
+        "plays": 1,
+        "last_watched_at": "2020-01-15T20:00:00.000Z",
+        "movie": {
+          "title": "Parasite",
+          "year": 2019,
+          "ids": { "trakt": 190430, "slug": "parasite-2019", "imdb": "tt6751668", "tmdb": 496243 }
+        }
+      },
+      {
+        "plays": 2,
+        "last_watched_at": "2022-11-20T21:00:00.000Z",
+        "movie": {
+          "title": "The Matrix",
+          "year": 1999,
+          "ids": { "trakt": 481, "slug": "the-matrix-1999", "imdb": "tt0133093", "tmdb": 603 }
+        }
+      }
+    ],
+    "shows": [
+      {
+        "plays": 3,
+        "last_watched_at": "2019-02-01T02:00:00.000Z",
+        "show": {
+          "title": "The Office",
+          "year": 2005,
+          "ids": { "trakt": 4494, "slug": "the-office-us", "imdb": "tt0386676", "tmdb": 2316, "tvdb": 73244 }
+        },
+        "seasons": [
+          {
+            "number": 1,
+            "episodes": [
+              { "number": 1, "plays": 1, "last_watched_at": "2019-01-01T02:00:00.000Z" },
+              { "number": 2, "plays": 1, "last_watched_at": "2019-01-02T02:00:00.000Z" }
+            ]
+          },
+          {
+            "number": 2,
+            "episodes": [
+              { "number": 1, "plays": 1, "last_watched_at": "2019-02-01T02:00:00.000Z" }
+            ]
+          }
+        ]
+      },
+      {
+        "plays": 1,
+        "last_watched_at": "2019-01-10T04:00:00.000Z",
+        "show": {
+          "title": "Breaking Bad",
+          "year": 2008,
+          "ids": { "trakt": 1388, "slug": "breaking-bad", "imdb": "tt0903747", "tmdb": 1396, "tvdb": 81189 }
+        },
+        "seasons": [
+          {
+            "number": 1,
+            "episodes": [
+              { "number": 1, "plays": 1, "last_watched_at": "2019-01-10T04:00:00.000Z" }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "ratings": {
+    "movies": [
+      {
+        "rated_at": "2020-01-16T00:00:00.000Z",
+        "rating": 10,
+        "movie": {
+          "title": "Parasite",
+          "year": 2019,
+          "ids": { "trakt": 190430, "slug": "parasite-2019", "imdb": "tt6751668", "tmdb": 496243 }
+        }
+      }
+    ],
+    "shows": [
+      {
+        "rated_at": "2019-02-12T00:00:00.000Z",
+        "rating": 10,
+        "show": {
+          "title": "Breaking Bad",
+          "year": 2008,
+          "ids": { "trakt": 1388, "slug": "breaking-bad", "imdb": "tt0903747", "tmdb": 1396, "tvdb": 81189 }
+        }
+      }
+    ]
+  },
+  "watchlist": {
+    "movies": [
+      {
+        "listed_at": "2023-01-10T00:00:00.000Z",
+        "movie": {
+          "title": "Blade Runner 2049",
+          "year": 2017,
+          "ids": { "trakt": 205871, "slug": "blade-runner-2049", "imdb": "tt1856101", "tmdb": 335984 }
+        }
+      }
+    ],
+    "shows": [
+      {
+        "listed_at": "2023-02-01T00:00:00.000Z",
+        "show": {
+          "title": "Arcane",
+          "year": 2021,
+          "ids": { "trakt": 158972, "slug": "arcane", "imdb": "tt11126994", "tmdb": 94605, "tvdb": 371028 }
+        }
+      }
+    ]
+  }
+}

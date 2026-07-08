@@ -1,0 +1,24 @@
+is_favorited,nb_episodes_seen,tv_show_name,user_id,tv_show_id,is_followed
+0,84,Arrested Development,10000000,72173,1
+0,374,QI,10000000,72716,1
+0,396,The Office (US),10000000,73244,1
+0,73,Battlestar Galactica (2003),10000000,73545,1
+0,0,Band of Brothers,10000000,74205,1
+0,61,Avatar: The Last Airbender,10000000,74852,1
+0,320,Doctor Who (2005),10000000,78804,1
+0,344,The Big Bang Theory,10000000,80379,1
+0,63,Breaking Bad,10000000,81189,1
+0,130,Marvel's Agents of S.H.I.E.L.D.,10000000,263365,1
+0,91,Orange Is the New Black,10000000,264586,1
+0,65,The Magicians (2015),10000000,299139,1
+0,39,The Boys,10000000,355567,1
+0,45,"Love, Death & Robots",10000000,357888,0
+0,63,What We Do in the Shadows,10000000,358211,1
+0,7,"Seven Worlds, One Planet",10000000,359251,1
+0,29,Warrior,10000000,359326,1
+0,12,Good Omens,10000000,359569,0
+0,6,Chernobyl,10000000,360893,1
+0,17,House of the Dragon,10000000,371572,1
+0,14,ONE PIECE (2023),10000000,392276,1
+0,9,Shōgun,10000000,392573,1
+0,36,The Bear,10000000,403294,1
