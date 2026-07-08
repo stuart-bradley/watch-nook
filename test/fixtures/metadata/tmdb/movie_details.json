@@ -1,0 +1,16 @@
+{
+  "id": 545611,
+  "title": "Everything Everywhere All at Once",
+  "release_date": "2022-03-24",
+  "poster_path": "/w3LxiVYldZ4qbFdmL1eL8h6bWMz.jpg",
+  "backdrop_path": "/movie_backdrop.jpg",
+  "overview": "An aging Chinese immigrant is swept up in an insane adventure in which she alone can save existence.",
+  "runtime": 139,
+  "genres": [
+    {"id": 28, "name": "Action"},
+    {"id": 12, "name": "Adventure"},
+    {"id": 878, "name": "Science Fiction"}
+  ],
+  "imdb_id": "tt6710474",
+  "external_ids": {"imdb_id": "tt6710474"}
+}

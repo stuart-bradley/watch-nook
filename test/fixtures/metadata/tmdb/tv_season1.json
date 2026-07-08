@@ -1,0 +1,8 @@
+{
+  "season_number": 1,
+  "episodes": [
+    {"season_number": 1, "episode_number": 1, "name": "Good News About Hell", "air_date": "2022-02-18", "overview": "Mark is asked to train a new hire.", "runtime": 57},
+    {"season_number": 1, "episode_number": 2, "name": "Half Loop", "air_date": "2022-02-18", "overview": "Helly tries to quit.", "runtime": 47},
+    {"season_number": 1, "episode_number": 3, "name": "In Perpetuity", "air_date": "2022-02-25", "overview": "The team gives Helly a tour.", "runtime": 46}
+  ]
+}

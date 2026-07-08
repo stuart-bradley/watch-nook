@@ -1,0 +1,29 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "id": 95396,
+      "media_type": "tv",
+      "name": "Severance",
+      "first_air_date": "2022-02-18",
+      "poster_path": "/tv.jpg",
+      "overview": "The show."
+    },
+    {
+      "id": 9741,
+      "media_type": "movie",
+      "title": "Severance",
+      "release_date": "2006-08-25",
+      "poster_path": "/movie.jpg",
+      "overview": "The movie."
+    },
+    {
+      "id": 55555,
+      "media_type": "person",
+      "name": "Some Actor",
+      "profile_path": "/actor.jpg"
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 3
+}
