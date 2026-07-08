@@ -1,0 +1,5 @@
+package com.stuartbradley.watchnook
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()
