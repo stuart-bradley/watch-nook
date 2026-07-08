@@ -1,0 +1,43 @@
+name: E2E
+
+# PR-only: the PR run already tests the merge result for an up-to-date branch,
+# and E2E is the most expensive job (emulator + instrumented build), so it does
+# not also run on push to main.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "lib/**"
+      - "integration_test/**"
+      - "pubspec.*"
+      - ".github/**"
+      - "android/**"
+      - "justfile"
+      - "scripts/**"
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    # Skip until integration tests exist. M0 has no integration_test/, so this
+    # job is a green skip on the M0 PR (not a red "no tests" failure); it
+    # auto-activates in M3 when the first integration_test lands (E2E is an M3
+    # deliverable per CLAUDE.md — do NOT stand up patrol here).
+    if: ${{ hashFiles('integration_test/**/*_test.dart') != '' }}
+    # API 33 (Android 13) for the POST_NOTIFICATIONS runtime dialog; 4G for
+    # patrol's heavier instrumented build; install-patrol activates patrol_cli
+    # (matches patrol). 45-min timeout leaves room for the shared workflow's one
+    # retry-on-infra-crash without tripping the job timeout.
+    uses: stuart-bradley/ci-shared/.github/workflows/flutter-e2e.yml@v1
+    with:
+      api-level: 33
+      disk-size: "4G"
+      install-patrol: true
+      timeout-minutes: 45
+      # Pin Flutter: an unpinned stable auto-updated on the runner and its Gradle
+      # plugin broke the patrol Android build ("compileFlutterBuildDebug not
+      # found"). 3.44.0 is the last known-good (builds the test bundle); unpin
+      # when stable recovers (keep ci/e2e/release on the same version).
+      flutter-version: "3.44.0"
