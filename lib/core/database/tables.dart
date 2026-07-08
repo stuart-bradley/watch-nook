@@ -124,8 +124,7 @@ class LibraryItems extends Table {
 
   /// Set true when a backend relink hits an anomaly (absolute-numbered/anime,
   /// specials) and episodes could not be safely reconciled by air-date.
-  BoolColumn get relinkFailed =>
-      boolean().withDefault(const Constant(false))();
+  BoolColumn get relinkFailed => boolean().withDefault(const Constant(false))();
 }
 
 /// A single watched (or rewatched) record. **User-owned domain**. One

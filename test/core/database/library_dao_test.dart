@@ -58,30 +58,36 @@ void main() {
       expect(result.single.data.values.first, 'ok');
     });
 
-    test('beforeOpen enables foreign_keys (not just declares the pragma)',
-        () async {
-      // Any query opens the connection and runs beforeOpen.
-      final rows = await db.customSelect('PRAGMA foreign_keys').get();
-      expect(rows.single.data.values.first, 1);
-    });
+    test(
+      'beforeOpen enables foreign_keys (not just declares the pragma)',
+      () async {
+        // Any query opens the connection and runs beforeOpen.
+        final rows = await db.customSelect('PRAGMA foreign_keys').get();
+        expect(rows.single.data.values.first, 1);
+      },
+    );
   });
 
   group('foreign-key enforcement (invariant regression guard)', () {
-    test('a WatchEvent referencing a missing LibraryItem is rejected',
-        () async {
-      // Proves foreign_keys = ON is actually active, not merely set in
-      // beforeOpen — a dangling FK must throw, not silently insert.
-      expect(
-        () => db
-            .into(db.watchEvents)
-            .insert(WatchEventsCompanion.insert(libraryItemId: 999999)),
-        throwsA(isA<SqliteException>()),
-      );
-    });
+    test(
+      'a WatchEvent referencing a missing LibraryItem is rejected',
+      () async {
+        // Proves foreign_keys = ON is actually active, not merely set in
+        // beforeOpen — a dangling FK must throw, not silently insert.
+        expect(
+          () => db
+              .into(db.watchEvents)
+              .insert(WatchEventsCompanion.insert(libraryItemId: 999999)),
+          throwsA(isA<SqliteException>()),
+        );
+      },
+    );
 
     test('deleting a LibraryItem cascades to its WatchEvents', () async {
       final id = await db.libraryDao.insertItem(aShow());
-      await db.into(db.watchEvents).insert(
+      await db
+          .into(db.watchEvents)
+          .insert(
             WatchEventsCompanion.insert(
               libraryItemId: id,
               seasonNumber: const Value(1),

@@ -8,8 +8,7 @@ part 'library_dao.g.dart';
 /// progress maintenance and the grid query land with #15 (M2); watched
 /// semantics with #19/#20.
 @DriftAccessor(tables: [LibraryItems])
-class LibraryDao extends DatabaseAccessor<AppDatabase>
-    with _$LibraryDaoMixin {
+class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   /// Creates a [LibraryDao].
   LibraryDao(super.attachedDatabase);
 

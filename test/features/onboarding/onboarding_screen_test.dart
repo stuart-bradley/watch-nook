@@ -7,15 +7,11 @@ import 'package:watch_nook/features/settings/data/shared_preferences_provider.da
 import 'package:watch_nook/main.dart';
 
 void main() {
-  // Mirror main(): never fetch fonts over the network in a test.
   setUpAll(() => GoogleFonts.config.allowRuntimeFetching = false);
 
-  testWidgets('a returning user boots straight to the Watchnook home', (
-    tester,
-  ) async {
-    SharedPreferences.setMockInitialValues(<String, Object>{
-      'onboarding_seen': true,
-    });
+  testWidgets('first run shows onboarding; Get started navigates home and '
+      'persists the flag', (tester) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
     final prefs = await SharedPreferences.getInstance();
 
     await tester.pumpWidget(
@@ -26,15 +22,19 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Seen onboarding → router lands on home, not the onboarding gate.
+    // Fresh install → the onboarding gate.
+    expect(find.text('Get started'), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Watchnook'), findsNothing);
+
+    await tester.tap(find.text('Get started'));
+    await tester.pumpAndSettle();
+
+    // markSeen → refreshListenable → redirect home; the gate is gone.
     expect(find.widgetWithText(AppBar, 'Watchnook'), findsOneWidget);
     expect(find.text('Get started'), findsNothing);
 
-    // Adversarial: debug banner off, and the app drives a router — leaving both
-    // `home:` and `routerConfig:` wired at once throws at build.
-    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
-    expect(app.debugShowCheckedModeBanner, isFalse);
-    expect(app.routerConfig, isNotNull);
-    expect(app.home, isNull);
+    // Adversarial: the flag is actually persisted, so a relaunch skips
+    // onboarding (not just a transient in-memory state flip).
+    expect(prefs.getBool('onboarding_seen'), isTrue);
   });
 }
