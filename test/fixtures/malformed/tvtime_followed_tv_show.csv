@@ -1,0 +1,4 @@
+archived,user_id,created_at,notification_type,diffusion,folder_id,notification_offset,tv_show_name,tv_show_id,updated_at,active
+0,10000000,2021-06-08 17:12:48,2,original,,1440,Arrested Development,72173,2021-06-08 17:12:48,1
+0,10000000,2021-01-01 00:00:00,2,original,,1440,Bad Id Show,N/A,2021-01-01 00:00:00,1
+0,10000000,2021-02-01 00:00:00,2,original,,1440,Truncated Show
