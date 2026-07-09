@@ -37,9 +37,21 @@ dev_dependencies:
   drift_dev: ^2.25.0
   flutter_test:
     sdk: flutter
+  # Pinned, not caret-ranged: `patrol test` is driven by patrol_cli, and the two
+  # must match. CI (`ci-shared/flutter-e2e.yml`) activates patrol_cli **3.11.0**,
+  # so this is patrol 3.20.0 — its same-day release. Bump both together or the
+  # generated test bundle stops compiling.
+  patrol: 3.20.0
   riverpod_generator: ^4.0.0+1
   riverpod_lint: ^3.1.0
   very_good_analysis: ^10.2.0
 
 flutter:
   uses-material-design: true
+
+# Where patrol_cli installs the instrumented build (#29). Android only — this
+# app has no iOS target.
+patrol:
+  app_name: Watchnook
+  android:
+    package_name: com.stuartbradley.watchnook
