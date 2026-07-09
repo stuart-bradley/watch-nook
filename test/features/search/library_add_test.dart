@@ -118,32 +118,34 @@ void main() {
     expect(item.recordedSource, MetadataSourceKind.tmdb);
   });
 
-  test('re-adding the same title does not duplicate (dedupe by identity)',
-      () async {
-    final source = _FakeSource(details: severanceDetails);
+  test(
+    're-adding the same title does not duplicate (dedupe by identity)',
+    () async {
+      final source = _FakeSource(details: severanceDetails);
 
-    final first = await addToLibrary(
-      source: source,
-      sourceKind: MetadataSourceKind.tmdb,
-      dao: db.libraryDao,
-      result: severance,
-      status: TrackStatus.watching,
-    );
-    final second = await addToLibrary(
-      source: source,
-      sourceKind: MetadataSourceKind.tmdb,
-      dao: db.libraryDao,
-      result: severance,
-      status: TrackStatus.completed,
-    );
+      final first = await addToLibrary(
+        source: source,
+        sourceKind: MetadataSourceKind.tmdb,
+        dao: db.libraryDao,
+        result: severance,
+        status: TrackStatus.watching,
+      );
+      final second = await addToLibrary(
+        source: source,
+        sourceKind: MetadataSourceKind.tmdb,
+        dao: db.libraryDao,
+        result: severance,
+        status: TrackStatus.completed,
+      );
 
-    final all = await db.libraryDao.getAll();
-    expect(all, hasLength(1), reason: 're-add returns the existing row');
-    expect(second.id, first.id);
-    // Dedupe returns the pre-existing row untouched — it does not overwrite the
-    // first status with the second.
-    expect(second.trackStatus, TrackStatus.watching);
-  });
+      final all = await db.libraryDao.getAll();
+      expect(all, hasLength(1), reason: 're-add returns the existing row');
+      expect(second.id, first.id);
+      // Dedupe returns the pre-existing row untouched — it does not
+      // overwrite the first status with the second.
+      expect(second.trackStatus, TrackStatus.watching);
+    },
+  );
 
   test('a TVDB-active add stores the tvdb id, not tmdb', () async {
     const tvdbHit = MediaSearchResult(

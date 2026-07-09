@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:watch_nook/core/database/app_database.dart';
+import 'package:watch_nook/features/library/presentation/library_screen.dart';
 import 'package:watch_nook/features/settings/data/shared_preferences_provider.dart';
 import 'package:watch_nook/main.dart';
 
@@ -20,7 +22,15 @@ void main() {
 
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          // Home is now the DB-backed library grid; stub it with a synchronous
+          // empty snapshot so this boot/routing test doesn't hang on a live
+          // Drift `.watch()` stream (see library_screen_test for the why).
+          libraryGridProvider.overrideWith(
+            (ref, filter) => Stream.value(const <LibraryItem>[]),
+          ),
+        ],
         child: const WatchnookApp(),
       ),
     );

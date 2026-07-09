@@ -1,23 +1,94 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:watch_nook/features/home/presentation/home_screen.dart';
+import 'package:watch_nook/features/library/presentation/library_screen.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_screen.dart';
 import 'package:watch_nook/features/search/presentation/search_screen.dart';
+import 'package:watch_nook/features/up_next/presentation/up_next_screen.dart';
 
 part 'app_router.g.dart';
 
-/// App routes. Home is the root; onboarding is the first-run gate. Exposed so a
-/// test can mount the router at a chosen location.
+/// App routes. The bottom-nav shell (AD-5) is the root — a `Library` tab (`/`,
+/// the grid #17) and an `Up Next` tab (`/up-next`, #21). Onboarding is the
+/// first-run gate; search is a pushed route reachable from the shell app bar.
+/// Exposed so a test can mount the router at a chosen location.
 final List<RouteBase> appRoutes = <RouteBase>[
-  GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
+  StatefulShellRoute.indexedStack(
+    builder: (context, state, navigationShell) =>
+        _ShellScaffold(navigationShell: navigationShell),
+    branches: [
+      StatefulShellBranch(
+        routes: [
+          GoRoute(
+            path: '/',
+            builder: (context, state) => const LibraryScreen(),
+          ),
+        ],
+      ),
+      StatefulShellBranch(
+        routes: [
+          GoRoute(
+            path: '/up-next',
+            builder: (context, state) => const UpNextScreen(),
+          ),
+        ],
+      ),
+    ],
+  ),
   GoRoute(
     path: '/onboarding',
     builder: (context, state) => const OnboardingScreen(),
   ),
   GoRoute(path: '/search', builder: (context, state) => const SearchScreen()),
 ];
+
+/// The bottom-nav shell (AD-5): a shared app bar (title + Search action) over
+/// the active tab, with a [NavigationBar] switching between Library and Up
+/// Next. Navigation goes through `navigationShell` (go_router) — no direct
+/// `Navigator.push`.
+class _ShellScaffold extends StatelessWidget {
+  const _ShellScaffold({required this.navigationShell});
+
+  final StatefulNavigationShell navigationShell;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Watchnook'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: 'Search',
+            onPressed: () => context.push('/search'),
+          ),
+        ],
+      ),
+      body: navigationShell,
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: navigationShell.currentIndex,
+        // goBranch keeps each tab's own navigation stack (indexed-stack).
+        onDestinationSelected: (i) => navigationShell.goBranch(
+          i,
+          initialLocation: i == navigationShell.currentIndex,
+        ),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.video_library_outlined),
+            selectedIcon: Icon(Icons.video_library),
+            label: 'Library',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.upcoming_outlined),
+            selectedIcon: Icon(Icons.upcoming),
+            label: 'Up Next',
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 /// Pure first-run redirect decision, gated on the onboarding flag **alone** (no
 /// library provider until M2). Extracted from the provider so the branch logic
