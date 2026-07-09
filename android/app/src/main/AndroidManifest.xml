@@ -1,13 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- allowBackup=true enables Android Auto Backup (US-* / M4). The precise
-         include/exclude allowlist — user tables in, disposable cache + secrets
-         out (ADR-3) — lands via fullBackupContent/dataExtractionRules in M4 (#32);
-         left default here. -->
+    <!-- allowBackup=true enables Android Auto Backup (US-11). Both rule files are
+         ALLOWLISTS (ADR-3): only <filesDir>/backup/ — the user-owned export JSON —
+         leaves the device. Drop either attribute and Android reverts to its
+         default, which backs up databases/ (the disposable cache) and
+         shared_prefs/ (the metadata API key). backup_rules is API <=30,
+         data_extraction_rules is API 31+; both are required. -->
     <application
         android:label="Watchnook"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:allowBackup="true">
+        android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"

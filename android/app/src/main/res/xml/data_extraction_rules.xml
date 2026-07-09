@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ALLOWLIST (ADR-3), API 31 and above. Two traps, both failing OPEN:
+     1. include/exclude are INVALID at the root of this schema; a root-level
+        include makes the file malformed, the rules are ignored, and the default
+        (cache + API key) is backed up.
+     2. A MISSING section is a FULLY ENABLED section — shipping only cloud-backup
+        leaks shared_prefs/ on a device-to-device transfer. Both are mandatory.
+     path must equal AutoBackupService.backupDirName.
+     Enforced by test/android/backup_rules_test.dart. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="backup"/>
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="backup"/>
+    </device-transfer>
+</data-extraction-rules>
