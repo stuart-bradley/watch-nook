@@ -31,6 +31,12 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   Future<LibraryItem?> getItem(int id) =>
       (select(libraryItems)..where((t) => t.id.equals(id))).getSingleOrNull();
 
+  /// Watch one item by id — the detail screen's live row, so it repaints when a
+  /// watch write recomputes the denormalized columns (#19) or the rating
+  /// changes. Emits null once the item is deleted.
+  Stream<LibraryItem?> watchItem(int id) =>
+      (select(libraryItems)..where((t) => t.id.equals(id))).watchSingleOrNull();
+
   /// The library grid stream, optionally narrowed to a [status] and/or [type].
   /// Filters on the indexed denormalized columns and repaints on any write.
   /// Most-recently-updated first so freshly-touched titles surface at the top.

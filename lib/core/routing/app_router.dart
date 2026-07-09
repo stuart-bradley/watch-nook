@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
 import 'package:watch_nook/features/library/presentation/library_screen.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_screen.dart';
@@ -41,6 +42,15 @@ final List<RouteBase> appRoutes = <RouteBase>[
     builder: (context, state) => const OnboardingScreen(),
   ),
   GoRoute(path: '/search', builder: (context, state) => const SearchScreen()),
+  GoRoute(
+    // `id` is a `LibraryItems` row id — detail is only reachable for a tracked
+    // title. A non-numeric or unknown id renders the "not in your library"
+    // state rather than throwing.
+    path: '/title/:id',
+    builder: (context, state) => DetailScreen(
+      itemId: int.tryParse(state.pathParameters['id'] ?? '') ?? -1,
+    ),
+  ),
 ];
 
 /// The bottom-nav shell (AD-5): a shared app bar (title + Search action) over
