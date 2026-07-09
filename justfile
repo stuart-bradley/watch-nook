@@ -52,34 +52,36 @@ e2e:
 
 # Lint shell scripts. Required: ci-shared's flutter-ci.yml runs `just
 # lint-scripts` before `just check`, so the recipe MUST exist. No-op until
-# scripts/ exists (release-sign/deploy land with #38); shellcheck only runs
-# when there is something to lint.
+# scripts/ has content; shellcheck only runs when there is something to lint.
 lint-scripts:
-    if git ls-files 'scripts/*.sh' | grep -q .; then shellcheck $(git ls-files 'scripts/*.sh'); else echo "lint-scripts: no scripts yet (release scripts land with #38)"; fi
+    if git ls-files 'scripts/*.sh' | grep -q .; then shellcheck $(git ls-files 'scripts/*.sh'); else echo "lint-scripts: no scripts to lint"; fi
 
-# Decode the release keystore + write android/key.properties (needs
-# KEYSTORE_BASE64 + STORE_PASSWORD + KEY_ALIAS + KEY_PASSWORD env vars).
-# scripts/release-sign.sh lands with #38 (release automation, needs-human).
+# Decode the release keystore + write android/key.properties from CI secrets
+# (KEYSTORE_BASE64 + STORE_PASSWORD + KEY_ALIAS + KEY_PASSWORD). Consumed by
+# release-apk-ci; Gradle falls back to debug signing when it is absent.
 release-sign:
     ./scripts/release-sign.sh
 
-# Build the signed release AAB. (No notification-icon R8 assertion — Watchnook
-# has no notification small icon; unlike the skeleton there is nothing for the
-# resource shrinker to strip that a runtime string lookup depends on.)
-release-build:
-    flutter build appbundle --release
-
-# Upload the AAB to Play (needs PLAY_STORE_JSON_KEY + track/status env vars).
-# scripts/release-deploy.sh lands with #38 (release automation, needs-human).
-release-deploy:
-    ./scripts/release-deploy.sh
-
-# Full local release pipeline: verify, then sign/build/deploy.
-release: check release-sign release-build release-deploy
-
-# CI release: sign/build/deploy only (`just check` runs in a separate,
-# secret-free CI step so codegen/tests never see the signing secrets).
-release-ci: release-sign release-build release-deploy
+# CI-only: build the signed universal release APK with the baked TMDB key, for
+# the GitHub-Releases pipeline (ci-shared flutter-release-apk.yml uploads it).
+# Needs the TMDB + keystore secrets in env. BUILD_NAME (the tag) sets
+# versionName; BUILD_NUMBER (the run number) sets a monotonic versionCode.
+# Writes secrets.json (gitignored) — do not run locally with a real secrets.json
+# you want to keep.
+release-apk-ci:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Fail loudly if the baked key is missing: a keyless release APK can't reach
+    # TMDB (issue #52 class) yet would ship green. The read token is an optional
+    # v4 fallback — empty is fine when the v3 apiKey is present.
+    : "${TMDB_API_KEY:?TMDB_API_KEY is not set — the release APK would ship keyless}"
+    printf '{"activeSource":"tmdb","tmdbApiKey":"%s","tmdbReadToken":"%s","tvdbApiKey":""}' \
+      "$TMDB_API_KEY" "${TMDB_READ_TOKEN:-}" > secrets.json
+    ./scripts/release-sign.sh
+    args=(build apk --release --dart-define-from-file=secrets.json)
+    [ -n "${BUILD_NAME:-}" ] && args+=(--build-name="${BUILD_NAME#v}")
+    [ -n "${BUILD_NUMBER:-}" ] && args+=(--build-number="$BUILD_NUMBER")
+    flutter "${args[@]}"
 
 # Install dependencies + generate code
 setup:
