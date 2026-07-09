@@ -19,6 +19,16 @@ final StreamProviderFamily<LibraryItem?, int> libraryItemProvider =
       (ref, id) => ref.watch(libraryDaoProvider).watchItem(id),
     );
 
+/// Live watched aired `(season, episode)` coordinates for one tracked item —
+/// the per-episode toggle's state (#19). DB-backed, so it repaints the moment a
+/// watch write lands. Plain `StreamProvider` (CLAUDE.md convention: no
+/// `@riverpod` over Drift-generated types, and this reads a Drift table).
+final StreamProviderFamily<Set<(int, int)>, int> watchedEpisodesProvider =
+    StreamProvider.family<Set<(int, int)>, int>(
+      (ref, itemId) =>
+          ref.watch(libraryDaoProvider).watchWatchedEpisodes(itemId),
+    );
+
 /// The backend id to fetch this row's metadata with — **this row's own**
 /// `recordedSource` id, never the other backend's (the episode-identity
 /// invariant). Null for a row with no id for its source (offline add / import):

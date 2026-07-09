@@ -117,6 +117,26 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
     watchEvents,
   )..where((t) => t.libraryItemId.equals(libraryItemId))).get();
 
+  /// Live set of **watched** aired `(season, episode)` coordinates for one item
+  /// — the detail screen's per-episode toggle state (#19). Rewatch rows are
+  /// excluded (they're extra viewings of an already-watched episode, not a
+  /// separate watched marker), as are a movie's null coordinates — a movie's
+  /// watched-ness is `LibraryItems.watchedCount`.
+  Stream<Set<(int, int)>> watchWatchedEpisodes(int libraryItemId) =>
+      (select(watchEvents)..where(
+            (t) =>
+                t.libraryItemId.equals(libraryItemId) &
+                t.isRewatch.equals(false) &
+                t.seasonNumber.isNotNull() &
+                t.episodeNumber.isNotNull(),
+          ))
+          .watch()
+          .map(
+            (rows) => {
+              for (final r in rows) (r.seasonNumber!, r.episodeNumber!),
+            },
+          );
+
   // --- writes --------------------------------------------------------------
 
   /// Insert a library item, returning the generated id. Low-level — most
@@ -176,6 +196,98 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   /// Delete an item; its [WatchEvents] cascade away (foreign_keys = ON).
   Future<void> deleteItem(int id) =>
       (delete(libraryItems)..where((t) => t.id.equals(id))).go();
+
+  // --- watch writes (#19) --------------------------------------------------
+  //
+  // The three legal mutations of watched state. Each runs in one transaction
+  // and ends in [recomputeDenormalized] (AD-4), so no caller has to reason
+  // about which writes may skip it. See the "watched = idempotent toggle"
+  // invariant in CLAUDE.md. A movie passes null [season]/[episode].
+
+  /// **Mark watched** — ensures exactly **one** non-rewatch row for
+  /// `(itemId, season, episode)`. A double-tap is a no-op, so a retry, a bulk
+  /// re-run (#20) and a re-import all converge on the same single marker.
+  ///
+  /// [runtimeMinutes] is snapshotted onto the row at mark-time: stats read
+  /// these facts and must never depend on the disposable cache (CLAUDE.md).
+  Future<void> markWatched(
+    int itemId, {
+    int? season,
+    int? episode,
+    DateTime? watchedAt,
+    int? runtimeMinutes,
+  }) => transaction(() async {
+    final already =
+        await (select(watchEvents)..where(
+              (t) =>
+                  _sameEpisode(t, itemId, season, episode) & t.isRewatch.not(),
+            ))
+            .get();
+    if (already.isNotEmpty) return; // idempotent — already watched.
+
+    await into(watchEvents).insert(
+      WatchEventsCompanion.insert(
+        libraryItemId: itemId,
+        seasonNumber: Value(season),
+        episodeNumber: Value(episode),
+        watchedAt: Value(watchedAt),
+        runtimeMinutes: Value(runtimeMinutes),
+      ),
+    );
+    await recomputeDenormalized(itemId);
+  });
+
+  /// **Log a rewatch** — *appends* an `isRewatch = true` row. The first watch's
+  /// date survives, and `watchedCount`/`lastWatched*` are unmoved (they count
+  /// non-rewatch rows only), so logging a rewatch of a *later* episode than
+  /// you've reached never fakes progress.
+  Future<void> logRewatch(
+    int itemId, {
+    int? season,
+    int? episode,
+    DateTime? watchedAt,
+    int? runtimeMinutes,
+  }) => transaction(() async {
+    await into(watchEvents).insert(
+      WatchEventsCompanion.insert(
+        libraryItemId: itemId,
+        seasonNumber: Value(season),
+        episodeNumber: Value(episode),
+        watchedAt: Value(watchedAt),
+        runtimeMinutes: Value(runtimeMinutes),
+        isRewatch: const Value(true),
+      ),
+    );
+    await recomputeDenormalized(itemId);
+  });
+
+  /// **Unwatch** — deletes **all** rows for `(itemId, season, episode)`,
+  /// rewatches included. Un-marking an episode can't leave orphan rewatches of
+  /// an episode the user says they never watched.
+  Future<void> unwatch(int itemId, {int? season, int? episode}) =>
+      transaction(() async {
+        await (delete(
+          watchEvents,
+        )..where((t) => _sameEpisode(t, itemId, season, episode))).go();
+        await recomputeDenormalized(itemId);
+      });
+
+  /// Matches one item's rows at one aired coordinate. A movie's null
+  /// season/episode needs `IS NULL`, not `= NULL` (which matches nothing in
+  /// SQLite) — so a movie's rows would silently never be found.
+  Expression<bool> _sameEpisode(
+    $WatchEventsTable t,
+    int itemId,
+    int? season,
+    int? episode,
+  ) =>
+      t.libraryItemId.equals(itemId) &
+      (season == null
+          ? t.seasonNumber.isNull()
+          : t.seasonNumber.equals(season)) &
+      (episode == null
+          ? t.episodeNumber.isNull()
+          : t.episodeNumber.equals(episode));
 
   /// **Recompute the denormalized progress columns** from [WatchEvents] (AD-4).
   /// The single source of truth: `watchedCount` = number of **non-rewatch**

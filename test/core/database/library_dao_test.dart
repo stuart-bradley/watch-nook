@@ -180,6 +180,197 @@ void main() {
     });
   });
 
+  group('watch writes (#19 — the idempotent-toggle invariant)', () {
+    Future<List<WatchEvent>> events(int itemId) =>
+        db.libraryDao.watchEventsFor(itemId);
+
+    test(
+      'markWatched is idempotent — a double-tap adds no second row',
+      () async {
+        final id = await db.libraryDao.insertItem(aShow());
+        await db.libraryDao.markWatched(id, season: 1, episode: 1);
+        await db.libraryDao.markWatched(id, season: 1, episode: 1);
+
+        expect(await events(id), hasLength(1));
+        final item = (await db.libraryDao.getItem(id))!;
+        expect(item.watchedCount, 1);
+        expect(item.lastWatchedSeason, 1);
+        expect(item.lastWatchedEpisode, 1);
+      },
+    );
+
+    test(
+      'markWatched snapshots watchedAt + runtimeMinutes onto the row',
+      () async {
+        final id = await db.libraryDao.insertItem(aShow());
+        final at = DateTime(2026, 7, 9, 21, 30);
+        await db.libraryDao.markWatched(
+          id,
+          season: 1,
+          episode: 1,
+          watchedAt: at,
+          runtimeMinutes: 47,
+        );
+
+        final row = (await events(id)).single;
+        expect(row.watchedAt, at);
+        // Stats read this snapshot, never the disposable cache.
+        expect(row.runtimeMinutes, 47);
+        expect(row.isRewatch, isFalse);
+      },
+    );
+
+    test(
+      'logRewatch appends without raising watchedCount or advancing progress',
+      () async {
+        final id = await db.libraryDao.insertItem(aShow());
+        await db.libraryDao.markWatched(id, season: 1, episode: 1);
+        // A rewatch of a LATER episode: a naive "any row advances progress"
+        // implementation would jump lastWatched* to S1E9 and count 2.
+        await db.libraryDao.logRewatch(id, season: 1, episode: 9);
+
+        expect(await events(id), hasLength(2));
+        final item = (await db.libraryDao.getItem(id))!;
+        expect(item.watchedCount, 1);
+        expect(item.lastWatchedSeason, 1);
+        expect(item.lastWatchedEpisode, 1);
+      },
+    );
+
+    test(
+      'logRewatch keeps the first watch date — it never rewrites it',
+      () async {
+        final id = await db.libraryDao.insertItem(aShow());
+        final first = DateTime(2020);
+        await db.libraryDao.markWatched(
+          id,
+          season: 1,
+          episode: 1,
+          watchedAt: first,
+        );
+        await db.libraryDao.logRewatch(
+          id,
+          season: 1,
+          episode: 1,
+          watchedAt: DateTime(2026),
+        );
+
+        final rows = await events(id);
+        expect(rows.where((e) => !e.isRewatch).single.watchedAt, first);
+        expect(rows.where((e) => e.isRewatch).single.watchedAt, DateTime(2026));
+      },
+    );
+
+    test(
+      'unwatch removes the rewatch rows too, not just the first watch',
+      () async {
+        final id = await db.libraryDao.insertItem(aShow());
+        await db.libraryDao.markWatched(id, season: 1, episode: 1);
+        await db.libraryDao.logRewatch(id, season: 1, episode: 1);
+        await db.libraryDao.logRewatch(id, season: 1, episode: 1);
+        expect(await events(id), hasLength(3));
+
+        await db.libraryDao.unwatch(id, season: 1, episode: 1);
+
+        // No orphan rewatches of an episode the user says they never watched.
+        expect(await events(id), isEmpty);
+        final item = (await db.libraryDao.getItem(id))!;
+        expect(item.watchedCount, 0);
+        expect(item.lastWatchedSeason, isNull);
+        expect(item.lastWatchedEpisode, isNull);
+      },
+    );
+
+    test('unwatch touches only its own episode; progress falls back', () async {
+      final id = await db.libraryDao.insertItem(aShow());
+      await db.libraryDao.markWatched(id, season: 1, episode: 1);
+      await db.libraryDao.markWatched(id, season: 1, episode: 2);
+      await db.libraryDao.markWatched(id, season: 2, episode: 1);
+
+      await db.libraryDao.unwatch(id, season: 2, episode: 1);
+
+      expect(await events(id), hasLength(2));
+      final item = (await db.libraryDao.getItem(id))!;
+      expect(item.watchedCount, 2);
+      expect(item.lastWatchedSeason, 1);
+      expect(item.lastWatchedEpisode, 2);
+    });
+
+    test('an episode number is scoped to its season — S1E1 ≠ S2E1', () async {
+      final id = await db.libraryDao.insertItem(aShow());
+      await db.libraryDao.markWatched(id, season: 1, episode: 1);
+      // Same episode number, different season: a second, distinct marker.
+      await db.libraryDao.markWatched(id, season: 2, episode: 1);
+      expect(await events(id), hasLength(2));
+
+      await db.libraryDao.unwatch(id, season: 1, episode: 1);
+      final left = (await events(id)).single;
+      expect(left.seasonNumber, 2);
+    });
+
+    test(
+      'a movie marks/unwatches on null coordinates (IS NULL, not = NULL)',
+      () async {
+        final id = await db.libraryDao.insertItem(aMovie());
+        await db.libraryDao.markWatched(id, runtimeMinutes: 155);
+        // `= NULL` matches nothing in SQLite, so a broken predicate inserts
+        // a second row here instead of no-opping.
+        await db.libraryDao.markWatched(id, runtimeMinutes: 155);
+
+        expect(await events(id), hasLength(1));
+        var item = (await db.libraryDao.getItem(id))!;
+        expect(item.watchedCount, 1);
+        expect(item.lastWatchedSeason, isNull);
+
+        await db.libraryDao.unwatch(id); // ...and would delete nothing here.
+        expect(await events(id), isEmpty);
+        item = (await db.libraryDao.getItem(id))!;
+        expect(item.watchedCount, 0);
+      },
+    );
+
+    test(
+      'writes are scoped to their item — a sibling show is untouched',
+      () async {
+        final a = await db.libraryDao.insertItem(aShow());
+        final b = await db.libraryDao.insertItem(
+          aShow(title: 'Other', tmdbId: 777),
+        );
+        await db.libraryDao.markWatched(a, season: 1, episode: 1);
+
+        // The same coordinate on another item is a distinct marker...
+        await db.libraryDao.markWatched(b, season: 1, episode: 1);
+        expect(await events(a), hasLength(1));
+        expect(await events(b), hasLength(1));
+
+        // ...and unwatching one must not delete the other's row.
+        await db.libraryDao.unwatch(a, season: 1, episode: 1);
+        expect(await events(a), isEmpty);
+        expect(await events(b), hasLength(1));
+        expect((await db.libraryDao.getItem(b))!.watchedCount, 1);
+      },
+    );
+
+    test(
+      'watchWatchedEpisodes emits watched coords, excluding rewatches',
+      () async {
+        final id = await db.libraryDao.insertItem(aShow());
+        await db.libraryDao.markWatched(id, season: 1, episode: 1);
+        await db.libraryDao.logRewatch(id, season: 1, episode: 1);
+        // A rewatch of an episode never marked watched must not appear watched.
+        await db.libraryDao.logRewatch(id, season: 4, episode: 2);
+
+        expect(await db.libraryDao.watchWatchedEpisodes(id).first, {(1, 1)});
+      },
+    );
+
+    test('watchWatchedEpisodes omits a movie null coordinate', () async {
+      final id = await db.libraryDao.insertItem(aMovie());
+      await db.libraryDao.markWatched(id);
+      expect(await db.libraryDao.watchWatchedEpisodes(id).first, isEmpty);
+    });
+  });
+
   group('watchLibrary (filtered grid stream)', () {
     test('narrows to the requested status and type', () async {
       await db.libraryDao.insertItem(aShow(title: 'Watching TV'));

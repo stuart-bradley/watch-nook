@@ -21,7 +21,8 @@ import 'package:watch_nook/features/detail/data/detail_providers.dart';
 ///
 /// Metadata comes from `titleDetailsProvider` (SWR, cache-first), so the screen
 /// renders offline from cache and a failed revalidation never blanks it. The
-/// per-episode watched toggle lands with #19.
+/// per-episode watched toggle and the movie mark/rewatch buttons (#19) write
+/// through `LibraryDao`, which owns the idempotent-toggle invariant.
 class DetailScreen extends ConsumerWidget {
   /// Creates the detail screen for the `LibraryItems` row [itemId].
   const DetailScreen({required this.itemId, super.key});
@@ -73,6 +74,10 @@ class _Body extends ConsumerWidget {
               _Header(item: item, details: details),
               const SizedBox(height: WatchnookSpacing.md),
               _RatingRow(item: item),
+              if (item.mediaType == MediaType.movie) ...[
+                const SizedBox(height: WatchnookSpacing.md),
+                _MovieWatchActions(item: item),
+              ],
               if (coldCache && async.hasError) ...[
                 const SizedBox(height: WatchnookSpacing.md),
                 const _Notice("Couldn't load details. You're offline."),
@@ -91,7 +96,11 @@ class _Body extends ConsumerWidget {
         ),
         // Seasons come from the details fetch; a movie has none.
         for (final season in details?.seasons ?? const <SeasonInfo>[])
-          _SeasonTile(showSourceId: sourceId!, season: season),
+          _SeasonTile(
+            itemId: item.id,
+            showSourceId: sourceId!,
+            season: season,
+          ),
         const _AttributionFooter(),
       ],
     );
@@ -231,6 +240,52 @@ Future<void> _pickRating(
       .updateRating(item.id, picked == -1 ? null : picked, now: clock.now());
 }
 
+/// A movie's watched toggle + rewatch log (#19, US-2/US-4). Watched-ness is the
+/// denormalized `watchedCount` on the live row — no cross-domain join, and a
+/// rewatch (which never raises the count) leaves the button as it was.
+class _MovieWatchActions extends ConsumerWidget {
+  const _MovieWatchActions({required this.item});
+
+  final LibraryItem item;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dao = ref.watch(libraryDaoProvider);
+    final watched = item.watchedCount > 0;
+    return Wrap(
+      spacing: WatchnookSpacing.sm,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        FilledButton.icon(
+          icon: Icon(watched ? Icons.check_circle : Icons.check_circle_outline),
+          label: Text(watched ? 'Watched' : 'Mark watched'),
+          onPressed: () => unawaited(
+            watched
+                ? dao.unwatch(item.id)
+                : dao.markWatched(
+                    item.id,
+                    watchedAt: clock.now(),
+                    runtimeMinutes: item.runtimeMinutes,
+                  ),
+          ),
+        ),
+        if (watched)
+          TextButton.icon(
+            icon: const Icon(Icons.replay),
+            label: const Text('Log rewatch'),
+            onPressed: () => unawaited(
+              dao.logRewatch(
+                item.id,
+                watchedAt: clock.now(),
+                runtimeMinutes: item.runtimeMinutes,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _NextEpisode extends StatelessWidget {
   const _NextEpisode({required this.episode});
 
@@ -257,8 +312,13 @@ class _NextEpisode extends StatelessWidget {
 /// One collapsible season. `ExpansionTile` doesn't build its children while
 /// collapsed, so the episode fetch happens on expand — one season at a time.
 class _SeasonTile extends StatelessWidget {
-  const _SeasonTile({required this.showSourceId, required this.season});
+  const _SeasonTile({
+    required this.itemId,
+    required this.showSourceId,
+    required this.season,
+  });
 
+  final int itemId;
   final int showSourceId;
   final SeasonInfo season;
 
@@ -270,6 +330,7 @@ class _SeasonTile extends StatelessWidget {
       subtitle: Text('${season.episodeCount} episodes'),
       children: [
         _SeasonEpisodes(
+          itemId: itemId,
           showSourceId: showSourceId,
           seasonNumber: season.seasonNumber,
         ),
@@ -280,10 +341,12 @@ class _SeasonTile extends StatelessWidget {
 
 class _SeasonEpisodes extends ConsumerWidget {
   const _SeasonEpisodes({
+    required this.itemId,
     required this.showSourceId,
     required this.seasonNumber,
   });
 
+  final int itemId;
   final int showSourceId;
   final int seasonNumber;
 
@@ -292,6 +355,12 @@ class _SeasonEpisodes extends ConsumerWidget {
     final episodes = ref.watch(
       seasonEpisodesProvider(showSourceId, seasonNumber),
     );
+    // Before the first emission nothing is known to be watched — an unwatched
+    // toggle that marks is the safe default (marking is idempotent; unwatching
+    // is destructive).
+    final watched =
+        ref.watch(watchedEpisodesProvider(itemId)).value ??
+        const <(int, int)>{};
     return episodes.when(
       loading: () => const Padding(
         padding: EdgeInsets.all(WatchnookSpacing.lg),
@@ -303,12 +372,55 @@ class _SeasonEpisodes extends ConsumerWidget {
           for (final e in rows)
             ListTile(
               dense: true,
-              // #19 wires the watched toggle onto this row.
               leading: Text('E${e.episodeNumber}'),
               title: Text(e.title ?? 'Episode ${e.episodeNumber}'),
               subtitle: e.airDate == null ? null : Text(_isoDate(e.airDate!)),
+              trailing: _EpisodeToggle(
+                itemId: itemId,
+                episode: e,
+                watched: watched.contains((e.seasonNumber, e.episodeNumber)),
+              ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The per-episode watched toggle (#19, US-2). Mark is idempotent; unwatch
+/// removes the episode's rewatches too. `runtimeMinutes` is snapshotted from
+/// the episode at mark-time so stats never read the disposable cache.
+class _EpisodeToggle extends ConsumerWidget {
+  const _EpisodeToggle({
+    required this.itemId,
+    required this.episode,
+    required this.watched,
+  });
+
+  final int itemId;
+  final EpisodeInfo episode;
+  final bool watched;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dao = ref.watch(libraryDaoProvider);
+    return IconButton(
+      icon: Icon(watched ? Icons.check_circle : Icons.check_circle_outline),
+      tooltip: watched ? 'Mark unwatched' : 'Mark watched',
+      onPressed: () => unawaited(
+        watched
+            ? dao.unwatch(
+                itemId,
+                season: episode.seasonNumber,
+                episode: episode.episodeNumber,
+              )
+            : dao.markWatched(
+                itemId,
+                season: episode.seasonNumber,
+                episode: episode.episodeNumber,
+                watchedAt: clock.now(),
+                runtimeMinutes: episode.runtimeMinutes,
+              ),
       ),
     );
   }
