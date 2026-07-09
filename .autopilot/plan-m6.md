@@ -23,11 +23,18 @@ its diff shows the whole stack until a human merges m1→m6 in order.
   `CachedMedia`, `CachedEpisodes` (disposable). **M5 adds no tables and no
   columns — `schemaVersion` stays 2, no new migration.** (Risk-path note: no
   migration ⇒ no migration review needed.)
-- **The stats facts are already snapshotted** onto the user tables (that was the
-  point of the invariant): `WatchEvents.runtimeMinutes` + `watchedAt`;
+- **The stats facts are snapshotted onto the user tables** (that was the point of
+  the invariant): `WatchEvents.runtimeMinutes` + `watchedAt`;
   `LibraryItems.genresCsv` / `year` / `runtimeMinutes` / `mediaType`. #34 is a
-  **read-only feature over user tables** — it must not touch the cache. See §5.1
-  for the one writer gap this exposes.
+  **strictly read-only feature over user tables** — it adds no writes and must
+  not touch the cache.
+  **But the snapshot is only complete for titles added via search.** Rows created
+  by an **import** carry `year` and `title` and nothing else: `merge_applier
+  .dart:137-155` inserts no `runtimeMinutes` and no `genresCsv` (the `Resolver`
+  returns a `MediaSearchResult`, which has neither field), and
+  `merge_applier.dart:278-283` deliberately writes a null `runtimeMinutes` onto
+  every imported `WatchEvent`. See §5.1 — this is a **documented decision, not a
+  bug**, and #34 must surface it honestly rather than "fix" it.
 - **`LibraryDao`** — `getAll`, `watchLibrary`, `watchEventsFor`, `markWatched`,
   `markManyWatched`, `logRewatch`, `unwatch`, `recomputeDenormalized`,
   `deleteAllUserData`, `hasAnyItems`, `transaction`. M5 adds exactly **one**
@@ -54,6 +61,7 @@ its diff shows the whole stack until a human merges m1→m6 in order.
 |---|---|---|---|
 | US-12 | As a data nerd, I see episodes/hours/genre/decade **and a streak**, so I can enjoy my own history. | #34 | Figures survive a cache eviction. |
 | US-12a | As a user with a wiped cache (offline, TTL-evicted, fresh restore), my stats are unchanged, so I trust the numbers. | #34 | `deleteAllCache()` in a test leaves every figure identical. |
+| US-12b | As a user whose library came from an import, I'm told *why* my hours and genres are empty, so I don't think the app is broken. | #34 | A null-runtime event renders the footnote; a fully in-app library does not. |
 | US-13 | As a first-run user, I see a welcoming empty library that tells me what to do next, so I'm not staring at a void. | #35 | Every list/grid screen has a distinct empty state. |
 | US-14 | As a user, I open **Settings** from the top bar to export my data, back it up, choose light/dark, and read the metadata attribution, so I own and understand my data. | #35 | Export JSON + Letterboxd CSV write a file the user picked; theme choice persists across restart. |
 | US-15 | As a user, the app looks like the delivered "Honey · gold" design on a device with no network, so typography and artwork placeholders are never a downgrade. | #36 | `PosterPlaceholder` shared; fonts render offline; no `withOpacity`. |
@@ -126,37 +134,67 @@ class StatBucket { final String label; final int count; }
   `clock.now()`'s day, on which ≥1 event has a non-null `watchedAt`. If today has
   no event but yesterday does, the streak still counts (grace: you haven't
   watched *yet* today). Events with `watchedAt == null` (imported, date unknown)
-  never contribute. Max lookback 366 days.
+  never contribute. **Rewatches DO extend the streak** — they are watch events
+  with a date, and the streak measures "did you watch something", not "did you
+  make progress". Bucket by local `(year, month, day)` after `toLocal()` (DST-safe
+  — never by `Duration` arithmetic on instants). Max lookback 366 days.
 
 ## 5. Issue #34 — Stats screen
 
-### 5.1 The writer audit (do this **first** — it's why #34 would ship wrong)
+### 5.1 The writer audit (do this **first** — it decides what #34 can honestly show)
 
-#34 is the first reader of `WatchEvents.runtimeMinutes`. Per CLAUDE.md ("change
-which field a reader consumes FROM ⇒ audit every WRITER"), grep the writers:
+#34 is the first reader of `WatchEvents.runtimeMinutes` and of
+`LibraryItems.genresCsv`. Per CLAUDE.md ("change which field a reader consumes
+FROM ⇒ audit every WRITER"), here is **every** writer:
 
-| Writer | Passes `runtimeMinutes`? |
-|---|---|
-| `detail_screen.dart:277` (mark movie) | ✅ `item.runtimeMinutes` |
-| `detail_screen.dart:547` (mark episode) | ✅ `episode.runtimeMinutes` |
-| `bulk_mark.dart:58` → `markManyWatched` | ✅ `e.runtimeMinutes` per mark |
-| `merge_applier.dart:226/237/266` (**import**) | ❌ **never passes it** |
-| `import_export_service.dart:151` (restore) | ✅ round-trips the stored value |
+| Writer | `WatchEvents.runtimeMinutes` | `LibraryItems.runtimeMinutes` / `genresCsv` |
+|---|---|---|
+| `search_providers.dart:60-79` (add via search) | — | ✅ both, from `MediaDetails` |
+| `detail_screen.dart:277` (mark movie) | ✅ `item.runtimeMinutes` | — |
+| `detail_screen.dart:289` (log rewatch) | ✅ `item.runtimeMinutes` | — |
+| `detail_screen.dart:547` (mark episode) | ✅ `episode.runtimeMinutes` | — |
+| `bulk_mark.dart:58` → `markManyWatched` | ✅ `e.runtimeMinutes` per mark | — |
+| `import_export_service.dart:151` (restore) | ✅ round-trips the stored value | ✅ round-trips |
+| `merge_applier.dart:226/237/266` (**import**) | ❌ **always null** | ❌ **never set** (`:137-155`) |
 
-So **every watch event created by an import contributes 0 minutes** — a user who
-imports a decade of TV Time history would see "0 h watched". Two-line fix, both
-in this issue:
+**The import gap is a documented decision, not a bug.** `merge_applier.dart:
+278-283` states it outright: *"an export knows what you watched, never how long
+it ran. Imported history therefore contributes to watch counts but not to watch
+time — the stats invariant forbids back-filling it from the disposable cache."*
+The `Resolver` returns a `MediaSearchResult` (`metadata_models.dart:38-94`),
+which carries neither runtime nor genres, so there is nothing to snapshot at
+import time without a new `MediaDetails` fetch.
 
-1. `merge_applier.dart` — pass the item's snapshotted `runtimeMinutes` into
-   `markWatched` / `markManyWatched` / `logRewatch` (the importer already has the
-   `LibraryItem`; per-episode runtimes aren't in any import file, and the item's
-   value is the show's episode runtime — TMDB `episode_run_time`).
-2. `statsFrom` — `event.runtimeMinutes ?? item.runtimeMinutes ?? 0`, so history
-   already on disk from an M3 import is not permanently zeroed.
+**Consequence for #34, stated plainly:** a library populated *only* by import
+shows real **counts**, a real **decade** breakdown (`year` **is** imported,
+`merge_applier.dart:134`), **zero hours**, and an **empty genre** breakdown.
 
-Document the invariant at both sites and in `.claude/CLAUDE.md` (extend the
-stats-snapshot bullet: *"every writer of `WatchEvents` snapshots
-`runtimeMinutes`; readers still coalesce to the item's runtime for legacy rows"*).
+**Decision — #34 stays read-only and tells the truth:**
+
+1. **Do NOT touch `merge_applier`.** Snapshotting `item.runtimeMinutes` onto the
+   event at import time would write `null` onto `null` (the item has no runtime
+   either) — a no-op that churns M3 code for nothing. The earlier draft of this
+   plan called this a "two-line fix"; it was neither.
+2. **Coalesce in the reader:** `event.runtimeMinutes ?? item.runtimeMinutes ?? 0`.
+   This is not a fix for the import case (both are null there) — it correctly
+   handles the **mixed** case: a title added via search (so the item *does* carry
+   a runtime) whose episodes were later marked by an import. Cheap, defensive,
+   read-only.
+3. **UI honesty (one line of copy, no logic):** the Hours and By-genre cards
+   carry a footnote — *"Counts titles watched in the app; imported history has no
+   runtime or genre data."* — rendered **only when** some watch event has a null
+   runtime. A user must never conclude the numbers are broken.
+   `// ponytail: a footnote, not a backfill. Enrichment is its own issue.`
+4. **File a follow-up issue** (M6 backlog, not this milestone): *"Snapshot
+   runtime + genres on import by resolving `MediaDetails`."* That is a real
+   change — network during import, touches `Resolver` and `MergeApplier`, needs
+   its own offline/rate-limit story. Out of scope for #34's issue body.
+
+Document the reader-side rule in `.claude/CLAUDE.md`, extending the
+stats-snapshot bullet: *"stats coalesce `WatchEvents.runtimeMinutes` to the
+item's runtime, then to zero; imported events legitimately carry neither, so
+counts and decades are complete for imports while hours and genres are not —
+never back-fill either from the cache."*
 
 ### 5.2 Implementation
 
@@ -184,24 +222,39 @@ stats-snapshot bullet: *"every writer of `WatchEvents` snapshots
 
 - **T1 `test/features/stats/stats_snapshot_test.dart`** (pure, no DB): counts
   split rewatch vs not; hours include rewatches; hours use the item fallback when
-  the event's runtime is null; genre splitting of `"Drama,Sci-Fi"`; decade
-  bucketing (`1999 → "1990s"`, `2000 → "2000s"`); null year/genre omitted.
+  the event's runtime is null; **both null → contributes 0, does not throw**;
+  genre splitting of `"Drama,Sci-Fi"`; decade bucketing (`1999 → "1990s"`,
+  `2000 → "2000s"`); null year/genre omitted.
 - **T2 streak table-test** (pinned `now`): 0 events → 0; today only → 1;
   today+yesterday → 2; yesterday only (no today) → 1 (grace); a gap of one day
-  breaks it; two events on the same day count once; `watchedAt == null` ignored;
-  events *in the future* don't extend it; a 400-day chain caps the walk.
+  breaks it; two events on the same day count once; a **rewatch** extends it;
+  `watchedAt == null` ignored; events *in the future* don't extend it; a 400-day
+  chain caps the walk.
+  **Timezone hardening:** pinning `now` through `clock` is *not* sufficient — a
+  fixture built as `now.subtract(Duration(days: n))` near midnight lands in a
+  different local day depending on the CI box's UTC offset. Build every fixture
+  as an **explicit local `DateTime(2026, 7, 8, 12)`** (local midday) and pin `now`
+  to a local midday too, so no fixture is within 12h of a day boundary in any
+  zone. Add one case asserting a `watchedAt` stored in UTC at `23:00Z` buckets by
+  its **local** day.
 - **T3 `test/features/stats/stats_cache_eviction_test.dart` — the acceptance
   criterion, adversarial:** in-memory DB → add items + mark watched → snapshot
   stats → `delete(cachedMedia).go()` + `delete(cachedEpisodes).go()` → assert the
   snapshot is **identical**. This fails loudly the day someone "optimizes"
   `watchAllEvents()` into a cache join.
-- **T4 import→stats regression:** run `MergeApplier` over a TV Time fixture, then
-  assert `timeWatched > Duration.zero`. This is the test that catches §5.1's bug
-  and stops it coming back.
+- **T4 import→stats characterization test (pins §5.1's *documented* behaviour):**
+  run `MergeApplier` over a TV Time fixture, then assert **all four** at once —
+  `episodesWatched > 0`, `byDecade` is **non-empty** (`year` is imported),
+  `timeWatched == Duration.zero`, and `byGenre` is **empty**. Comment it with the
+  `merge_applier.dart:278-283` citation. This is deliberately a *characterization*
+  test, not an aspiration: it documents the seam, and it is the test that will go
+  red — correctly — the day the enrichment follow-up lands, forcing whoever does
+  it to update the contract in one place.
 - **T5 widget** `stats_screen_test.dart`: override the `StreamProvider` with
   `Stream.value(snapshot)` (**never** the real DB); assert the two stat cards,
-  the streak line, and the genre/decade bar labels render; and that the empty
-  snapshot renders the empty state, not a `0 h` card.
+  the streak line, and the genre/decade bar labels render; that the empty
+  snapshot renders the empty state, not a `0 h` card; and that the §5.1(3)
+  footnote appears **only** when a null-runtime event is present.
 
 **Commit:** `feat(stats): stats screen — counts, hours, genre/decade, streak (#34)`
 
@@ -326,7 +379,7 @@ Already done in earlier milestones: `watchnook_theme.dart`, `watchnook_tokens
 |---|---|---|
 | Pure unit | `statsFrom` counts/hours/genre/decade; streak table-test | T1, T2 |
 | DB integration | cache-eviction invariance (in-memory DB) | T3 |
-| Regression | import → non-zero hours (the §5.1 bug) | T4 |
+| Characterization | import → counts + decades, but zero hours / no genres (§5.1) | T4 |
 | Unit | theme-mode persistence + corrupt-value fallback | T6 |
 | Widget | stats, settings, empty states, onboarding (all providers overridden) | T5, T7, T8, T9 |
 | Widget | shared poster placeholder | T10 |
@@ -349,8 +402,8 @@ poster placeholders render. Capture the outcome in the PR triage comment.
 ## 10. Sequencing & risks
 
 1. **#34** — first: it introduces `lib/core/widgets/empty_state.dart` that #35
-   consumes, and its §5.1 writer audit touches `merge_applier` (M3 code) in
-   isolation, before #35/#36 churn the screens.
+   consumes. It touches **no** existing write path (§5.1) — it is additive:
+   one DAO read method, one domain file, one screen, one router branch.
 2. **#35** — depends on #34's `EmptyState`; promotes `_AttributionFooter` out of
    `detail_screen`.
 3. **#36** — last: it rewrites the poster widget used by the screens #35 just
@@ -359,14 +412,17 @@ poster placeholders render. Capture the outcome in the PR triage comment.
 **Risks**
 - *Font bundling needs a network fetch of `.ttf`s in a sandbox.* Mitigated by the
   explicit §7.3 fallback (a tracked `needs-human` issue, never a silent fake).
-- *Streak is timezone-sensitive.* `watchedAt` is stored UTC; the streak is
-  computed on **local** calendar days via `toLocal()`. The table-test pins `now`
-  through `clock`, so it does not flake on a CI box in another zone.
-- *`merge_applier` is M3 code covered by M3's tests.* The change is additive (a
-  named arg); T4 pins the new behaviour and the existing M3 suite must stay green
-  — any red there is a regression, not "unrelated red".
+- *Streak is timezone-sensitive.* `watchedAt` is stored UTC; the streak buckets on
+  **local** calendar `(y,m,d)` via `toLocal()`. Pinning `now` through `clock` is
+  **not** enough on its own — see T2's fixture rule (explicit local middays), or
+  the test flakes on a CI box in another zone.
+- *Stats under-report for imported libraries, by design.* The numbers are correct
+  but incomplete (§5.1); the mitigation is the UI footnote + T4, not a backfill.
+  If a human decides that's unacceptable, the enrichment follow-up — not this
+  milestone — is where it belongs.
 - *Three nav tabs + a pushed Settings changes the shell.* `smoke_test` and the
   routing tests must stub the stats provider or they hang (CLAUDE.md).
 
-**Not in scope (file follow-ups):** Material You dynamic colour (AD-M5-6);
+**Not in scope (file follow-ups):** import enrichment — snapshot runtime/genres
+by resolving `MediaDetails` (§5.1(4)); Material You dynamic colour (AD-M5-6);
 golden tests (§7.1); `package_info_plus` (§6.1); #37 and #38 (`needs-human`).
