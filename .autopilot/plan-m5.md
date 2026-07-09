@@ -302,6 +302,15 @@ class AutoBackupService {
   the first's half-written bytes. Hold the in-flight `Future<void>?` in a field
   and return it instead of starting a second write. (One field, not a lock
   library — the only concurrency here is "the same callback twice".)
+  **The field MUST be nulled in a `whenComplete`/`finally`.** Leave it set and
+  every subsequent `snapshot()` returns the already-completed future: backups
+  stop forever, silently, with no error anywhere. Test 5b cannot see this (both
+  its calls are in the same flight) — only §5.3 test 6's *later, independent*
+  `snapshot()` can, so that assertion is load-bearing, not incidental.
+  Single-flight is **leading-edge**: the second caller's newer DB state is not
+  captured until the next `onPause`. Accepted — `onPause` re-fires on every
+  backgrounding and Android throttles off-device backup anyway, so the file
+  re-converges. The corruption race is what mattered.
 - `restoreIfEmpty()`: `if (await dao.hasAnyItems()) return false;` then
   `if (!await file.exists()) return false;` then `service.restore(await
   file.readAsString())`. Guard on the **library**, not on a "first run" pref —
@@ -312,12 +321,25 @@ class AutoBackupService {
 (keepAlive: true)` `importExportService` (sync) + `autoBackupService`
 (`Future`, because `getApplicationSupportDirectory()` is async).
 
-**The provider injects the `backup/` subdirectory, not the support dir:**
+**The provider injects the `backup/` subdirectory, not the support dir — and it
+builds the path from a named const, never a bare literal:**
 
 ```dart
+class AutoBackupService {
+  /// MUST equal `path="backup"` in res/xml/backup_rules.xml and
+  /// data_extraction_rules.xml, or nothing is ever backed up. See AD-7.
+  static const backupDirName = 'backup';
+}
+
 final support = await getApplicationSupportDirectory();
-return AutoBackupService(..., directory: Directory('${support.path}/backup'));
+return AutoBackupService(
+  ...,
+  directory: Directory('${support.path}/${AutoBackupService.backupDirName}'),
+);
 ```
+
+A second literal in the provider would make §5.3 test 12 decorative: it would
+catch the XML drifting while the provider quietly moved to `backups/`.
 
 `getApplicationSupportDirectory()` returns Android's `getFilesDir()` (verified:
 `path_provider_android` returns `_applicationContext.filesDir`), which is backup
@@ -406,10 +428,15 @@ comment with the invariant. Backup file therefore lives at
    snapshot, wipe everything, restore → cache stays empty (it was never in the
    file) and no exception.
 
-**Tests** `test/android/backup_rules_test.dart` — parse the XML (`XmlDocument`
-via the `xml` package, already transitive through `archive`; if it is not a
-direct dep, assert over `String` instead of adding one). **Assert positively —
-never by absence.** Both rule files fail *open*: the leaking file is the one that
+**Tests** `test/android/backup_rules_test.dart` — **`String` assertions, no XML
+parser.** Do *not* `import 'package:xml'` on the strength of it being transitive
+through `archive`: `archive` may drop or bump it in any release and break this
+test's import (this is what `depend_on_referenced_packages` lints against). The
+files are six lines each; substring + `RegExp.allMatches` over
+`<include ... />` is enough to enumerate the `(domain, path)` pairs, and it adds
+nothing to `pubspec.yaml`. (If a real parser ever earns its keep, `xml` goes in
+`dev_dependencies` — test-only, so "no new shipped deps" still holds.)
+**Assert positively — never by absence.** Both rule files fail *open*: the leaking file is the one that
 mentions neither `database` nor `sharedpref`, so "does not contain
 `domain=\"database\"`" passes on precisely the file we are trying to catch.
 
@@ -428,10 +455,10 @@ mentions neither `database` nor `sharedpref`, so "does not contain
     `<device-transfer>` each fails a *different* one of tests 8–10.
 11. `AndroidManifest.xml` references both rule files by name and still has
     `allowBackup="true"`.
-12. The path in the allowlist (`backup`) equals the subdirectory
-    `export_providers.dart` appends to the support dir — assert the literal
-    `'backup'` from one shared `const` if practical, so the two files cannot
-    drift (§5.3, "one fact expressed in two files").
+12. `AutoBackupService.backupDirName` equals the `path` attribute parsed out of
+    **both** XML files. Not "the literal `'backup'` appears in each" — the
+    assertion must read the Dart const the provider actually uses (§5.3), or it
+    catches XML drift while the provider silently moves to `backups/`.
 
 **Real-artifact verification** (Definition of Done — `just check` cannot see any
 of this): `android-emulator` skill → install, import a fixture, background the
@@ -515,17 +542,30 @@ one from inside `just check`. That is why each row names a test or a device chec
    tighter allowlist path. Any objection?
 4. `_key` → `const onboardingSeenKey` (public) needed so `main()` can pre-set the
    flag on restore. OK?
-5. Does `test/android/backup_rules_test.dart` get to use the `xml` package? It is
-   transitive via `archive`, not a direct dep. Add it to `dev_dependencies`, or
-   assert over raw `String` and keep "no new deps" literally true?
+*(Resolved in pass 2: no `xml` package — `String` assertions, §5.3.)*
 
 ## 9. Review log
 
-Plan-reviewer pass 1 → **NEEDS CHANGES** (6 required). All six addressed above:
-root-level `<include>` in `dataExtractionRules` is invalid and a missing
-`<device-transfer>` fails open (§AD-7, §5.3, tests 8–12); `updatedAt` is NOT
-NULL with no default (§AD-5, §5.1 test 4); the frozen key set is 18 columns, not
-17 (§5.4 test 3); `hasAnyItems()` replaces `getAll().isNotEmpty` on the boot path
-(§5.1); absent/invalid `version` rejects without wiping (§4, §5.1 test 6); the
-`backup/` subdir is now explicit in the provider (§5.3). Its three suggestions
-were taken too: snapshot single-flight, `rating == 0` ⇒ unrated, UTC everywhere.
+**Pass 1 → NEEDS CHANGES** (6 required). All six addressed: root-level
+`<include>` in `dataExtractionRules` is invalid and a missing `<device-transfer>`
+fails open (§AD-7, §5.3, tests 8–12); `updatedAt` is NOT NULL with no default
+(§AD-5, §5.1 test 4); the frozen key set is 18 columns, not 17 (§5.4 test 3);
+`hasAnyItems()` replaces `getAll().isNotEmpty` on the boot path (§5.1);
+absent/invalid `version` rejects without wiping (§4, §5.1 test 6); the `backup/`
+subdir is explicit in the provider (§5.3). Its three suggestions were taken too:
+snapshot single-flight, `rating == 0` ⇒ unrated, UTC everywhere.
+
+**Pass 2 → APPROVE**, with three non-blocking notes, all folded in before
+implementation started: the single-flight field must be nulled in
+`whenComplete` (leaving it set = permanent silent backup failure, invisible to
+test 5b — §5.3); `backupDirName` is a real shared const so test 12 catches
+provider drift and not just XML drift (§5.3); and `backup_rules_test.dart` uses
+`String` assertions rather than importing `xml` transitively through `archive`
+(§5.3). Pass 2 independently recounted the 18-column allowlist against
+`tables.dart` and confirmed it exact.
+
+**Settled — do not re-litigate:** restore-as-replace as the reading of ADR-6;
+AD-2's recompute-don't-export of derived columns; the Letterboxd 0–10 ⇄ 0.5–5.0
+rescale as the exact inverse of the importer; `onPause` (not `onDetach`) as the
+snapshot hook; `getApplicationSupportDirectory()` == Android `filesDir` ==
+backup domain `file`.
