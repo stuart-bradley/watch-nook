@@ -1,4 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The app's one network dependency is the metadata API (TMDB). Flutter's
+         scaffold declares INTERNET only in the debug/profile manifests, so it
+         MUST be declared here too — otherwise the RELEASE build (the one users
+         download) ships with no network access at all and every request fails
+         "Failed host lookup". This is invisible to debug/profile builds and to
+         `just check`; only a release build on a device surfaces it. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <!-- allowBackup=true enables Android Auto Backup (US-11). Both rule files are
          ALLOWLISTS (ADR-3): only <filesDir>/backup/ — the user-owned export JSON —
          leaves the device. Drop either attribute and Android reverts to its
