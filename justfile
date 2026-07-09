@@ -64,17 +64,23 @@ release-sign:
 
 # CI-only: build the signed universal release APK with the baked TMDB key, for
 # the GitHub-Releases pipeline (ci-shared flutter-release-apk.yml uploads it).
-# Needs the TMDB + keystore secrets in env. BUILD_NAME (the release tag, e.g.
-# v0.1.0) sets the APK versionName. Writes secrets.json (gitignored) — do not
-# run locally with a real secrets.json you want to keep.
+# Needs the TMDB + keystore secrets in env. BUILD_NAME (the tag) sets
+# versionName; BUILD_NUMBER (the run number) sets a monotonic versionCode.
+# Writes secrets.json (gitignored) — do not run locally with a real secrets.json
+# you want to keep.
 release-apk-ci:
     #!/usr/bin/env bash
     set -euo pipefail
+    # Fail loudly if the baked key is missing: a keyless release APK can't reach
+    # TMDB (issue #52 class) yet would ship green. The read token is an optional
+    # v4 fallback — empty is fine when the v3 apiKey is present.
+    : "${TMDB_API_KEY:?TMDB_API_KEY is not set — the release APK would ship keyless}"
     printf '{"activeSource":"tmdb","tmdbApiKey":"%s","tmdbReadToken":"%s","tvdbApiKey":""}' \
-      "${TMDB_API_KEY:-}" "${TMDB_READ_TOKEN:-}" > secrets.json
+      "$TMDB_API_KEY" "${TMDB_READ_TOKEN:-}" > secrets.json
     ./scripts/release-sign.sh
     args=(build apk --release --dart-define-from-file=secrets.json)
     [ -n "${BUILD_NAME:-}" ] && args+=(--build-name="${BUILD_NAME#v}")
+    [ -n "${BUILD_NUMBER:-}" ] && args+=(--build-number="$BUILD_NUMBER")
     flutter "${args[@]}"
 
 # Install dependencies + generate code
