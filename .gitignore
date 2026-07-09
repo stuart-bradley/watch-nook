@@ -36,12 +36,8 @@ secrets.json
 .vscode/
 .DS_Store
 
-# Autopilot machine state (NOT plan-*.md — those are committed to branches)
-.autopilot/state.json
-.autopilot/events.log
-.autopilot/.state.*
-.autopilot/progress.log
-.autopilot/qgate.log
-.autopilot/journal-*.md
+# Local agent/dev-tooling scratch (not part of the app)
+.autopilot/
+.autopilot.json
 /MORNING.md
 /STOP
