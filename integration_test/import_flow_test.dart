@@ -136,6 +136,14 @@ void main() {
       expect(await _titles(db2), {'Severance', 'Andor', 'Blade Runner 2049'});
       expect(await _watchEvents(db2), 11);
       expect(await _rewatches(db2), 1);
+      // watchedCount is denormalized — excluded from the JSON (AD-2) and
+      // recomputed by restore(), not "survived". Assert it returns so this leg
+      // covers the recompute path, not just the raw WatchEvents rows: Severance
+      // was bulk-marked to all 9 episodes.
+      final severance = (await db2.libraryDao.getAll()).firstWhere(
+        (i) => i.title == 'Severance',
+      );
+      expect(severance.watchedCount, 9);
     },
     timeout: const Timeout(Duration(minutes: 3)),
   );
