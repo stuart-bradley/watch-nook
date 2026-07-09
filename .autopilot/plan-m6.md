@@ -130,6 +130,13 @@ class StatBucket { final String label; final int count; }
   `genresCsv` are omitted (no "Unknown" bucket).
 - `byDecade` buckets on `LibraryItems.year` → `year - year % 10` → `"2010s"`.
   Null year omitted.
+- **Product choice, flagged for the human reviewer:** both breakdowns are
+  **episode-weighted**, so a 62-episode binge of one drama adds 62 to `Drama` and
+  62 to `2010s`, dwarfing twenty films. That answers *"where did my hours go?"*
+  rather than *"what's in my library?"*. Title-weighted is the other defensible
+  reading. Episode-weighted is chosen because it matches the two headline cards
+  above it (episodes, hours) — but it is a visible product decision, not an
+  implementation detail, and a human should confirm it before release.
 - **Streak** = consecutive **local calendar days**, walking back from
   `clock.now()`'s day, on which ≥1 event has a non-null `watchedAt`. If today has
   no event but yesterday does, the streak still counts (grace: you haven't
@@ -166,8 +173,11 @@ which carries neither runtime nor genres, so there is nothing to snapshot at
 import time without a new `MediaDetails` fetch.
 
 **Consequence for #34, stated plainly:** a library populated *only* by import
-shows real **counts**, a real **decade** breakdown (`year` **is** imported,
-`merge_applier.dart:134`), **zero hours**, and an **empty genre** breakdown.
+shows real **counts**, a **decade** breakdown where the source gave a year
+(`merge_applier.dart:148` writes it), **zero hours**, and an **empty genre**
+breakdown. Note the decade breakdown is only *partly* populated for TV Time:
+`tv_time_importer.dart:184` parses a year solely from a `"(YYYY)"` title suffix,
+so plain-named shows import a null year and drop out of `byDecade`.
 
 **Decision — #34 stays read-only and tells the truth:**
 
@@ -181,9 +191,14 @@ shows real **counts**, a real **decade** breakdown (`year` **is** imported,
    a runtime) whose episodes were later marked by an import. Cheap, defensive,
    read-only.
 3. **UI honesty (one line of copy, no logic):** the Hours and By-genre cards
-   carry a footnote — *"Counts titles watched in the app; imported history has no
-   runtime or genre data."* — rendered **only when** some watch event has a null
-   runtime. A user must never conclude the numbers are broken.
+   carry a footnote — *"Some titles have no runtime or genre data."* — rendered
+   **only when** some watch event has a null runtime. A user must never conclude
+   the numbers are broken.
+   The copy deliberately does **not** say "imported": a title added via search
+   while **offline** also has a null runtime (`search_providers.dart:53-57` — the
+   `MediaDetails` fetch failed), so blaming imports would be a lie in that case.
+   Gating on provenance (`recordedSource`) would be more precise and is not worth
+   a column read; the vaguer sentence is true in both cases.
    `// ponytail: a footnote, not a backfill. Enrichment is its own issue.`
 4. **File a follow-up issue** (M6 backlog, not this milestone): *"Snapshot
    runtime + genres on import by resolving `MediaDetails`."* That is a real
@@ -204,9 +219,16 @@ never back-fill either from the cache."*
   `Stream<List<(WatchEvent, LibraryItem)>> watchAllEvents()` (one join, user
   tables only). Nothing else.
 - `lib/features/stats/presentation/stats_providers.dart` — a plain
-  `StreamProvider<StatsSnapshot>` (**not** `@riverpod`: it maps Drift-generated
-  rows — CLAUDE.md's `InvalidTypeException` rule) mapping `watchAllEvents()`
-  through `statsFrom(..., clock.now())`.
+  `StreamProvider<StatsSnapshot>` mapping `watchAllEvents()` through
+  `statsFrom(..., clock.now())`. (`@riverpod` *would* compile here — the exposed
+  type is the pure-Dart `StatsSnapshot`, not a Drift row, so CLAUDE.md's
+  `InvalidTypeException` rule does not bite. A plain `StreamProvider` is simply
+  less machinery for a provider with no parameters.)
+  **Known staleness:** `clock.now()` is captured when the stream is built, so the
+  streak only recomputes on a DB write. Left open across midnight with no new
+  watch, the streak card shows yesterday's number until the next write.
+  `// ponytail: no midnight timer; the number is right the moment you watch
+  something, which is the only moment anyone looks.`
 - `lib/features/stats/presentation/stats_screen.dart` — port the delivered
   mockup (`docs/design/flutter/lib/features/stats/stats_screen.dart`): two
   `_StatCard`s (Episodes, Watched-hours), the streak card, `_Bar` rows for genre
@@ -243,13 +265,21 @@ never back-fill either from the cache."*
   snapshot is **identical**. This fails loudly the day someone "optimizes"
   `watchAllEvents()` into a cache join.
 - **T4 import→stats characterization test (pins §5.1's *documented* behaviour):**
-  run `MergeApplier` over a TV Time fixture, then assert **all four** at once —
-  `episodesWatched > 0`, `byDecade` is **non-empty** (`year` is imported),
-  `timeWatched == Duration.zero`, and `byGenre` is **empty**. Comment it with the
-  `merge_applier.dart:278-283` citation. This is deliberately a *characterization*
-  test, not an aspiration: it documents the seam, and it is the test that will go
-  red — correctly — the day the enrichment follow-up lands, forcing whoever does
-  it to update the contract in one place.
+  run `MergeApplier` over **hand-built `ImportRecord`s carrying an explicit
+  `year: 2015`** (the pattern `test/core/import_export/merge_applier_test.dart`
+  already uses), then assert **all four** at once — `episodesWatched > 0`,
+  `byDecade` contains `"2010s"`, `timeWatched == Duration.zero`, and `byGenre` is
+  **empty**. Comment it with the `merge_applier.dart:278-283` citation.
+  **Do not drive this off the TV Time fixture.** Its `byDecade` coverage is
+  incidental: `tv_time_importer.dart:184` derives the year only from a `"(YYYY)"`
+  title suffix, so the assertion passes today purely because the trimmed fixture
+  happens to retain year-suffixed shows with watch events (`The Magicians (2015)`,
+  `ONE PIECE (2023)`). Re-running `test/fixtures/tvtime/trim_from_gdpr_export.py`
+  could drop them and the assertion would go green-but-vacuous.
+  This is deliberately a *characterization* test, not an aspiration: it documents
+  the seam, and it is the test that will go red — correctly — the day the
+  enrichment follow-up lands, forcing whoever does it to update the contract in
+  one place.
 - **T5 widget** `stats_screen_test.dart`: override the `StreamProvider` with
   `Stream.value(snapshot)` (**never** the real DB); assert the two stat cards,
   the streak line, and the genre/decade bar labels render; that the empty
