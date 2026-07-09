@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
+import 'package:watch_nook/features/import/presentation/import_screen.dart';
 import 'package:watch_nook/features/library/presentation/library_screen.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_screen.dart';
@@ -42,6 +43,7 @@ final List<RouteBase> appRoutes = <RouteBase>[
     builder: (context, state) => const OnboardingScreen(),
   ),
   GoRoute(path: '/search', builder: (context, state) => const SearchScreen()),
+  GoRoute(path: '/import', builder: (context, state) => const ImportScreen()),
   GoRoute(
     // `id` is a `LibraryItems` row id — detail is only reachable for a tracked
     // title. A non-numeric or unknown id renders the "not in your library"
@@ -72,6 +74,13 @@ class _ShellScaffold extends StatelessWidget {
             icon: const Icon(Icons.search),
             tooltip: 'Search',
             onPressed: () => context.push('/search'),
+          ),
+          // ponytail: lives on the app bar because there is no Settings screen
+          // yet (#33, M4). Move it under Settings when that lands.
+          IconButton(
+            icon: const Icon(Icons.file_upload_outlined),
+            tooltip: 'Import',
+            onPressed: () => context.push('/import'),
           ),
         ],
       ),
