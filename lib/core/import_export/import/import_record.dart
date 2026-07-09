@@ -87,3 +87,8 @@ class ImportRecord {
   /// the applier's cue for defaulting [trackStatus].
   bool get hasFirstWatch => watches.any((w) => !w.isRewatch);
 }
+
+/// What an importer read out of one archive: the records it understood, and the
+/// number of rows it had to drop. Degrading is the contract (AD-7) — a bad row
+/// costs a row, never the import — so the count is surfaced, never swallowed.
+typedef ParseResult = ({List<ImportRecord> records, int skippedRows});
