@@ -5,10 +5,9 @@
 // real HTTP shapes those sources will parse — auth, pagination, error bodies,
 // TVDB login/token-refresh, and a per-IP-not-per-key rate-limit probe.
 //
-// Live-run is HUMAN-GATED: it needs real keys, which CI/the overnight loop
-// don't ship (secrets.json is gitignored). Committed here it must only
-// `flutter analyze` clean; a human runs it on a dev box and logs the
-// rate-limit findings on the PR. See .autopilot/plan-m2.md · #8.
+// Live-run needs real keys, which CI doesn't ship (secrets.json is gitignored).
+// Committed here it must only `flutter analyze` clean; run it on a dev box to
+// log the rate-limit findings. (issue #8)
 //
 // Usage (pure-Dart script — imports no Flutter, so `dart run` works):
 //

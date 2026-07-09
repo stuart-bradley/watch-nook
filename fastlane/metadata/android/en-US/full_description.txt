@@ -1,0 +1,22 @@
+Watchnook is a local-first TV and movie tracker for Android. Track what you're
+watching and what's next, mark episodes and films watched (with bulk actions and
+rewatch logging), see upcoming episodes for your shows, and keep watch
+statistics — all on your device.
+
+Built to replace TV Time, without the accounts and servers.
+
+Why Watchnook:
+
+* Local-first — your library lives on your phone, not on someone's server. It
+  keeps working offline, and there's nothing to go down.
+* No account, no sign-up, no ads, no tracking, no social features.
+* Import your history from TV Time, Trakt, IMDb, or Letterboxd — clean matches
+  land automatically, ambiguous ones you confirm, and importing never wipes what
+  you already have.
+* Your data is yours — export it any time as portable JSON or a Letterboxd CSV,
+  plus Android Auto Backup.
+* Watch stats — episodes, hours, by genre and decade, streaks.
+
+Metadata (titles, artwork, air-dates) comes from The Movie Database (TMDB).
+This product uses TMDB and the TMDB APIs but is not endorsed, certified, or
+otherwise approved by TMDB.

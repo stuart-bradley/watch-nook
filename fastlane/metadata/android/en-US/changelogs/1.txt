@@ -1,0 +1,6 @@
+First public release.
+
+Track TV & movies locally: search and add titles, mark episodes/films watched
+(bulk actions + rewatch logging), upcoming episodes for tracked shows, watch
+stats, and import from TV Time / Trakt / IMDb / Letterboxd. Export to JSON +
+Letterboxd CSV. Offline-first, no accounts.
