@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/import_export/export/letterboxd_export.dart';
 
 /// What a [ImportExportService.restore] actually wrote.
 typedef RestoreSummary = ({
@@ -97,6 +98,14 @@ class ImportExportService {
   /// [exportMap], pretty-printed.
   Future<String> exportJson() async =>
       const JsonEncoder.withIndent('  ').convert(await exportMap());
+
+  /// The user's films as a letterboxd.com/import CSV (#31). TV rows never
+  /// reach [letterboxdCsv] — Letterboxd tracks films and nothing else.
+  Future<String> exportLetterboxdCsv() async => letterboxdCsv([
+    for (final item in await dao.getAll())
+      if (item.mediaType == MediaType.movie)
+        (item, await dao.watchEventsFor(item.id)),
+  ]);
 
   /// **Replace** the library with [json] (AD-4). Restore replaces; import
   /// merges — this never calls `MergeApplier` and never preserves an existing
