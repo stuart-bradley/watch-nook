@@ -122,6 +122,31 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
     watchEvents,
   )..where((t) => t.libraryItemId.equals(libraryItemId))).get();
 
+  /// Every watch event joined to its library item — the stats read (#34).
+  ///
+  /// **INVARIANT: user-owned tables only.** This query must never join
+  /// [CachedMedia]/[CachedEpisodes] (the "two data domains" rule in CLAUDE.md).
+  /// Every fact stats need is already snapshotted here — `runtimeMinutes` onto
+  /// the event at mark-time, `genresCsv`/`year` onto the item at add-time — so
+  /// wiping the disposable cache leaves every figure unchanged. Joining the
+  /// cache in for "nicer" numbers would silently make the stats screen go blank
+  /// after a TTL eviction or a restore. `stats_cache_eviction_test.dart` fails
+  /// loudly the day someone tries.
+  Stream<List<(WatchEvent, LibraryItem)>> watchAllEvents() {
+    final query = select(watchEvents).join([
+      innerJoin(
+        libraryItems,
+        libraryItems.id.equalsExp(watchEvents.libraryItemId),
+      ),
+    ]);
+    return query.watch().map(
+      (rows) => [
+        for (final row in rows)
+          (row.readTable(watchEvents), row.readTable(libraryItems)),
+      ],
+    );
+  }
+
   /// Live set of **watched** aired `(season, episode)` coordinates for one item
   /// — the detail screen's per-episode toggle state (#19). Rewatch rows are
   /// excluded (they're extra viewings of an already-watched episode, not a

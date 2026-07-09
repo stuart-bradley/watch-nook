@@ -12,6 +12,8 @@ import 'package:watch_nook/core/routing/app_router.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/library/presentation/library_screen.dart';
 import 'package:watch_nook/features/search/presentation/search_screen.dart';
+import 'package:watch_nook/features/stats/domain/stats_snapshot.dart';
+import 'package:watch_nook/features/stats/presentation/stats_providers.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 
 /// #22 — the AD-5 nav shell, which every per-issue test mounts *past* (each one
@@ -80,6 +82,9 @@ void main() {
           upcomingThisWeekProvider.overrideWith(
             (ref) async => const <UpcomingEntry>[],
           ),
+          statsProvider.overrideWith(
+            (ref) => Stream.value(StatsSnapshot.empty),
+          ),
           libraryItemProvider.overrideWith(
             (ref, id) => Stream.value(id == item.id ? item : null),
           ),
@@ -96,7 +101,7 @@ void main() {
   int selectedTab(WidgetTester tester) =>
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex;
 
-  testWidgets('the bottom nav switches between the Library and Up Next tabs', (
+  testWidgets('the bottom nav switches between the three shell tabs', (
     tester,
   ) async {
     await pumpShell(tester);
@@ -110,6 +115,14 @@ void main() {
     expect(location(), '/up-next');
     expect(selectedTab(tester), 1);
     expect(find.text('No episodes for your shows this week.'), findsOneWidget);
+
+    await tester.tap(find.text('Stats'));
+    await tester.pumpAndSettle();
+
+    expect(location(), '/stats');
+    expect(selectedTab(tester), 2);
+    // The empty snapshot — this asserts the tab resolves, not what it computes.
+    expect(find.text('No stats yet'), findsOneWidget);
 
     await tester.tap(find.text('Library'));
     await tester.pumpAndSettle();
