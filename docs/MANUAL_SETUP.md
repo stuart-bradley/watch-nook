@@ -12,6 +12,11 @@ The M3 import parsers TDD against these files, now committed under `test/fixture
 - **TMDB** (default backend): create an account → API → request a key (instant). 
 - **TheTVDB v4** (optional, enables commercial/pay-once): `https://thetvdb.com/dashboard` → create a v4 key → choose **Negotiated Contract** (free under $50k/yr, attribution only). Approval is human-gated and can be slow/flaky (issue #376) — apply early; the app ships fine on TMDB alone.
 - Put the keys in the RemoteConfig JSON (hosted, e.g. GitHub Pages/raw) **and** the baked-in default in the app. Never commit keys to the repo (`.gitignore` covers `secrets.json`/`*.env`).
+- **`secrets.json` must be FLAT** (top-level string keys) — `--dart-define-from-file` only round-trips flat strings; a nested object arrives as a Dart `Map.toString()` (invalid JSON) and silently resolves to an empty key (issue #52). Shape:
+  ```json
+  { "activeSource": "tmdb", "tmdbApiKey": "…", "tmdbReadToken": "…", "tvdbApiKey": "" }
+  ```
+- **TheTVDB key is NOT public-safe like TMDB.** TMDB rate-limits per-IP, so its embedded key is harmless (public by design). TheTVDB attributes usage per-key/contract, so a baked-in TheTVDB key can be abused to drain *your* quota / muddy *your* free contract. Before enabling TheTVDB, choose a delivery model — TheTVDB's per-user **subscriber PIN** (no shared secret shipped) or hosted-RemoteConfig-only (rotatable) — and confirm their terms allow client embedding. Keep `tvdbApiKey` empty until then.
 
 ## 3. Plugins & tooling
 - Ensure the **`autopilot`** and **`toolkit`** plugins are enabled in Claude Code.

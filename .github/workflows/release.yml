@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      track:
+        description: 'Play Store track'
+        required: true
+        default: 'internal'
+        type: choice
+        options:
+          - internal
+          - alpha
+          - beta
+          - production
+      release_status:
+        description: 'Release status'
+        required: true
+        default: 'completed'
+        type: choice
+        options:
+          - draft
+          - completed
+
+jobs:
+  deploy:
+    # Tag pushes default to the internal track, status completed (auto-roll to
+    # internal testers). workflow_dispatch can still pick a wider track / draft.
+    uses: stuart-bradley/ci-shared/.github/workflows/flutter-release.yml@v1
+    with:
+      track: ${{ inputs.track || 'internal' }}
+      release-status: ${{ inputs.release_status || 'completed' }}
+      # Pin Flutter: an unpinned stable auto-updated on the runner and its Gradle
+      # plugin broke the Android release build ("compileFlutterBuildDebug not
+      # found"). 3.44.0 is the last known-good; unpin when stable recovers (keep
+      # ci/e2e/release on the same version).
+      flutter-version: "3.44.0"
+    secrets: inherit

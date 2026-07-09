@@ -1,0 +1,57 @@
+name: E2E
+
+# PR-only: the PR run already tests the merge result for an up-to-date branch,
+# and E2E is the most expensive job (emulator + instrumented build), so it does
+# not also run on push to main.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "lib/**"
+      - "integration_test/**"
+      - "pubspec.*"
+      - ".github/**"
+      - "android/**"
+      - "justfile"
+      - "scripts/**"
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Skip E2E until integration tests exist (they land in M3). NOTE: hashFiles() is INVALID in a job-level
+  # `if:` — it needs a checked-out workspace, which does not exist when GitHub evaluates job-`if`
+  # server-side, so GitHub rejects the whole file as a 0s startup_failure. Detect the tests in a cheap
+  # gate job and gate the expensive reusable-workflow job on its output instead.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.detect.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        run: |
+          if compgen -G 'integration_test/**/*_test.dart' >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+  e2e:
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    # API 33 (Android 13) for the POST_NOTIFICATIONS runtime dialog; 4G for
+    # patrol's heavier instrumented build; install-patrol activates patrol_cli
+    # (matches patrol). 45-min timeout leaves room for the shared workflow's one
+    # retry-on-infra-crash without tripping the job timeout.
+    uses: stuart-bradley/ci-shared/.github/workflows/flutter-e2e.yml@v1
+    with:
+      api-level: 33
+      disk-size: "4G"
+      install-patrol: true
+      timeout-minutes: 45
+      # Pin Flutter: an unpinned stable auto-updated on the runner and its Gradle
+      # plugin broke the patrol Android build ("compileFlutterBuildDebug not
+      # found"). 3.44.0 is the last known-good (builds the test bundle); unpin
+      # when stable recovers (keep ci/e2e/release on the same version).
+      flutter-version: "3.44.0"

@@ -1,0 +1,30 @@
+{
+  "id": 95396,
+  "name": "Severance",
+  "first_air_date": "2022-02-18",
+  "poster_path": "/lFf6LLrQjYldcZItzOkGmMMigP7.jpg",
+  "backdrop_path": "/backdrop.jpg",
+  "overview": "Mark leads a team of office workers whose memories have been surgically divided between work and personal life.",
+  "status": "Returning Series",
+  "number_of_episodes": 19,
+  "number_of_seasons": 2,
+  "episode_run_time": [50],
+  "genres": [
+    {"id": 18, "name": "Drama"},
+    {"id": 9648, "name": "Mystery"}
+  ],
+  "seasons": [
+    {"season_number": 0, "episode_count": 3, "name": "Specials"},
+    {"season_number": 1, "episode_count": 9, "name": "Season 1"},
+    {"season_number": 2, "episode_count": 10, "name": "Season 2"}
+  ],
+  "external_ids": {"imdb_id": "tt11280740"},
+  "next_episode_to_air": {
+    "season_number": 3,
+    "episode_number": 1,
+    "name": "Untitled",
+    "air_date": "2027-01-15",
+    "overview": "The next chapter begins.",
+    "runtime": 50
+  }
+}

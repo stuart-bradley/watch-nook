@@ -1,0 +1,19 @@
+{
+  "status": "success",
+  "data": {
+    "id": 168899,
+    "name": "Everything Everywhere All at Once",
+    "image": "https://artworks.thetvdb.com/banners/v4/movie/168899/posters/1.jpg",
+    "year": "2022",
+    "runtime": 139,
+    "overview": "An aging Chinese immigrant is swept up in an insane adventure across the multiverse.",
+    "status": {"id": 5, "name": "Released", "recordType": "movie"},
+    "genres": [
+      {"id": 878, "name": "Science Fiction"},
+      {"id": 12, "name": "Adventure"}
+    ],
+    "remoteIds": [
+      {"id": "tt6710474", "type": 2, "sourceName": "IMDB"}
+    ]
+  }
+}

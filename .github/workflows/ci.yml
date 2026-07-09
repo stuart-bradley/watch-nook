@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    uses: stuart-bradley/ci-shared/.github/workflows/flutter-ci.yml@v1
+    with:
+      # smoke-build compiles the debug Android build in CI, so #1's signing /
+      # desugar / namespace / applicationId config is validated by a hard gate
+      # without needing an emulator (closes the "just check doesn't compile
+      # Android" gap).
+      smoke-build: true
+      # Pin Flutter: an unpinned stable auto-updated on the runner and its Gradle
+      # plugin broke the Android build ("compileFlutterBuildDebug not found"),
+      # red on e2e/release. 3.44.0 is the last known-good; unpin when stable
+      # recovers (keep ci/e2e/release on the same version).
+      flutter-version: "3.44.0"

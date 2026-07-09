@@ -1,0 +1,23 @@
+{
+  "status": "success",
+  "data": [
+    {
+      "objectID": "series-371980",
+      "type": "series",
+      "tvdb_id": "371980",
+      "name": "Severance",
+      "year": "2022",
+      "image_url": "https://artworks.thetvdb.com/banners/v4/series/371980/posters/1.jpg",
+      "overview": "Mark leads a team of office workers whose memories have been surgically divided between their work and personal lives.",
+      "remote_ids": [
+        {"id": "tt11280740", "type": 2, "sourceName": "IMDB"},
+        {"id": "95396", "type": 12, "sourceName": "TheMovieDB.com"}
+      ]
+    },
+    {
+      "objectID": "person-1",
+      "type": "person",
+      "name": "Adam Scott"
+    }
+  ]
+}

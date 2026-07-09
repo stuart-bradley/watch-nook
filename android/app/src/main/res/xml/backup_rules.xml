@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ALLOWLIST (ADR-3), API 30 and below. Only the user-owned backup JSON leaves
+     the device. Any include element turns this file into an allowlist; omitting
+     the file backs up databases/ (the disposable cache) and shared_prefs/ (the
+     metadata API key). path must equal AutoBackupService.backupDirName.
+     Enforced by test/android/backup_rules_test.dart. -->
+<full-backup-content>
+    <include domain="file" path="backup"/>
+</full-backup-content>
