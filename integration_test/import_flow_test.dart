@@ -10,36 +10,37 @@ import 'package:patrol/patrol.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
+import 'package:watch_nook/core/import_export/export/import_export_service.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/routing/app_router.dart';
 import 'package:watch_nook/features/import/data/import_providers.dart';
+import 'package:watch_nook/features/settings/data/export_share.dart';
 import 'package:watch_nook/features/settings/data/shared_preferences_provider.dart';
 
-/// **#29, US-11 — the import round trip, on a real device.**
+/// **#29 / #47, US-10/US-11 — the import + export round trip, on a real device.**
 ///
 /// Import a TV Time export → the library fills → bulk-mark a show → import the
-/// *same file again* → nothing is duplicated, nothing is destroyed. That last
-/// leg is the whole point: an import is a **merge**, not a restore (the
-/// import≠restore invariant), and the regressions it guards against — a second
-/// item row per show, a second copy of every watch event, a rewatch row
-/// appended on every import, the bulk-marked episodes wiped — are all silent.
+/// *same file again* → nothing is duplicated, nothing is destroyed → **export
+/// the library and restore it into an empty database → the two match exactly.**
+/// The re-import leg proves an import is a **merge**, not a restore (the
+/// import≠restore invariant): the regressions it guards — a second item row per
+/// show, a second copy of every watch event, a rewatch row appended on every
+/// import, the bulk-marked episodes wiped — are all silent. The export leg
+/// (#47) proves the JSON round-trips the whole library losslessly.
 ///
-/// Only two seams are stubbed, and both are things a device test cannot drive:
-/// the SAF file picker (a platform channel) and the metadata backend (a network
-/// call to a live API, which would make this test flaky and key-dependent).
+/// Three seams are stubbed, all things a device test cannot drive: the SAF file
+/// picker (a platform channel), the metadata backend (a live network call that
+/// would make this flaky and key-dependent), and the export share sheet (a
+/// platform channel — the override captures the generated JSON instead).
 /// Everything between them is the real app: real routing, real screens, real
-/// importer, real resolver, real `MergeApplier`, real Drift.
+/// importer, real resolver, real `MergeApplier`, export service, real Drift.
 ///
 /// The DB is in-memory so each run starts from an empty library.
-///
-// TODO(stuart): extend with the export leg — import → mark → **export** →
-// re-import — once `ImportExportService` lands in M4 (#30/#31). Tracked in #47;
-// there is no exporter to call today.
 void main() {
   patrolTest(
-    'import to bulk mark to reimport keeps history intact',
+    'import bulk-mark reimport then export round-trips history intact',
     (
       $,
     ) async {
@@ -53,6 +54,10 @@ void main() {
 
       final export = _tvTimeExportZip();
 
+      // The export share sheet is a platform channel; capture the JSON the app
+      // hands it instead of opening it.
+      String? exportedJson;
+
       await $.pumpWidgetAndSettle(
         ProviderScope(
           overrides: [
@@ -61,6 +66,16 @@ void main() {
             activeMetadataSourceProvider.overrideWithValue(_FakeSource()),
             importFilePickerProvider.overrideWithValue(
               () async => (name: 'tv-time-export.zip', bytes: export),
+            ),
+            exportSharerProvider.overrideWithValue(
+              ({
+                required fileName,
+                required contents,
+                required mimeType,
+              }) async {
+                exportedJson = contents;
+                return true;
+              },
             ),
           ],
           child: const _AppUnderTest(),
@@ -100,6 +115,27 @@ void main() {
       // rewatch row, and the six bulk-marked episodes survive.
       expect(await _watchEvents(db), 11);
       expect(await _rewatches(db), 1);
+
+      // ---- leg 4: export → restore into an empty DB → identical -------
+      // Back to the library, then drive the real Settings → Export JSON button.
+      // The sharer override captured the JSON the app generated.
+      await $(BackButton).tap();
+      await $(Icons.settings_outlined).tap();
+      await $('Export JSON').scrollTo().tap();
+      await $.pumpAndSettle();
+      expect(exportedJson, isNotNull);
+
+      // Restore that export into a fresh, empty database (the replace path). A
+      // lossless round-trip reproduces the library exactly; the regressions it
+      // guards are silent — a dropped watch event, a lost rewatch flag, a
+      // watchedCount that doesn't survive the JSON.
+      final db2 = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db2.close);
+      await ImportExportService(db2.libraryDao).restore(exportedJson!);
+
+      expect(await _titles(db2), {'Severance', 'Andor', 'Blade Runner 2049'});
+      expect(await _watchEvents(db2), 11);
+      expect(await _rewatches(db2), 1);
     },
     timeout: const Timeout(Duration(minutes: 3)),
   );
