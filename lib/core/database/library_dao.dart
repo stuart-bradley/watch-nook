@@ -202,6 +202,32 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   Future<void> deleteItem(int id) =>
       (delete(libraryItems)..where((t) => t.id.equals(id))).go();
 
+  /// Insert one watch event verbatim. Bypasses the idempotent [markWatched]
+  /// semantics, so it is **only** for the restore path, which is rebuilding
+  /// history the user already owns rather than recording a new viewing.
+  Future<int> insertWatchEvent(WatchEventsCompanion entry) =>
+      into(watchEvents).insert(entry);
+
+  /// Wipe **both user-owned tables**. The restore-vs-import invariant
+  /// (CLAUDE.md): a restore *replaces* (this), an import *merges* (never calls
+  /// this). Callers wrap it with their inserts in one transaction so a failed
+  /// restore rolls back to the library it started with.
+  ///
+  /// Events are deleted explicitly rather than left to the FK cascade, so the
+  /// method stays correct even if `foreign_keys` is off.
+  Future<void> deleteAllUserData() => transaction(() async {
+    await delete(watchEvents).go();
+    await delete(libraryItems).go();
+  });
+
+  /// Cheap `LIMIT 1` existence probe — is the library empty?
+  ///
+  /// Not `getAll().isNotEmpty`: the fresh-install backup restore (#32) asks
+  /// this inside `main()` before `runApp`, and a returning user with thousands
+  /// of rows must not deserialize the whole library on every cold boot.
+  Future<bool> hasAnyItems() async =>
+      await (select(libraryItems)..limit(1)).getSingleOrNull() != null;
+
   // --- watch writes (#19) --------------------------------------------------
   //
   // The three legal mutations of watched state. Each runs in one transaction
