@@ -62,6 +62,7 @@ flutter:
   # silently renders Roboto. `test/theme_fonts_test.dart` pins the contract.
   assets:
     - assets/fonts/
+    - assets/branding/
 
 # Where patrol_cli installs the instrumented build (#29). Android only — this
 # app has no iOS target.

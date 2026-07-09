@@ -192,8 +192,8 @@ void main() {
 
     expect(
       find.text(
-        'This product uses the TMDB API but is not endorsed or certified '
-        'by TMDB.',
+        'This product uses TMDB and the TMDB APIs but is not endorsed, '
+        'certified, or otherwise approved by TMDB.',
       ),
       findsOneWidget,
     );
@@ -214,7 +214,7 @@ void main() {
     expect(find.text('Metadata provided by TheTVDB.'), findsOneWidget);
     expect(find.text('https://www.thetvdb.com/'), findsOneWidget);
     expect(
-      find.textContaining('not endorsed or certified'),
+      find.textContaining('not endorsed, certified'),
       findsNothing,
     );
   });
@@ -261,6 +261,6 @@ void main() {
     // attribution footer is still mandatory.
     expect(find.text('Severance'), findsWidgets);
     expect(find.text("Couldn't load details. You're offline."), findsOneWidget);
-    expect(find.textContaining('not endorsed or certified'), findsOneWidget);
+    expect(find.textContaining('not endorsed, certified'), findsOneWidget);
   });
 }

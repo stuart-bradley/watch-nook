@@ -52,6 +52,25 @@ TmdbSource _source({
 );
 
 void main() {
+  group('attribution (TMDB compliance — #53)', () {
+    test('notice is the EXACT TMDB-required wording (no paraphrase)', () {
+      // TMDB API terms mandate this string verbatim; a paraphrase is a
+      // compliance violation. This is the regression guard for #53.
+      expect(
+        _source().attribution().notice,
+        'This product uses TMDB and the TMDB APIs but is not endorsed, '
+        'certified, or otherwise approved by TMDB.',
+      );
+    });
+
+    test('bundles the TMDB logo asset (the terms require the logo too)', () {
+      expect(
+        _source().attribution().logoAsset,
+        'assets/branding/tmdb_logo.png',
+      );
+    });
+  });
+
   group('search', () {
     test('narrowed to tv normalizes ids, title, and year', () async {
       final results = await _source().search('severance', kind: MediaKind.tv);

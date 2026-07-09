@@ -252,12 +252,14 @@ class TmdbSource implements MetadataSource {
 
   @override
   Attribution attribution() => const Attribution(
-    // Copy matches the design ref (settings/detail attribution footer). No
-    // bundled logo yet — the UI renders a "TMDB" text credit (M2).
+    // TMDB terms require this EXACT notice (verbatim) AND the logo — do not
+    // paraphrase or drop either (issue #53 / attribution invariant / TMDB API
+    // terms). The logo is the official primary-short wordmark.
     notice:
-        'This product uses the TMDB API but is not endorsed or certified by '
-        'TMDB.',
+        'This product uses TMDB and the TMDB APIs but is not endorsed, '
+        'certified, or otherwise approved by TMDB.',
     linkUrl: 'https://www.themoviedb.org/',
+    logoAsset: 'assets/branding/tmdb_logo.png',
   );
 
   // --- parsing helpers -------------------------------------------------------
