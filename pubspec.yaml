@@ -11,6 +11,7 @@ environment:
 # .autopilot/plan-m1.md. Front-loading the M0-consumed set here keeps the pubspec
 # (and CI dependency resolution) stable across #1–#5.
 dependencies:
+  archive: ^4.0.9
   cached_network_image: ^3.4.1
   clock: ^1.1.1
   cupertino_icons: ^1.0.8
