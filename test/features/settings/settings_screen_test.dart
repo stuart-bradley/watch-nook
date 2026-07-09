@@ -225,10 +225,10 @@ void main() {
       'change', (tester) async {
     await pump(tester, stored: {themeModeKey: 'system'});
 
-    final picker = tester.widget<SegmentedButton<ThemeMode>>(
-      find.byType(SegmentedButton<ThemeMode>),
+    final picker = tester.widget<SegmentedButton<AppAppearance>>(
+      find.byType(SegmentedButton<AppAppearance>),
     );
-    expect(picker.selected, {ThemeMode.system});
+    expect(picker.selected, {AppAppearance.system});
 
     await tester.tap(find.text('Light'));
     await tester.pumpAndSettle();
@@ -237,11 +237,11 @@ void main() {
     expect(prefs.getString(themeModeKey), 'light');
     expect(
       tester
-          .widget<SegmentedButton<ThemeMode>>(
-            find.byType(SegmentedButton<ThemeMode>),
+          .widget<SegmentedButton<AppAppearance>>(
+            find.byType(SegmentedButton<AppAppearance>),
           )
           .selected,
-      {ThemeMode.light},
+      {AppAppearance.light},
     );
   });
 
@@ -260,11 +260,24 @@ void main() {
     expect(find.text('https://www.themoviedb.org/'), findsOneWidget);
   });
 
-  testWidgets('Dynamic (Material You) is deliberately not offered', (
+  testWidgets('Dynamic (Material You) is offered and persists (#51)', (
     tester,
   ) async {
-    await pump(tester);
-    expect(find.text('Dynamic'), findsNothing);
-    expect(find.text('System'), findsOneWidget);
+    await pump(tester, stored: {themeModeKey: 'dark'});
+    expect(find.text('Dynamic'), findsOneWidget);
+
+    await tester.tap(find.text('Dynamic'));
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString(themeModeKey), 'dynamicColor');
+    expect(
+      tester
+          .widget<SegmentedButton<AppAppearance>>(
+            find.byType(SegmentedButton<AppAppearance>),
+          )
+          .selected,
+      {AppAppearance.dynamicColor},
+    );
   });
 }

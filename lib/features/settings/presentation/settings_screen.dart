@@ -94,27 +94,31 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
-/// System / Light / Dark. "Dynamic" (Material You) is deliberately absent — it
-/// needs the `dynamic_color` package and a real device to verify.
-/// ponytail: three modes; `dynamic_color` is a dependency plus a device test.
+/// System / Light / Dark / Dynamic. "Dynamic" is Material You — the palette is
+/// sourced from the wallpaper on Android 12+, falling back to the Honey brand
+/// scheme where the platform supplies no dynamic colours (#51).
 class _ThemeModePicker extends ConsumerWidget {
   const _ThemeModePicker();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final mode = ref.watch(appThemeModeProvider);
+    final appearance = ref.watch(appThemeModeProvider);
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: WatchnookSpacing.screen,
         vertical: WatchnookSpacing.sm,
       ),
-      child: SegmentedButton<ThemeMode>(
+      child: SegmentedButton<AppAppearance>(
         segments: const [
-          ButtonSegment(value: ThemeMode.system, label: Text('System')),
-          ButtonSegment(value: ThemeMode.light, label: Text('Light')),
-          ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+          ButtonSegment(value: AppAppearance.system, label: Text('System')),
+          ButtonSegment(value: AppAppearance.light, label: Text('Light')),
+          ButtonSegment(value: AppAppearance.dark, label: Text('Dark')),
+          ButtonSegment(
+            value: AppAppearance.dynamicColor,
+            label: Text('Dynamic'),
+          ),
         ],
-        selected: {mode},
+        selected: {appearance},
         onSelectionChanged: (selection) =>
             ref.read(appThemeModeProvider.notifier).setMode(selection.first),
       ),
