@@ -19,7 +19,8 @@ void main() {
     expect(
       manifest,
       contains('android.permission.INTERNET'),
-      reason: 'Release APKs have no network without this; debug/profile mask it.',
+      reason:
+          'Release APKs have no network without this; debug/profile mask it.',
     );
   });
 }
