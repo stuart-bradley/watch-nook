@@ -33,9 +33,16 @@ test:
 # Full CI check (same as what runs on PRs)
 check: codegen analyze format-check test
 
-# Build debug APK
+# Build debug APK. Injects secrets.json (flat dart-defines) WHEN PRESENT so the
+# built artifact actually carries an API key — closes the on-device #52 gap where
+# a keyless build silently can't reach TMDB. CI ships no secrets.json and builds
+# keyless (the intended RemoteConfig.empty path).
 build-debug:
-    flutter build apk --debug --no-pub
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(build apk --debug --no-pub)
+    [ -f secrets.json ] && args+=(--dart-define-from-file=secrets.json)
+    flutter "${args[@]}"
 
 # E2E tests (Patrol). Assumes a running emulator/device + a patrol_cli matching
 # the patrol dep on PATH. patrol test auto-discovers integration_test/.

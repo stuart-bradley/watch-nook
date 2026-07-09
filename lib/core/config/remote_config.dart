@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 
 /// Which metadata backend the app talks to (ADR-1). The M0 config only
@@ -34,8 +32,8 @@ class RemoteConfig {
   /// failures raise `TypeError` (an `Error`, not an `Exception`) — a CLAUDE.md
   /// Dart gotcha. Callers (`current()`/`refresh()`) guard with `on Object` and
   /// keep the previous value, so a malformed payload never overwrites good
-  /// cache. The baked-in defaults path ([bakedDefaultsFromDefines]) degrades to
-  /// empty instead, because empty is the right fallback there.
+  /// cache. The baked-in defaults path ([bakedDefaultsFromDefines]) can't fail
+  /// this way — it reads flat string defines that are simply empty when absent.
   factory RemoteConfig.fromJson(Map<String, dynamic> json) => RemoteConfig(
     backend: MetadataBackend.fromName(json['backend'] as String),
     tmdbApiKey: json['tmdbApiKey'] as String,
@@ -78,34 +76,25 @@ class RemoteConfig {
 /// Builds the baked-in fallback [RemoteConfig] from the
 /// `--dart-define-from-file=secrets.json` values.
 ///
-/// The committed `secrets.json` is **nested** and `--dart-define-from-file`
-/// does **not** dot-flatten nested JSON — a nested object arrives as its
-/// **JSON-string** value under the top-level key. So `tmdbJson`/`tvdbJson` are
-/// the raw JSON strings of the `tmdb`/`tvdb` objects, which we decode here.
+/// The defines are **flat top-level strings** (`tmdbApiKey`,
+/// `tmdbReadToken`, `tvdbApiKey`) — the only shape that round-trips
+/// through `--dart-define-from-file`. A **nested** object does NOT arrive
+/// as its JSON string: Flutter serialises it with Dart's `Map.toString()`
+/// (unquoted → invalid JSON), so it silently resolves empty and the app
+/// ships with no key (issue #52). Keep `secrets.json` flat; never re-nest.
 ///
-/// The whole parse is guarded: absent/empty/malformed defines fall back to
-/// [RemoteConfig.empty] (CI ships no secrets → all empty; tests inject the real
-/// nested shape). A flat `String.fromEnvironment('TMDB_API_KEY')` would resolve
-/// empty against this nested file, so this #6 contract is regression-tested.
+/// Absent defines (CI ships none) resolve to '' → the app runs on
+/// [RemoteConfig.empty]'s safe defaults. Note: TMDB embeds fine (public by
+/// design — per-IP rate limiting), but TheTVDB is attributed per-key/contract,
+/// so decide its delivery model before baking a real `tvdbApiKey` in.
 RemoteConfig bakedDefaultsFromDefines({
   required String activeSource,
-  required String tmdbJson,
-  required String tvdbJson,
-}) {
-  try {
-    final tmdb = tmdbJson.isEmpty
-        ? const <String, dynamic>{}
-        : jsonDecode(tmdbJson) as Map<String, dynamic>;
-    final tvdb = tvdbJson.isEmpty
-        ? const <String, dynamic>{}
-        : jsonDecode(tvdbJson) as Map<String, dynamic>;
-    return RemoteConfig(
-      backend: MetadataBackend.fromName(activeSource),
-      tmdbApiKey: (tmdb['apiKey'] as String?) ?? '',
-      tmdbReadToken: (tmdb['apiReadAccessToken'] as String?) ?? '',
-      tvdbApiKey: (tvdb['apiKey'] as String?) ?? '',
-    );
-  } on Object {
-    return RemoteConfig.empty;
-  }
-}
+  required String tmdbApiKey,
+  required String tmdbReadToken,
+  required String tvdbApiKey,
+}) => RemoteConfig(
+  backend: MetadataBackend.fromName(activeSource),
+  tmdbApiKey: tmdbApiKey,
+  tmdbReadToken: tmdbReadToken,
+  tvdbApiKey: tvdbApiKey,
+);

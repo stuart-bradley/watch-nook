@@ -3,14 +3,18 @@ import 'package:watch_nook/core/config/remote_config.dart';
 
 void main() {
   group('bakedDefaultsFromDefines', () {
-    // Regression guard for the #6 contract: the committed secrets.json is
-    // NESTED, and --dart-define-from-file delivers each nested object as its
-    // JSON-STRING. A flat String.fromEnvironment would silently resolve empty.
-    test('parses the nested secrets.json JSON-string defines', () {
+    // Regression guard for #52: defines are FLAT strings. A nested object
+    // passed to --dart-define-from-file arrives as Dart Map.toString() (not
+    // JSON) and resolves EMPTY on-device — flat strings are the only shape
+    // that survives the build. This suite pins the flat contract;
+    // `just build-debug` + the emulator smoke are the real-artifact backstop
+    // the old nested test lacked.
+    test('reads flat string defines', () {
       final config = bakedDefaultsFromDefines(
         activeSource: 'tvdb',
-        tmdbJson: '{"apiKey":"v3key","apiReadAccessToken":"v4token"}',
-        tvdbJson: '{"apiKey":"tvdbkey"}',
+        tmdbApiKey: 'v3key',
+        tmdbReadToken: 'v4token',
+        tvdbApiKey: 'tvdbkey',
       );
 
       expect(config.backend, MetadataBackend.tvdb);
@@ -19,32 +23,29 @@ void main() {
       expect(config.tvdbApiKey, 'tvdbkey');
     });
 
-    test(
-      'degrades to empty defaults when defines are absent (CI ships none)',
-      () {
-        final config = bakedDefaultsFromDefines(
-          activeSource: '',
-          tmdbJson: '',
-          tvdbJson: '',
-        );
-
-        expect(config.backend, MetadataBackend.tmdb); // safe default
-        expect(config.tmdbApiKey, isEmpty);
-        expect(config.tmdbReadToken, isEmpty);
-        expect(config.tvdbApiKey, isEmpty);
-      },
-    );
-
-    // Adversarial: a malformed define must not blow up boot.
-    test('degrades to empty on malformed JSON rather than throwing', () {
+    test('empty defines (CI ships none) resolve to safe empty defaults', () {
       final config = bakedDefaultsFromDefines(
-        activeSource: 'tmdb',
-        tmdbJson: '{not valid json',
-        tvdbJson: '{}',
+        activeSource: '',
+        tmdbApiKey: '',
+        tmdbReadToken: '',
+        tvdbApiKey: '',
       );
 
+      expect(config.backend, MetadataBackend.tmdb); // safe default
       expect(config.tmdbApiKey, isEmpty);
+      expect(config.tmdbReadToken, isEmpty);
       expect(config.tvdbApiKey, isEmpty);
+    });
+
+    // An unrecognised activeSource must not throw — it falls back to TMDB.
+    test('unrecognised activeSource falls back to TMDB', () {
+      final config = bakedDefaultsFromDefines(
+        activeSource: 'bogus',
+        tmdbApiKey: 'k',
+        tmdbReadToken: '',
+        tvdbApiKey: '',
+      );
+
       expect(config.backend, MetadataBackend.tmdb);
     });
   });

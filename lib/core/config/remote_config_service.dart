@@ -69,12 +69,17 @@ class RemoteConfigService {
   }
 }
 
+// Flat string defines — the only shape that round-trips through
+// --dart-define-from-file (a nested object arrives as Dart Map.toString(), not
+// JSON, and silently resolves empty — issue #52). Keep secrets.json flat.
 const _activeSourceDefine = String.fromEnvironment('activeSource');
-const _tmdbDefine = String.fromEnvironment('tmdb');
-const _tvdbDefine = String.fromEnvironment('tvdb');
+const _tmdbApiKeyDefine = String.fromEnvironment('tmdbApiKey');
+const _tmdbReadTokenDefine = String.fromEnvironment('tmdbReadToken');
+const _tvdbApiKeyDefine = String.fromEnvironment('tvdbApiKey');
 
 RemoteConfig _bakedFromEnvironment() => bakedDefaultsFromDefines(
   activeSource: _activeSourceDefine,
-  tmdbJson: _tmdbDefine,
-  tvdbJson: _tvdbDefine,
+  tmdbApiKey: _tmdbApiKeyDefine,
+  tmdbReadToken: _tmdbReadTokenDefine,
+  tvdbApiKey: _tvdbApiKeyDefine,
 );
