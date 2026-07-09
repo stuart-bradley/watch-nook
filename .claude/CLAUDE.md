@@ -68,7 +68,7 @@ Cross-file rules that aren't obvious locally — keep them in a comment at the s
 
 ## Testing (alongside every change)
 - **Unit:** importers (against real fixtures in `test/fixtures/` + malformed inputs), resolver/MergeApplier, watched-semantics, export/import round-trip, `MetadataSource` **contract suite** (both impls) via `package:http/testing.dart` MockClient, TVDB token-refresh. Inject a `Clock`.
-- **Widget:** key screens via `ProviderScope` overrides (never the real DB).
+- **Widget:** key screens via `ProviderScope` overrides (never the real DB). A DB-backed `StreamProvider` screen (e.g. the library grid) **must** have that provider overridden with a synchronous `Stream.value(snapshot)` — a live Drift `.watch()` stream never quiesces under flutter_test fake-async, so `pumpAndSettle()` hangs for its full **10-minute** timeout and then fails with *"A Timer is still pending after the widget tree was disposed"*. This bites **full-app boot tests too** (`smoke_test`, onboarding) — home is the DB-backed library grid, so they must stub `libraryGridProvider` even though they only assert on routing.
 - **E2E (patrol, `integration_test/`):** import sample TV Time → library populated → bulk-mark → export → re-import matches. Pin `patrol_cli` to the version matching `patrol`; no `/` in a `patrolTest` name; patrol-generated bundles are gitignored.
 
 ## Commit Message Format
