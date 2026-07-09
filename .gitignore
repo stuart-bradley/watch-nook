@@ -40,5 +40,8 @@ secrets.json
 .autopilot/state.json
 .autopilot/events.log
 .autopilot/.state.*
+.autopilot/progress.log
+.autopilot/qgate.log
+.autopilot/journal-*.md
 /MORNING.md
 /STOP

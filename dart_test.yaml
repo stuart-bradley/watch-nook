@@ -1,0 +1,6 @@
+# Per-test timeout: the hang-guard. A widget test that mounts a live Drift
+# `.watch()` stream and spins `pumpAndSettle` will otherwise hang for its
+# 10-minute default (see the widget-test note in CLAUDE.md) — which is fatal to
+# a time-boxed autopilot step. Every real unit/widget test here runs in < 5s, so
+# 60s is a 10x safety margin that still turns a hang into a fast failure.
+timeout: 60s
