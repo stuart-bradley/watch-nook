@@ -129,13 +129,9 @@ class CachingMetadataRepository {
 
   Duration _ttl(MediaType type, String? showStatus) {
     if (type == MediaType.movie) return _endedTtl;
-    // Heuristic on the freeform backend status string (both providers phrase it
-    // differently). Anything not clearly ended/cancelled gets the airing TTL —
-    // the safe default (refresh more often rather than serve a stale schedule).
-    final s = (showStatus ?? '').toLowerCase();
-    final ended =
-        s.contains('ended') || s.contains('cancel') || s.contains('completed');
-    return ended ? _endedTtl : _airingTtl;
+    // Anything not clearly ended/cancelled gets the airing TTL — the safe
+    // default (refresh more often rather than serve a stale schedule).
+    return showHasEnded(showStatus) ? _endedTtl : _airingTtl;
   }
 
   bool _isStale(DateTime fetchedAt, Duration ttl) =>

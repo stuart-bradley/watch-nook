@@ -12,6 +12,21 @@ enum MediaKind {
   static MediaKind fromName(String name) => MediaKind.values.byName(name);
 }
 
+/// Whether a freeform backend `showStatus` means the show has finished airing.
+///
+/// A heuristic: both providers phrase it differently ("Ended", "Canceled",
+/// "Completed"). Anything unrecognised counts as **still airing** — the safe
+/// default in both consumers (refresh the cache more often; keep polling for
+/// upcoming episodes).
+///
+/// INVARIANT: this is the single reading of `showStatus`. Consumers are
+/// `CachingMetadataRepository._ttl` (ADR-7 TTL tier) and the upcoming filter
+/// (#21, which skips ended-`completed` shows). Add a phrasing here, not there.
+bool showHasEnded(String? showStatus) {
+  final s = (showStatus ?? '').toLowerCase();
+  return s.contains('ended') || s.contains('cancel') || s.contains('completed');
+}
+
 /// Requested image size. The interface is size-bucketed so callers are
 /// backend-agnostic: `TmdbSource` maps these to TMDB's `w185/w342/w500/original`
 /// buckets; `TvdbSource` returns full URLs and ignores the size (ADR-1/ADR-7).
