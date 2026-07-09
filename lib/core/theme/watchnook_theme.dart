@@ -1,3 +1,4 @@
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
@@ -21,6 +22,26 @@ class WatchnookTheme {
 
   static ThemeData get dark => _build(_honeyDark);
   static ThemeData get light => _build(_honeyLight);
+
+  /// The (light, dark) [ThemeData] for the current appearance, given the
+  /// platform's Material You schemes (#51). Dynamic colour is honoured only
+  /// when [useDynamicColor] is set AND both [lightDynamic]/[darkDynamic] are
+  /// supplied (Android 12+); otherwise the Honey brand scheme is used. Pure —
+  /// so the fallback is unit-testable without the platform channel. The
+  /// Watchnook type + component styling is kept; only the palette changes.
+  static (ThemeData light, ThemeData dark) resolve({
+    required bool useDynamicColor,
+    ColorScheme? lightDynamic,
+    ColorScheme? darkDynamic,
+  }) {
+    if (useDynamicColor && lightDynamic != null && darkDynamic != null) {
+      return (
+        _build(lightDynamic.harmonized()),
+        _build(darkDynamic.harmonized()),
+      );
+    }
+    return (light, dark);
+  }
 
   // ---- Colour schemes ----------------------------------------------------
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -56,7 +57,8 @@ Future<void> main() async {
 
 /// Root widget. The Honey theme in light and dark; which one shows is the
 /// user's Settings choice (#35), defaulting to dark — the delivered design
-/// intent. Material You / dynamic colour is a later polish issue.
+/// intent. Picking **Dynamic** (#51) sources the palette from the wallpaper on
+/// Android 12+ ([DynamicColorBuilder]), falling back to Honey elsewhere.
 ///
 /// Stateful only to own the [AppLifecycleListener] that snapshots the backup
 /// file on pause (#32) — Android Auto Backup uploads whatever is on disk when
@@ -97,13 +99,26 @@ class _WatchnookAppState extends ConsumerState<WatchnookApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: 'Watchnook',
-      debugShowCheckedModeBanner: false,
-      theme: WatchnookTheme.light,
-      darkTheme: WatchnookTheme.dark,
-      themeMode: ref.watch(appThemeModeProvider),
-      routerConfig: ref.watch(appRouterProvider),
+    final appearance = ref.watch(appThemeModeProvider);
+    // Material You (#51): DynamicColorBuilder yields the wallpaper schemes on
+    // Android 12+ (null elsewhere / in tests); resolve() honours them only when
+    // Dynamic is chosen and both are present, else falls back to Honey.
+    return DynamicColorBuilder(
+      builder: (lightDynamic, darkDynamic) {
+        final (light, dark) = WatchnookTheme.resolve(
+          useDynamicColor: appearance.usesDynamicColor,
+          lightDynamic: lightDynamic,
+          darkDynamic: darkDynamic,
+        );
+        return MaterialApp.router(
+          title: 'Watchnook',
+          debugShowCheckedModeBanner: false,
+          theme: light,
+          darkTheme: dark,
+          themeMode: appearance.themeMode,
+          routerConfig: ref.watch(appRouterProvider),
+        );
+      },
     );
   }
 }
