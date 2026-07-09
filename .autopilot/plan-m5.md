@@ -24,7 +24,7 @@ its diff shows the whole stack until a human merges m1→m5 in order.
   no migration ⇒ no migration review needed.)
 - **`LibraryDao`** — `getAll`, `getItem`, `watchEventsFor`, `insertItem`,
   `updateItem`, `deleteItem`, `markWatched`, `markManyWatched`, `logRewatch`,
-  `unwatch`, `recomputeDenormalized`, `transaction`. M4 adds exactly **two**
+  `unwatch`, `recomputeDenormalized`, `transaction`. M4 adds exactly **three**
   methods (§5.1); everything else composes.
 - **Import side (M3)** — `ImportArchive`, `parseArchive`, four importers,
   `Resolver`, `MergeApplier`, `ImportSummary`. M4 does **not** touch any of it.
@@ -69,8 +69,14 @@ its diff shows the whole stack until a human merges m1→m5 in order.
   field goes through typed `_str/_int/_bool/_date/_enum` helpers returning null
   on a type mismatch. A structurally-valid-but-malformed item is **dropped and
   counted** (AD-7 in M3's plan: a bad row costs a row, never the file); a
-  missing required field (`mediaType`, `title`, `trackStatus`,
-  `recordedSource`, `addedAt`) drops that item.
+  missing required field drops that item. The required set is **every NOT NULL,
+  no-default column** of `LibraryItems`: `mediaType`, `recordedSource`, `title`,
+  `trackStatus`, `addedAt`, **`updatedAt`**. `updatedAt` is `dateTime()` with no
+  default (tables.dart:123) — `LibraryItemsCompanion.insert` cannot be built
+  without it, so it is required, and the parser defaults `updatedAt ??= addedAt`
+  before dropping (a file that knows when a row was added but not when it was
+  touched is recoverable; one missing both is not). `watchedCount` and
+  `relinkFailed` have DB defaults and are never required.
 - **AD-6 — The backup path never blocks or aborts boot.** `restoreIfEmpty()` is
   awaited in `main()` **inside `try { } on Object { }`**, and its DB work is one
   transaction. A corrupt backup file that throws every launch would otherwise be
@@ -78,9 +84,23 @@ its diff shows the whole stack until a human merges m1→m5 in order.
 - **AD-7 — The manifest allowlist is the *only* thing standing between the cache
   and Google's servers.** Android Auto Backup's default includes `databases/`
   and `shared_prefs/` — i.e. our disposable cache tables **and** the metadata API
-  key. `<include>` makes both rule files allowlists (any `<include>` ⇒ only those
-  paths are backed up). This is a load-bearing invariant enforced by a test
-  (§5.3), not by a comment.
+  key. An `<include>` turns a rule file into an allowlist (any `<include>` ⇒ only
+  those paths are backed up). **Two traps make this sharper than it looks, and
+  both fail *open*:**
+  1. In `dataExtractionRules` (API 31+) `<include>`/`<exclude>` are **invalid at
+     the root** — they must nest inside `<cloud-backup>` and `<device-transfer>`.
+     A root-level `<include>` is a malformed file, the rules are **ignored**, and
+     the default (cache + API key → Google) applies.
+  2. **A missing section is a fully-enabled section.** Per the Android docs, "if
+     there are no rules for a particular backup mode, such as if the
+     `<device-transfer>` section is missing, that mode is fully enabled for all
+     content" — so shipping only `<cloud-backup>` leaks `shared_prefs/` on a
+     device-to-device transfer.
+
+  Therefore both sections are always written, and §5.3's test asserts their
+  **presence and exact contents positively**. Asserting the *absence* of
+  `domain="database"` is worthless here: the leaking file is the one that
+  mentions neither. Load-bearing invariant, enforced by a test, not a comment.
 
 ## 4. Data model — the canonical export JSON (`version: 1`)
 
@@ -117,7 +137,15 @@ Nulls are **omitted**, not written, to keep the file small; the reader treats
 absent and null identically. `season`/`episode` both absent ⇒ a movie watch
 (same convention as `WatchEvents` and `ImportWatch`).
 
-Restore rejects `version > 1` (returns 0 items restored, no wipe).
+**Every** `DateTime` is written `.toUtc().toIso8601String()` — `exportedAt`,
+`addedAt`, `updatedAt`, `ratedAt`, `watchedAt` alike. A local-vs-`Z` mismatch
+would silently shift a round-tripped date across a day boundary.
+
+**Version gate: restore accepts `version == 1` and nothing else.** Absent,
+non-integer, `0`, or `> 1` all reject — return `(0, 0, 0)` and **do not wipe**.
+"Reject" must not mean "treat as v1": `restoreIfEmpty()` only ever runs against
+an empty DB, but M5's manual restore (#35) will not have that guard, so the
+no-wipe-on-unknown-version rule is pinned here rather than discovered there.
 
 ## 5. Issue-by-issue
 
@@ -151,13 +179,18 @@ typedef RestoreSummary = ({int itemsRestored, int watchEventsRestored, int skipp
   not an accident.
 - `restore()`: `dao.transaction(() async { await dao.deleteAllUserData(); for each
   item { insertItem(...); insertWatchEvents(...); recomputeDenormalized(id); } })`.
-- **Two new `LibraryDao` methods** (`lib/core/database/library_dao.dart`), the
+- **Three new `LibraryDao` methods** (`lib/core/database/library_dao.dart`), the
   only DAO change in M4:
   - `Future<void> deleteAllUserData()` — `delete(watchEvents)` then
     `delete(libraryItems)`, in a transaction. (Cascade would cover events; being
     explicit means the method is correct even if `foreign_keys` is off.)
   - `Future<void> insertWatchEvent(WatchEventsCompanion entry)`.
-  Both get a doc comment naming the restore-vs-import invariant.
+  - `Future<bool> hasAnyItems()` — `LIMIT 1` existence probe, **not**
+    `getAll().isNotEmpty`. #32's guard runs inside `main()` before `runApp`; a
+    returning user with thousands of rows must not deserialize the whole library
+    on every cold boot to answer "is it empty?".
+
+  All three get a doc comment naming the restore-vs-import invariant.
 
 **Tests** `test/core/import_export/import_export_service_test.dart` (in-memory DB):
 1. **Round-trip identity (the acceptance):** seed 1 movie + 1 show with
@@ -172,10 +205,18 @@ typedef RestoreSummary = ({int itemsRestored, int watchEventsRestored, int skipp
 3. **Empty library** exports `items: []` and restores to empty.
 4. **Adversarial — structurally valid, wrongly typed:** `{"version":1,"items":[
    {"mediaType":42,"title":null,...}]}` → does **not** throw (`TypeError` trap,
-   AD-5), drops the item, `skippedItems == 1`, DB left empty.
+   AD-5), drops the item, `skippedItems == 1`, DB left empty. Cases, one per
+   required column: `mediaType` not a legal enum name; `title` null; `addedAt`
+   an int; **`updatedAt` absent → item still restores, with `updatedAt ==
+   addedAt`** (AD-5's fallback); **`addedAt` and `updatedAt` both absent → item
+   dropped**. Unknown extra keys are ignored, not fatal.
 5. **Adversarial — syntactically invalid** (`"not json"`) → throws
    `FormatException`; caller (#32) is the one that swallows it.
-6. **Adversarial — future version** (`"version": 99`) → no wipe, 0 restored.
+6. **Adversarial — the version gate never wipes.** Seed a non-empty library,
+   then `restore()` each of `{"version":99,...}`, `{"version":0,...}`,
+   `{"version":"1",...}`, and a doc with **no** `version` key at all — each
+   returns 0 restored **and leaves the seeded rows untouched**. (The wipe must
+   not precede the gate.)
 7. **Adversarial — a bad item mid-file does not lose the good ones**, and the
    pre-existing rows are gone exactly once (replace, not merge).
 8. `exportedAt` comes from an injected `Clock` (`withClock`), asserting no
@@ -199,7 +240,9 @@ thin `ImportExportService.exportLetterboxdCsv()` does the reads.
   no date (Letterboxd then files it as watched-undated rather than misdating it).
 - `Rating` = `rating / 2` on Letterboxd's 0.5–5.0 scale, one decimal (`4.5`),
   empty when unrated. This is the exact inverse of `LetterboxdImporter`'s
-  doubling — asserted by a round-trip test.
+  `(stars * 2).round()` — asserted by a round-trip test. **`rating == 0` emits
+  empty, not `0.0`:** Letterboxd's scale floors at 0.5, and the importer already
+  rejects `< 0.5`, so a zero here is "unrated" however it got into the column.
 - **Only `MediaType.movie`** rows (Letterboxd tracks films and nothing else).
   A movie with **no watch events and no rating is skipped** — it is a watchlist
   entry, and emitting it would tell Letterboxd the user had watched it. A movie
@@ -211,7 +254,8 @@ thin `ImportExportService.exportLetterboxdCsv()` does the reads.
 **Tests** `test/core/import_export/letterboxd_export_test.dart`:
 1. **Shape (the acceptance):** header is byte-exact; a movie with 1 watch + 2
    rewatches yields 3 rows with `Rewatch` = `No,Yes,Yes`.
-2. **Rating rescale:** `rating: 9` → `4.5`; `rating: null` → `` (empty).
+2. **Rating rescale:** `rating: 9` → `4.5`; `rating: 10` → `5.0`; `rating: 1` →
+   `0.5`; `rating: null` → `` (empty); **`rating: 0` → `` (empty), not `0.0`**.
 3. **TV shows never appear.**
 4. **Watchlist movie (no events, no rating) is omitted; rated-unwatched movie
    emits one dateless row.**
@@ -232,8 +276,9 @@ thin `ImportExportService.exportLetterboxdCsv()` does the reads.
 
 ```dart
 class AutoBackupService {
-  AutoBackupService({required this.service, required this.directory});
+  AutoBackupService({required this.service, required this.dao, required this.directory});
   final ImportExportService service;
+  final LibraryDao dao;
   final Directory directory;                  // injected ⇒ tests use a temp dir, not path_provider
 
   File get file => File('${directory.path}/watchnook_backup.json');
@@ -252,16 +297,35 @@ class AutoBackupService {
   (so a serialize failure never even creates the temp) → `tmp.writeAsString(json,
   flush: true)` → `tmp.rename(file.path)`. Same-directory rename is atomic on
   POSIX; that is the whole trick, and it is why the temp is a sibling.
-- `restoreIfEmpty()`: `if ((await dao.getAll()).isNotEmpty) return false;` then
-  `if (!file.existsSync()) return false;` then `service.restore(await
+  **Single-flight:** `onPause` is fire-and-forget, so a fast pause→resume→pause
+  can put two writers on the same temp name and let the second's rename publish
+  the first's half-written bytes. Hold the in-flight `Future<void>?` in a field
+  and return it instead of starting a second write. (One field, not a lock
+  library — the only concurrency here is "the same callback twice".)
+- `restoreIfEmpty()`: `if (await dao.hasAnyItems()) return false;` then
+  `if (!await file.exists()) return false;` then `service.restore(await
   file.readAsString())`. Guard on the **library**, not on a "first run" pref —
-  prefs are excluded from backup (§AD-7) so they cannot be trusted here.
+  prefs are excluded from backup (§AD-7) so they cannot be trusted here. Uses the
+  `LIMIT 1` probe, not `getAll()`: this runs on the cold-boot path (§5.1).
 
 **New file** `lib/core/import_export/export/export_providers.dart` — `@Riverpod
 (keepAlive: true)` `importExportService` (sync) + `autoBackupService`
 (`Future`, because `getApplicationSupportDirectory()` is async).
-`getApplicationSupportDirectory()` maps to Android's `getFilesDir()` = backup
-domain `file`, which is what the rule files allowlist.
+
+**The provider injects the `backup/` subdirectory, not the support dir:**
+
+```dart
+final support = await getApplicationSupportDirectory();
+return AutoBackupService(..., directory: Directory('${support.path}/backup'));
+```
+
+`getApplicationSupportDirectory()` returns Android's `getFilesDir()` (verified:
+`path_provider_android` returns `_applicationContext.filesDir`), which is backup
+domain `file` with an empty relative path. The allowlist below says
+`path="backup"`, so the service **must** write one level down. Get this wrong and
+the app backs up nothing at all, silently, forever — the write path and the
+allowlist path are one fact expressed in two files, and only the on-emulator
+check below can see them disagree.
 
 **Wiring — `lib/main.dart`:**
 - Boot (AD-6):
@@ -280,12 +344,45 @@ domain `file`, which is what the rule files allowlist.
   errors swallowed to a `debugPrint` (a failed backup must never crash the app).
   Disposed in `dispose()`.
 
-**New files** `android/app/src/main/res/xml/backup_rules.xml` (API ≤30,
-`fullBackupContent`) and `.../data_extraction_rules.xml` (API 31+): both
-allowlist **only** `domain="file" path="backup"`. `AndroidManifest.xml` gains
-`android:fullBackupContent="@xml/backup_rules"` and
+**New files** — two rule files, because the two Android backup eras read
+different schemas (AD-7). Written out in full here so the nesting cannot be
+guessed wrong at implementation time:
+
+`android/app/src/main/res/xml/backup_rules.xml` (API ≤ 30, `fullBackupContent`) —
+`<include>` lives at the root in *this* schema:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ALLOWLIST (ADR-3). Only the user-owned backup JSON leaves the device.
+     Omitting this file backs up databases/ (the disposable cache) and
+     shared_prefs/ (the metadata API key). Enforced by backup_rules_test.dart. -->
+<full-backup-content>
+    <include domain="file" path="backup"/>
+</full-backup-content>
+```
+
+`android/app/src/main/res/xml/data_extraction_rules.xml` (API 31+) — `<include>`
+is **invalid at the root**; and a *missing* section is a **fully enabled**
+section, so both `<cloud-backup>` and `<device-transfer>` must be present:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ALLOWLIST (ADR-3). BOTH sections are mandatory: an absent <device-transfer>
+     means "back up everything" on device-to-device transfer — i.e. the API key
+     in shared_prefs/. Enforced by backup_rules_test.dart. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="backup"/>
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="backup"/>
+    </device-transfer>
+</data-extraction-rules>
+```
+
+`AndroidManifest.xml` gains `android:fullBackupContent="@xml/backup_rules"` and
 `android:dataExtractionRules="@xml/data_extraction_rules"`, replacing the TODO
-comment with the invariant. Backup file therefore moves to
+comment with the invariant. Backup file therefore lives at
 `<filesDir>/backup/watchnook_backup.json`.
 
 **Tests** `test/core/import_export/auto_backup_service_test.dart`
@@ -300,6 +397,8 @@ comment with the invariant. Backup file therefore moves to
    is byte-identical afterwards and **no `.tmp` sibling is left behind**.
 5. **Atomic write — no partial file is ever visible:** after `snapshot()`, the
    directory contains exactly one file and it parses as JSON.
+5b. **Single-flight:** two `snapshot()` calls awaited together (no `await`
+   between them) produce one write and one valid file, no orphan `.tmp`.
 6. **Adversarial — a corrupt backup does not boot-loop:** `restoreIfEmpty()` over
    `"{{{"` and over a well-formed-but-wrongly-typed doc → throws at most a
    caught exception, DB left empty, and a *subsequent* `snapshot()` still works.
@@ -307,15 +406,32 @@ comment with the invariant. Backup file therefore moves to
    snapshot, wipe everything, restore → cache stays empty (it was never in the
    file) and no exception.
 
-**Tests** `test/android/backup_rules_test.dart` — pure XML string assertions, no
-Flutter binding:
-8. Both rule files exist, and each contains an `<include domain="file"
-   path="backup"`.
-9. **Adversarial:** neither file mentions `domain="database"` nor
-   `domain="sharedpref"` (the cache tables and the API key). This test is the
-   enforcement of AD-7.
-10. `AndroidManifest.xml` references both rule files and still has
+**Tests** `test/android/backup_rules_test.dart` — parse the XML (`XmlDocument`
+via the `xml` package, already transitive through `archive`; if it is not a
+direct dep, assert over `String` instead of adding one). **Assert positively —
+never by absence.** Both rule files fail *open*: the leaking file is the one that
+mentions neither `database` nor `sharedpref`, so "does not contain
+`domain=\"database\"`" passes on precisely the file we are trying to catch.
+
+8. `backup_rules.xml`: root is `<full-backup-content>`; its **only** child is
+   `<include domain="file" path="backup"/>`. Zero other `include`/`exclude`
+   elements anywhere in the document.
+9. `data_extraction_rules.xml`: root is `<data-extraction-rules>`; it has **both**
+   a `<cloud-backup>` and a `<device-transfer>` child (a missing one is a fully
+   enabled one); **each** contains exactly one `<include>`, with
+   `domain="file" path="backup"`, and nothing else. No `<include>`/`<exclude>` at
+   the root (invalid schema ⇒ rules ignored ⇒ default backup).
+10. **Adversarial, driven by the invariant rather than by string absence:**
+    collect every `include` element in both documents and assert the set of
+    `(domain, path)` pairs is exactly `{("file", "backup")}`. Adding a
+    `domain="database"` include, adding a third backup mode section, or dropping
+    `<device-transfer>` each fails a *different* one of tests 8–10.
+11. `AndroidManifest.xml` references both rule files by name and still has
     `allowBackup="true"`.
+12. The path in the allowlist (`backup`) equals the subdirectory
+    `export_providers.dart` appends to the support dir — assert the literal
+    `'backup'` from one shared `const` if practical, so the two files cannot
+    drift (§5.3, "one fact expressed in two files").
 
 **Real-artifact verification** (Definition of Done — `just check` cannot see any
 of this): `android-emulator` skill → install, import a fixture, background the
@@ -339,8 +455,12 @@ someone *adds* a leak, not merely pass today.
    `isNot(contains('apiKey'))`.
 2. **Frozen key set — top level.** `exportMap().keys` is exactly
    `{version, exportedAt, items}`.
-3. **Frozen key set — per item.** Every emitted item key ∈ the explicit
-   allowlist of the 17 user columns + `watches`; and every `watches` key ∈
+3. **Frozen key set — per item.** Every emitted item key ∈ an **explicitly
+   enumerated** allowlist (not a count) of the **18** exported user columns —
+   `LibraryItems`' 22 columns minus the 4 derived ones of AD-2 — plus `watches`:
+   `{mediaType, recordedSource, tmdbId, tvdbId, imdbId, title, year, posterPath,
+   genresCsv, runtimeMinutes, trackStatus, showStatus, episodeCountTotal, rating,
+   ratedAt, addedAt, updatedAt, relinkFailed, watches}`. Every `watches` key ∈
    `{season, episode, watchedAt, runtimeMinutes, isRewatch}`. A new cache-derived
    field cannot slip in unnoticed.
 4. **Derived columns are absent** (AD-2): no `id`, `watchedCount`,
@@ -369,13 +489,20 @@ Commit: `test(export): export-excludes-cache regression (#33)`.
 
 ## 7. Risks
 
+Every entry here fails **open** — the broken state looks exactly like the working
+one from inside `just check`. That is why each row names a test or a device check.
+
 | Risk | Mitigation |
 |------|-----------|
-| Allowlist typo silently backs up `databases/` (cache + no user gain) or `shared_prefs/` (**API key to Google**) | §5.3 tests 8–10 + `dumpsys backup` on the emulator |
-| `getApplicationSupportDirectory()` is not the `file` backup domain | Verified on-emulator by locating the real path before `bmgr backupnow` |
+| Malformed `dataExtractionRules` (root-level `<include>`) ⇒ rules **ignored** ⇒ `databases/` + `shared_prefs/` (**API key**) to Google | §5.3 tests 9–10 assert the `<cloud-backup>`/`<device-transfer>` nesting positively; `dumpsys backup` on device |
+| `<device-transfer>` omitted ⇒ that mode backs up **everything** | Test 9 asserts both sections exist. Absence-of-string assertions cannot catch this — hence test 10's positive `(domain, path)` set |
+| Write path (`filesDir/…`) and allowlist path (`filesDir/backup/`) drift ⇒ **nothing** is ever backed up, silently | Test 12 pins them to one `const`; the emulator round-trip is the only true check |
+| `getApplicationSupportDirectory()` is not the `file` backup domain | Verified: `path_provider_android` returns `_applicationContext.filesDir`. Re-confirmed on-emulator before `bmgr backupnow` |
 | A corrupt backup boot-loops the app | AD-6: `try { } on Object { }` around the awaited restore; §5.3 test 6 |
-| `restore()` wipes a live library because "empty" was mis-detected | The guard reads `LibraryItems`, never a pref; §5.3 test 2 |
+| `restore()` wipes a live library because "empty" was mis-detected | The guard reads `LibraryItems` via `hasAnyItems()`, never a pref; §5.3 test 2. The version gate rejects **before** the wipe (§5.1 test 6) |
+| `updatedAt` (NOT NULL, no default) missing from a hand-edited file ⇒ companion cannot be built | AD-5 required-set + `updatedAt ??= addedAt`; §5.1 test 4 |
 | Round-trip test passes by comparing `toJson()` to `toJson()` | Test 1 compares **column by column** against re-read DB rows |
+| Two `onPause` snapshots race on one temp name ⇒ half-written bytes published | Single-flight future in `AutoBackupService`; §5.3 test 5b |
 | Letterboxd rejects our CSV | Columns are exactly the issue's contract; verification is a human upload (flag in the triage comment as unverifiable by CI) |
 
 ## 8. Unresolved questions
@@ -388,3 +515,17 @@ Commit: `test(export): export-excludes-cache regression (#33)`.
    tighter allowlist path. Any objection?
 4. `_key` → `const onboardingSeenKey` (public) needed so `main()` can pre-set the
    flag on restore. OK?
+5. Does `test/android/backup_rules_test.dart` get to use the `xml` package? It is
+   transitive via `archive`, not a direct dep. Add it to `dev_dependencies`, or
+   assert over raw `String` and keep "no new deps" literally true?
+
+## 9. Review log
+
+Plan-reviewer pass 1 → **NEEDS CHANGES** (6 required). All six addressed above:
+root-level `<include>` in `dataExtractionRules` is invalid and a missing
+`<device-transfer>` fails open (§AD-7, §5.3, tests 8–12); `updatedAt` is NOT
+NULL with no default (§AD-5, §5.1 test 4); the frozen key set is 18 columns, not
+17 (§5.4 test 3); `hasAnyItems()` replaces `getAll().isNotEmpty` on the boot path
+(§5.1); absent/invalid `version` rejects without wiping (§4, §5.1 test 6); the
+`backup/` subdir is now explicit in the provider (§5.3). Its three suggestions
+were taken too: snapshot single-flight, `rating == 0` ⇒ unrated, UTC everywhere.
