@@ -4,6 +4,11 @@ import 'package:watch_nook/core/database/tables.dart';
 
 part 'library_dao.g.dart';
 
+/// One aired coordinate to bulk-mark, with the runtime snapshotted at mark-time
+/// (the stats invariant). A record, not a metadata model — the DAO stays
+/// unaware of the metadata layer.
+typedef EpisodeMark = ({int season, int episode, int? runtimeMinutes});
+
 /// Data access for [LibraryItems] (+ read of its [WatchEvents]) and the
 /// denormalized-progress maintenance the whole M2 grid relies on.
 ///
@@ -235,6 +240,48 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
       ),
     );
     await recomputeDenormalized(itemId);
+  });
+
+  /// **Bulk mark watched** (#20) — the whole set in **one** transaction, ending
+  /// in a **single** [recomputeDenormalized] rather than one per episode.
+  ///
+  /// Idempotent per coordinate, exactly like [markWatched]: an episode that
+  /// already carries a non-rewatch marker is skipped, so re-running a bulk mark
+  /// inserts nothing and marking a partly-watched season only fills the gaps.
+  /// Duplicate coordinates *within* [marks] collapse to one row — a malformed
+  /// season listing can't inflate `watchedCount`. Returns the rows inserted.
+  Future<int> markManyWatched(
+    int itemId,
+    Iterable<EpisodeMark> marks, {
+    DateTime? watchedAt,
+  }) => transaction(() async {
+    final existing =
+        await (select(watchEvents)..where(
+              (t) => t.libraryItemId.equals(itemId) & t.isRewatch.not(),
+            ))
+            .get();
+    final seen = {
+      for (final r in existing)
+        if (r.seasonNumber case final s?)
+          if (r.episodeNumber case final e?) (s, e),
+    };
+
+    final fresh = [
+      for (final m in marks)
+        if (seen.add((m.season, m.episode)))
+          WatchEventsCompanion.insert(
+            libraryItemId: itemId,
+            seasonNumber: Value(m.season),
+            episodeNumber: Value(m.episode),
+            watchedAt: Value(watchedAt),
+            runtimeMinutes: Value(m.runtimeMinutes),
+          ),
+    ];
+    if (fresh.isEmpty) return 0;
+
+    await batch((b) => b.insertAll(watchEvents, fresh));
+    await recomputeDenormalized(itemId);
+    return fresh.length;
   });
 
   /// **Log a rewatch** — *appends* an `isRewatch = true` row. The first watch's

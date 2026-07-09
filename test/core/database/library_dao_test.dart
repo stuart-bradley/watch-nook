@@ -2,6 +2,7 @@ import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
+import 'package:watch_nook/core/database/library_dao.dart';
 import 'package:watch_nook/core/database/tables.dart';
 
 void main() {
@@ -581,5 +582,116 @@ void main() {
       await db.libraryDao.insertItem(aShow(title: 'Manual B', tmdbId: null));
       expect(await db.libraryDao.getAll(), hasLength(3));
     });
+  });
+
+  group('markManyWatched (#20 — bulk is a batch of idempotent marks)', () {
+    Future<List<WatchEvent>> events(int itemId) =>
+        db.libraryDao.watchEventsFor(itemId);
+
+    EpisodeMark ep(int s, int e, [int? runtime]) =>
+        (season: s, episode: e, runtimeMinutes: runtime);
+
+    test(
+      're-running a bulk mark inserts nothing — no inflated count',
+      () async {
+        final id = await db.libraryDao.insertItem(aShow());
+        final marks = [ep(1, 1), ep(1, 2), ep(1, 3)];
+
+        expect(await db.libraryDao.markManyWatched(id, marks), 3);
+        expect(await db.libraryDao.markManyWatched(id, marks), 0);
+
+        expect(await events(id), hasLength(3));
+        final item = (await db.libraryDao.getItem(id))!;
+        expect(item.watchedCount, 3);
+        expect(item.lastWatchedSeason, 1);
+        expect(item.lastWatchedEpisode, 3);
+      },
+    );
+
+    test(
+      'a duplicate coordinate within one call collapses to one row',
+      () async {
+        final id = await db.libraryDao.insertItem(aShow());
+        expect(
+          await db.libraryDao.markManyWatched(id, [ep(1, 1), ep(1, 1)]),
+          1,
+        );
+        expect(await events(id), hasLength(1));
+        expect((await db.libraryDao.getItem(id))!.watchedCount, 1);
+      },
+    );
+
+    test('bulk over a partly-watched season fills only the gaps', () async {
+      final id = await db.libraryDao.insertItem(aShow());
+      await db.libraryDao.markWatched(
+        id,
+        season: 1,
+        episode: 2,
+        watchedAt: DateTime(2020),
+      );
+
+      expect(
+        await db.libraryDao.markManyWatched(id, [
+          ep(1, 1),
+          ep(1, 2),
+          ep(1, 3),
+        ], watchedAt: now),
+        2,
+      );
+
+      final rows = await events(id);
+      expect(rows, hasLength(3));
+      // The pre-existing marker keeps its own (earlier) watch date.
+      final e2 = rows.singleWhere((r) => r.episodeNumber == 2);
+      expect(e2.watchedAt, DateTime(2020));
+      expect((await db.libraryDao.getItem(id))!.watchedCount, 3);
+    });
+
+    test('a rewatch marker does not stand in for a watched marker', () async {
+      final id = await db.libraryDao.insertItem(aShow());
+      // A rewatch of an episode with no first-watch row: bulk must still insert
+      // the real marker, or `watchedCount` stays 0 forever.
+      await db.libraryDao.logRewatch(id, season: 1, episode: 1);
+
+      expect(await db.libraryDao.markManyWatched(id, [ep(1, 1)]), 1);
+      expect((await db.libraryDao.getItem(id))!.watchedCount, 1);
+    });
+
+    test(
+      'runtime is snapshotted per episode, and an empty bulk no-ops',
+      () async {
+        final id = await db.libraryDao.insertItem(aShow());
+        expect(await db.libraryDao.markManyWatched(id, const []), 0);
+        expect(await events(id), isEmpty);
+
+        await db.libraryDao.markManyWatched(id, [ep(1, 1, 57), ep(1, 2)]);
+        final rows = await events(id);
+        expect(
+          rows.singleWhere((r) => r.episodeNumber == 1).runtimeMinutes,
+          57,
+        );
+        expect(
+          rows.singleWhere((r) => r.episodeNumber == 2).runtimeMinutes,
+          isNull,
+        );
+      },
+    );
+
+    test(
+      'writes are scoped to their item — a sibling show is untouched',
+      () async {
+        final a = await db.libraryDao.insertItem(aShow());
+        final b = await db.libraryDao.insertItem(
+          aShow(title: 'Other', tmdbId: 777),
+        );
+        await db.libraryDao.markWatched(b, season: 1, episode: 1);
+
+        await db.libraryDao.markManyWatched(a, [ep(1, 1), ep(1, 2)]);
+
+        expect(await events(b), hasLength(1));
+        expect((await db.libraryDao.getItem(b))!.watchedCount, 1);
+        expect((await db.libraryDao.getItem(a))!.watchedCount, 2);
+      },
+    );
   });
 }

@@ -12,6 +12,7 @@ import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
+import 'package:watch_nook/features/detail/data/bulk_mark.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 
 /// Title detail (#18, US-6): backdrop, overview, the user's rating, the
@@ -78,6 +79,16 @@ class _Body extends ConsumerWidget {
                 const SizedBox(height: WatchnookSpacing.md),
                 _MovieWatchActions(item: item),
               ],
+              if (details?.seasons.any((s) => s.seasonNumber > 0) ?? false) ...[
+                const SizedBox(height: WatchnookSpacing.md),
+                _BulkButton(
+                  icon: Icons.done_all,
+                  label: 'Mark show watched',
+                  itemId: item.id,
+                  showSourceId: sourceId!,
+                  seasons: _seasonNumbers(details!),
+                ),
+              ],
               if (coldCache && async.hasError) ...[
                 const SizedBox(height: WatchnookSpacing.md),
                 const _Notice("Couldn't load details. You're offline."),
@@ -100,6 +111,7 @@ class _Body extends ConsumerWidget {
             itemId: item.id,
             showSourceId: sourceId!,
             season: season,
+            allSeasons: _seasonNumbers(details!),
           ),
         const _AttributionFooter(),
       ],
@@ -316,11 +328,16 @@ class _SeasonTile extends StatelessWidget {
     required this.itemId,
     required this.showSourceId,
     required this.season,
+    required this.allSeasons,
   });
 
   final int itemId;
   final int showSourceId;
   final SeasonInfo season;
+
+  /// Every season number of the show — "watch up to here" spans the seasons
+  /// before this one, so the episode rows need more than their own season.
+  final List<int> allSeasons;
 
   @override
   Widget build(BuildContext context) {
@@ -329,26 +346,125 @@ class _SeasonTile extends StatelessWidget {
       title: Text(name),
       subtitle: Text('${season.episodeCount} episodes'),
       children: [
+        // Specials (season 0) have no bulk action — they're excluded from
+        // aired-order progress, so the button would mark nothing.
+        if (season.seasonNumber > 0)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: WatchnookSpacing.screen,
+              ),
+              child: _BulkButton(
+                icon: Icons.playlist_add_check,
+                label: 'Mark season watched',
+                itemId: itemId,
+                showSourceId: showSourceId,
+                seasons: [season.seasonNumber],
+              ),
+            ),
+          ),
         _SeasonEpisodes(
           itemId: itemId,
           showSourceId: showSourceId,
           seasonNumber: season.seasonNumber,
+          allSeasons: allSeasons,
         ),
       ],
     );
   }
 }
 
+/// Fires a bulk mark (#20) and reports the outcome. `seasons`/`upTo` are handed
+/// straight to [bulkMarkWatched], which excludes specials and is idempotent.
+class _BulkButton extends ConsumerWidget {
+  const _BulkButton({
+    required this.icon,
+    required this.label,
+    required this.itemId,
+    required this.showSourceId,
+    required this.seasons,
+  });
+
+  final IconData icon;
+  final String label;
+  final int itemId;
+  final int showSourceId;
+  final List<int> seasons;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => OutlinedButton.icon(
+    icon: Icon(icon),
+    label: Text(label),
+    onPressed: () => unawaited(
+      _runBulk(
+        context,
+        ref,
+        itemId: itemId,
+        showSourceId: showSourceId,
+        seasons: seasons,
+      ),
+    ),
+  );
+}
+
+/// Runs a bulk mark and surfaces the result in a snack bar. The messenger is
+/// captured **before** the await, so no `BuildContext` crosses the async gap.
+/// A cold cache with no network throws out of [bulkMarkWatched] having written
+/// nothing — the user sees the offline notice, not a half-marked season.
+Future<void> _runBulk(
+  BuildContext context,
+  WidgetRef ref, {
+  required int itemId,
+  required int showSourceId,
+  required List<int> seasons,
+  (int, int)? upTo,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final marked = await bulkMarkWatched(
+      dao: ref.read(libraryDaoProvider),
+      repo: ref.read(metadataRepositoryProvider),
+      itemId: itemId,
+      showSourceId: showSourceId,
+      seasons: seasons,
+      upTo: upTo,
+    );
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          switch (marked) {
+            0 => 'Already watched.',
+            1 => 'Marked 1 episode watched.',
+            _ => 'Marked $marked episodes watched.',
+          },
+        ),
+      ),
+    );
+  } on Object {
+    messenger.showSnackBar(
+      const SnackBar(content: Text("Couldn't load episodes. You're offline.")),
+    );
+  }
+}
+
+/// Aired-order season numbers of a show's details, specials included (the bulk
+/// helpers do the season-0 filtering, in one place).
+List<int> _seasonNumbers(MediaDetails details) =>
+    details.seasons.map((s) => s.seasonNumber).toList();
+
 class _SeasonEpisodes extends ConsumerWidget {
   const _SeasonEpisodes({
     required this.itemId,
     required this.showSourceId,
     required this.seasonNumber,
+    required this.allSeasons,
   });
 
   final int itemId;
   final int showSourceId;
   final int seasonNumber;
+  final List<int> allSeasons;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -375,6 +491,20 @@ class _SeasonEpisodes extends ConsumerWidget {
               leading: Text('E${e.episodeNumber}'),
               title: Text(e.title ?? 'Episode ${e.episodeNumber}'),
               subtitle: e.airDate == null ? null : Text(_isoDate(e.airDate!)),
+              // "Watch up to here" (#20): everything aired-order ≤ this
+              // episode, across the earlier seasons too.
+              onLongPress: e.seasonNumber <= 0
+                  ? null
+                  : () => unawaited(
+                      _runBulk(
+                        context,
+                        ref,
+                        itemId: itemId,
+                        showSourceId: showSourceId,
+                        seasons: allSeasons,
+                        upTo: (e.seasonNumber, e.episodeNumber),
+                      ),
+                    ),
               trailing: _EpisodeToggle(
                 itemId: itemId,
                 episode: e,
