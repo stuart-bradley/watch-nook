@@ -9,6 +9,7 @@ import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
+import 'package:watch_nook/core/widgets/poster_placeholder.dart';
 import 'package:watch_nook/features/import/data/import_providers.dart';
 import 'package:watch_nook/features/import/domain/import_state.dart';
 
@@ -332,10 +333,17 @@ class _Poster extends ConsumerWidget {
 
   final String? path;
 
+  // Matches the search row: the subtitle already carries the type.
+  static const _placeholder = PosterPlaceholder(
+    width: _posterWidth,
+    height: _posterHeight,
+    radius: WatchnookRadii.thumb,
+  );
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final path = this.path;
-    if (path == null) return const _PosterPlaceholder();
+    if (path == null) return _placeholder;
     final url = ref
         .read(activeMetadataSourceProvider)
         .imageUrl(path, ImageSize.small);
@@ -347,8 +355,8 @@ class _Poster extends ConsumerWidget {
         width: _posterWidth,
         height: _posterHeight,
         fit: BoxFit.cover,
-        placeholder: (_, _) => const _PosterPlaceholder(),
-        errorWidget: (_, _, _) => const _PosterPlaceholder(),
+        placeholder: (_, _) => _placeholder,
+        errorWidget: (_, _, _) => _placeholder,
       ),
     );
   }
@@ -356,18 +364,3 @@ class _Poster extends ConsumerWidget {
 
 const double _posterWidth = 40;
 const double _posterHeight = _posterWidth / WatchnookTokens.posterAspect;
-
-class _PosterPlaceholder extends StatelessWidget {
-  const _PosterPlaceholder();
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: _posterWidth,
-    height: _posterHeight,
-    decoration: BoxDecoration(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      borderRadius: WatchnookRadii.thumb,
-    ),
-    child: const Icon(Icons.movie_outlined, size: 20),
-  );
-}

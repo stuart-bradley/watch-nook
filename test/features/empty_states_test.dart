@@ -38,8 +38,10 @@ class _ThrowingSource implements MetadataSource {
 /// The one screen that legitimately *does* call the source. It finds nothing.
 class _BarrenSource implements MetadataSource {
   @override
-  Future<List<MediaSearchResult>> search(String query, {MediaKind? kind}) async
-      => const [];
+  Future<List<MediaSearchResult>> search(
+    String query, {
+    MediaKind? kind,
+  }) async => const [];
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();

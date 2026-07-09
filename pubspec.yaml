@@ -54,6 +54,15 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
+  # Fonts are declared under `assets:`, NOT `fonts:` — this is deliberate.
+  # `google_fonts` resolves a bundled face by scanning the *asset manifest* for
+  # a file whose name ends with `<Family>-<Variant>.ttf`; it never reads the
+  # `fonts:` section. `main()` sets `allowRuntimeFetching = false`, so a face
+  # that is missing here throws inside the loader, gets swallowed, and the app
+  # silently renders Roboto. `test/theme_fonts_test.dart` pins the contract.
+  assets:
+    - assets/fonts/
+
 # Where patrol_cli installs the instrumented build (#29). Android only — this
 # app has no iOS target.
 patrol:

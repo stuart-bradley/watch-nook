@@ -8,9 +8,14 @@ import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 /// Manrope for everything else. Requires `google_fonts` in pubspec.
 ///
 /// Offline-first: `main()` sets `GoogleFonts.config.allowRuntimeFetching =
-/// false`, so if the families aren't bundled as assets the platform font
-/// renders — the app never makes a font network call (only the metadata API
-/// may touch the network). Follow-up: bundle Newsreader + Manrope `.ttf`.
+/// false`, so the app never makes a font network call (only the metadata API
+/// may touch the network). Both families are bundled under `assets/fonts/` —
+/// google_fonts finds a face by scanning the *asset manifest* for
+/// `<Family>-<Variant>.ttf`, so a face it names but that isn't bundled is
+/// swallowed by its loader and silently renders Roboto. Every style below
+/// resolves to the `regular` variant (the `copyWith(fontWeight:)` calls run
+/// *after* the variant is chosen from `base`, so they synthesize weight rather
+/// than pull a second face). `test/theme_fonts_test.dart` pins that contract.
 class WatchnookTheme {
   WatchnookTheme._();
 

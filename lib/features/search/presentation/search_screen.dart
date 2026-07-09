@@ -11,6 +11,7 @@ import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
+import 'package:watch_nook/core/widgets/poster_placeholder.dart';
 import 'package:watch_nook/features/search/data/search_providers.dart';
 
 /// Debounce before a keystroke fires a network search (#16).
@@ -166,10 +167,17 @@ class _Poster extends ConsumerWidget {
   static const double _width = 40;
   static const double _height = _width / WatchnookTokens.posterAspect;
 
+  // The row's subtitle already reads "2019 · Film", so no TypeBadge here.
+  static const _placeholder = PosterPlaceholder(
+    width: _width,
+    height: _height,
+    radius: WatchnookRadii.thumb,
+  );
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final path = this.path;
-    if (path == null) return const _PosterPlaceholder(_width, _height);
+    if (path == null) return _placeholder;
     final url = ref
         .read(activeMetadataSourceProvider)
         .imageUrl(path, ImageSize.small);
@@ -181,30 +189,9 @@ class _Poster extends ConsumerWidget {
         width: _width,
         height: _height,
         fit: BoxFit.cover,
-        placeholder: (_, _) => const _PosterPlaceholder(_width, _height),
-        errorWidget: (_, _, _) => const _PosterPlaceholder(_width, _height),
+        placeholder: (_, _) => _placeholder,
+        errorWidget: (_, _, _) => _placeholder,
       ),
-    );
-  }
-}
-
-class _PosterPlaceholder extends StatelessWidget {
-  const _PosterPlaceholder(this.width, this.height);
-
-  final double width;
-  final double height;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: WatchnookRadii.thumb,
-      ),
-      child: Icon(Icons.movie_outlined, color: scheme.onSurfaceVariant),
     );
   }
 }

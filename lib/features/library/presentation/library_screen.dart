@@ -12,6 +12,7 @@ import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
+import 'package:watch_nook/core/widgets/poster_placeholder.dart';
 
 /// The library grid filter — status and/or type, either null for "all". A
 /// record so the family key has value equality (same filter reuses the stream).
@@ -243,7 +244,10 @@ class _Card extends ConsumerWidget {
           Expanded(
             child: ClipRRect(
               borderRadius: WatchnookRadii.poster,
-              child: _Poster(path: item.posterPath),
+              child: _Poster(
+                path: item.posterPath,
+                mediaType: item.mediaType,
+              ),
             ),
           ),
           const SizedBox(height: WatchnookSpacing.sm),
@@ -272,14 +276,20 @@ class _Card extends ConsumerWidget {
 /// active source for its URL, so the grid renders with no source provider in
 /// tests.
 class _Poster extends ConsumerWidget {
-  const _Poster({required this.path});
+  const _Poster({required this.path, required this.mediaType});
 
   final String? path;
+  final MediaType mediaType;
+
+  /// The grid card is the one place the type isn't already spelled out in a
+  /// subtitle, so the placeholder carries a [TypeBadge].
+  String get _tag => mediaType == MediaType.movie ? 'Film' : 'TV';
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final path = this.path;
-    if (path == null) return const _PosterPlaceholder();
+    final placeholder = PosterPlaceholder(tag: _tag);
+    if (path == null) return placeholder;
     final url = ref
         .read(activeMetadataSourceProvider)
         .imageUrl(path, ImageSize.medium);
@@ -288,23 +298,8 @@ class _Poster extends ConsumerWidget {
       cacheManager: PosterCacheManager.instance,
       fit: BoxFit.cover,
       width: double.infinity,
-      placeholder: (_, _) => const _PosterPlaceholder(),
-      errorWidget: (_, _, _) => const _PosterPlaceholder(),
-    );
-  }
-}
-
-class _PosterPlaceholder extends StatelessWidget {
-  const _PosterPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(color: scheme.surfaceContainerHighest),
-      child: Center(
-        child: Icon(Icons.movie_outlined, color: scheme.onSurfaceVariant),
-      ),
+      placeholder: (_, _) => placeholder,
+      errorWidget: (_, _, _) => placeholder,
     );
   }
 }
