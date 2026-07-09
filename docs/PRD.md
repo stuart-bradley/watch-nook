@@ -6,7 +6,7 @@ TV Time shuts down **2026-07-15**, stranding people who track TV/movies. The bes
 
 Feasibility (researched, primary sources): a shared, app-embedded metadata key is viable because **TMDB rate-limits per-IP, not per-key** — one key serves all installs without a proxy. TMDB's free tier is **non-commercial**; **TheTVDB v4** is free even commercially **under $50k/yr** (attribution only, no per-user PINs) but is approval-gated. So the app is **provider-agnostic** and can flip backend via config. Only social (dropped) and "where to watch" streaming data (no free/keyless source — deferred) would require a server.
 
-Primary user: the developer, for himself. **No revenue is fine.** Default ship = free on TMDB; if the TheTVDB key lands, pay-once becomes possible with no recurring cost.
+Primary user: the developer, for himself. **No revenue is fine — and monetization is not a realistic goal here** (corrected 2026-07-09; the earlier "pay-once becomes possible with no recurring cost" was wrong — it priced the *licence* but ignored key *distribution*). The app ships **free on TMDB**, whose dev key permits free non-commercial use. Monetizing is licensing-gated and impractical for a minimal-revenue app: the TMDB dev key forbids **any** revenue — donations included (see ADR-8) — so it needs a TMDB commercial licence or TheTVDB; and TheTVDB's key is attributed **per-key/contract, not per-IP**, so it can't be safely embedded in a distributed client without a proxy (recurring cost). Treat Watchnook as a **free tool, not a product**.
 
 ## Product overview
 
@@ -21,7 +21,7 @@ Track existing + upcoming movies/TV; mark watched/unwatched (bulk); view metadat
 - **ADR-5 — Import pipeline.** `Importer` (`ImportArchive` → `List<ImportRecord>`; supports multi-file zips) → `Resolver` (id-match auto; else title+year search → confident single hit auto, ambiguous → confirmation queue) → **`MergeApplier`** (additive upsert by id-block; distinct from restore's replace path).
 - **ADR-6 — Export = backup format.** The JSON `AutoBackupService` writes on pause **is** the manual-export format (versioned, user-tables-only) + a Letterboxd-convention CSV for movies. Restore = replace path; import = MergeApplier.
 - **ADR-7 — Caching / SWR.** Return cache instantly; background-refetch if stale; TTL by volatility (ended ~30d, airing 6–24h, images 60d). Refresh only tracked shows on app-resume; skip dropped/ended-completed. `cached_network_image` for posters.
-- **ADR-8 — Monetization deferred + licensing-coupled.** v1 free, no IAP. Port monetization later only if on TheTVDB free-tier or TMDB commercial (IAP on a TMDB developer key violates its non-commercial terms).
+- **ADR-8 — Monetization deferred + licensing-coupled (likely never).** v1 free, no IAP, **no donations**. The TMDB API terms count **any** revenue — donations included — as commercial use, which the free dev key forbids. Monetizing at all needs a TMDB commercial licence or TheTVDB. TheTVDB's key is attributed **per-key/contract (not per-IP like TMDB)**, so a shipped client key is a liability the only real fix for is a proxy (recurring cost) — it doesn't pencil out at minimal revenue. If ever revisited: TMDB commercial (key stays embedded, per-IP-safe), **not** TheTVDB. Attribution obligations (logo + exact notice) apply **even to the free build** — see the attribution invariant.
 
 ## Data model (Drift)
 

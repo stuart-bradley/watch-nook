@@ -57,8 +57,8 @@ Cross-file rules that aren't obvious locally — keep them in a comment at the s
 ### Metadata (provider-agnostic — ADR-1)
 - One `MetadataSource` interface; two impls (`TmdbSource`, `TvdbSource`), selected at runtime by `activeMetadataSourceProvider` from `RemoteConfigService`. Never call an HTTP client directly from UI/features — go through `MetadataSource`.
 - The API key is embedded/remote-config-delivered and **public by design** (per-IP rate limiting on TMDB means a shared key is fine). Keep rotation cheap (config swap, no release).
-- **Attribution is mandatory** and per-source (TMDB logo + "not endorsed by TMDB" notice / TheTVDB link). Show it on the detail screen.
-- **Licensing coupling:** TMDB's free developer key is **non-commercial only**. Do **not** add monetization (IAP) while on a TMDB developer key — it requires TheTVDB free-tier or a TMDB commercial key first.
+- **Attribution is mandatory** and per-source. TMDB's terms require **both** the TMDB **logo** *and* the **exact** notice: "This product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB." (Current app ships neither the logo nor the exact wording — compliance gap, must fix before public release. TheTVDB = linked credit.) Show it on the detail screen + settings.
+- **Licensing coupling:** TMDB's free developer key is **non-commercial only** — and per the TMDB API terms **any** revenue counts as commercial, **donations included**. So do **not** add monetization *or a donations link* while on a TMDB developer key; it needs a TMDB commercial licence or TheTVDB first. Note TheTVDB's key is per-key/contract-attributed (not per-IP), so it can't be safely embedded client-side without a proxy — for a minimal-revenue app, monetization is effectively out of scope (see PRD ADR-8). Keep it **free**.
 
 ### Database (Drift)
 - All access via DAOs; no raw SQL outside table definitions. Every schema change bumps `schemaVersion` + adds a `MigrationStrategy` step. In-memory DB (`NativeDatabase.memory()`) in tests.
