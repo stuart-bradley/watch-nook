@@ -10,6 +10,7 @@ import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
+import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/features/search/data/search_providers.dart';
 
 /// Debounce before a keystroke fires a network search (#16).
@@ -61,21 +62,24 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       ),
       body: results.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, _) => const _CenteredMessage(
+        error: (_, _) => const EmptyState(
           icon: Icons.cloud_off,
-          message: "Couldn't search. Check your connection and try again.",
+          headline: "Couldn't search. Check your connection and try again.",
         ),
         data: (items) {
           if (_query.trim().isEmpty) {
-            return const _CenteredMessage(
+            return const EmptyState(
               icon: Icons.search,
-              message: 'Search for a film or show to track.',
+              headline: 'Search for a film or show to track.',
             );
           }
           if (items.isEmpty) {
-            return const _CenteredMessage(
+            return EmptyState(
               icon: Icons.sentiment_dissatisfied,
-              message: 'No results.',
+              headline: 'No results',
+              body:
+                  'Nothing matched "${_query.trim()}". Try another spelling, '
+                  'or the original-language title.',
             );
           }
           return ListView.builder(
@@ -201,31 +205,6 @@ class _PosterPlaceholder extends StatelessWidget {
         borderRadius: WatchnookRadii.thumb,
       ),
       child: Icon(Icons.movie_outlined, color: scheme.onSurfaceVariant),
-    );
-  }
-}
-
-class _CenteredMessage extends StatelessWidget {
-  const _CenteredMessage({required this.icon, required this.message});
-
-  final IconData icon;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(WatchnookSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: scheme.onSurfaceVariant),
-            const SizedBox(height: WatchnookSpacing.md),
-            Text(message, textAlign: TextAlign.center),
-          ],
-        ),
-      ),
     );
   }
 }

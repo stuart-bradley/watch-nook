@@ -93,10 +93,7 @@ void main() {
   testWidgets('the empty library shows a prompt, not a crash', (tester) async {
     await tester.pumpWidget(harness(const []));
     await tester.pumpAndSettle();
-    expect(
-      find.text('Nothing here yet. Search to add a title.'),
-      findsOneWidget,
-    );
+    expect(find.text('Your library is empty'), findsOneWidget);
   });
 
   testWidgets('the type filter narrows the grid stream', (tester) async {

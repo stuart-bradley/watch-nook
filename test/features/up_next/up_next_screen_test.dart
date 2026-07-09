@@ -32,12 +32,21 @@ void main() {
     ),
   );
 
+  /// `trackedShowsProvider` is stubbed alongside the upcoming fetch: the empty
+  /// state reads it to tell "you track no shows" from "quiet week", and the
+  /// real one is a live Drift `.watch()` that never quiesces under fake async.
   Future<void> pumpWith(
     WidgetTester tester,
-    Future<List<UpcomingEntry>> Function(Ref) upcoming,
-  ) => tester.pumpWidget(
+    Future<List<UpcomingEntry>> Function(Ref) upcoming, {
+    List<TrackedShow> tracked = const [
+      (sourceId: 1, itemId: 1, title: 'Severance'),
+    ],
+  }) => tester.pumpWidget(
     ProviderScope(
-      overrides: [upcomingThisWeekProvider.overrideWith(upcoming)],
+      overrides: [
+        upcomingThisWeekProvider.overrideWith(upcoming),
+        trackedShowsProvider.overrideWith((ref) => Stream.value(tracked)),
+      ],
       child: const MaterialApp(home: Scaffold(body: UpNextScreen())),
     ),
   );
@@ -72,8 +81,18 @@ void main() {
     await pumpWith(tester, (ref) async => const []);
     await tester.pumpAndSettle();
 
-    expect(find.text('No episodes for your shows this week.'), findsOneWidget);
+    expect(find.text('Nothing airing this week'), findsOneWidget);
     expect(find.byType(ListTile), findsNothing);
+  });
+
+  // Same empty list, different cause: a user tracking nothing needs different
+  // advice from a user having a quiet week (#35).
+  testWidgets('no tracked shows → a different empty state', (tester) async {
+    await pumpWith(tester, (ref) async => const [], tracked: const []);
+    await tester.pumpAndSettle();
+
+    expect(find.text('No shows tracked yet'), findsOneWidget);
+    expect(find.text('Nothing airing this week'), findsNothing);
   });
 
   testWidgets('a failed (offline) fetch renders a retryable error state', (

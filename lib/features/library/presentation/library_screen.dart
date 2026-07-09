@@ -11,6 +11,7 @@ import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
+import 'package:watch_nook/core/widgets/empty_state.dart';
 
 /// The library grid filter — status and/or type, either null for "all". A
 /// record so the family key has value equality (same filter reuses the stream).
@@ -83,17 +84,54 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         Expanded(
           child: items.when(
             loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => const _Centered(
+            error: (e, _) => const EmptyState(
               icon: Icons.error_outline,
-              message: "Couldn't load your library.",
+              headline: "Couldn't load your library.",
             ),
             data: (rows) => rows.isEmpty
-                ? const _Centered(
-                    icon: Icons.video_library_outlined,
-                    message: 'Nothing here yet. Search to add a title.',
-                  )
+                ? _EmptyLibrary(filtered: _status != null || _type != null)
                 : _Grid(rows: rows),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// An empty grid means one of two very different things, and saying the wrong
+/// one is the bug this split exists to prevent: a user with 300 titles whose
+/// filter matched nothing must not be told their library is empty (#35, US-13).
+class _EmptyLibrary extends StatelessWidget {
+  const _EmptyLibrary({required this.filtered});
+
+  /// Whether a status/type chip is narrowing the grid.
+  final bool filtered;
+
+  @override
+  Widget build(BuildContext context) {
+    if (filtered) {
+      return const EmptyState(
+        icon: Icons.filter_alt_off_outlined,
+        headline: 'Nothing matches this filter',
+        body: 'Try another status or type.',
+      );
+    }
+    return EmptyState(
+      icon: Icons.video_library_outlined,
+      headline: 'Your library is empty',
+      body:
+          'Search for a film or show to track it, or import the history you '
+          'already have somewhere else.',
+      actions: [
+        FilledButton.icon(
+          onPressed: () => context.push('/search'),
+          icon: const Icon(Icons.search),
+          label: const Text('Search'),
+        ),
+        OutlinedButton.icon(
+          onPressed: () => context.push('/import'),
+          icon: const Icon(Icons.file_upload_outlined),
+          label: const Text('Import'),
         ),
       ],
     );
@@ -266,31 +304,6 @@ class _PosterPlaceholder extends StatelessWidget {
       decoration: BoxDecoration(color: scheme.surfaceContainerHighest),
       child: Center(
         child: Icon(Icons.movie_outlined, color: scheme.onSurfaceVariant),
-      ),
-    );
-  }
-}
-
-class _Centered extends StatelessWidget {
-  const _Centered({required this.icon, required this.message});
-
-  final IconData icon;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(WatchnookSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: scheme.onSurfaceVariant),
-            const SizedBox(height: WatchnookSpacing.md),
-            Text(message, textAlign: TextAlign.center),
-          ],
-        ),
       ),
     );
   }

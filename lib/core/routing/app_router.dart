@@ -7,6 +7,7 @@ import 'package:watch_nook/features/library/presentation/library_screen.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_screen.dart';
 import 'package:watch_nook/features/search/presentation/search_screen.dart';
+import 'package:watch_nook/features/settings/presentation/settings_screen.dart';
 import 'package:watch_nook/features/stats/presentation/stats_screen.dart';
 import 'package:watch_nook/features/up_next/presentation/up_next_screen.dart';
 
@@ -14,8 +15,8 @@ part 'app_router.g.dart';
 
 /// App routes. The bottom-nav shell (AD-5) is the root — a `Library` tab (`/`,
 /// the grid #17), an `Up Next` tab (`/up-next`, #21) and a `Stats` tab
-/// (`/stats`, #34). Onboarding is the first-run gate; search is a pushed route
-/// reachable from the shell app bar.
+/// (`/stats`, #34). Onboarding is the first-run gate; search and settings are
+/// pushed routes reachable from the shell app bar.
 /// Exposed so a test can mount the router at a chosen location.
 final List<RouteBase> appRoutes = <RouteBase>[
   StatefulShellRoute.indexedStack(
@@ -53,6 +54,11 @@ final List<RouteBase> appRoutes = <RouteBase>[
     builder: (context, state) => const OnboardingScreen(),
   ),
   GoRoute(path: '/search', builder: (context, state) => const SearchScreen()),
+  GoRoute(
+    path: '/settings',
+    builder: (context, state) => const SettingsScreen(),
+  ),
+  // Reachable from Settings → Import, and from the first-run onboarding page.
   GoRoute(path: '/import', builder: (context, state) => const ImportScreen()),
   GoRoute(
     // `id` is a `LibraryItems` row id — detail is only reachable for a tracked
@@ -65,10 +71,10 @@ final List<RouteBase> appRoutes = <RouteBase>[
   ),
 ];
 
-/// The bottom-nav shell (AD-5): a shared app bar (title + Search action) over
-/// the active tab, with a [NavigationBar] switching between Library, Up Next
-/// and Stats. Navigation goes through `navigationShell` (go_router) — no direct
-/// `Navigator.push`.
+/// The bottom-nav shell (AD-5): a shared app bar (title + Search and Settings
+/// actions) over the active tab, with a [NavigationBar] switching between
+/// Library, Up Next and Stats. Navigation goes through `navigationShell`
+/// (go_router) — no direct `Navigator.push`.
 class _ShellScaffold extends StatelessWidget {
   const _ShellScaffold({required this.navigationShell});
 
@@ -85,12 +91,10 @@ class _ShellScaffold extends StatelessWidget {
             tooltip: 'Search',
             onPressed: () => context.push('/search'),
           ),
-          // ponytail: lives on the app bar because there is no Settings screen
-          // yet (#33, M4). Move it under Settings when that lands.
           IconButton(
-            icon: const Icon(Icons.file_upload_outlined),
-            tooltip: 'Import',
-            onPressed: () => context.push('/import'),
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => context.push('/settings'),
           ),
         ],
       ),

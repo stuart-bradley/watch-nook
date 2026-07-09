@@ -10,6 +10,7 @@ import 'package:watch_nook/core/routing/app_router.dart';
 import 'package:watch_nook/core/theme/watchnook_theme.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
 import 'package:watch_nook/features/settings/data/shared_preferences_provider.dart';
+import 'package:watch_nook/features/settings/data/theme_mode_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -53,8 +54,9 @@ Future<void> main() async {
   );
 }
 
-/// Root widget. Fixed Honey theme, dark-leaning by default (the delivered
-/// design intent); Material You / dynamic colour is a later polish issue.
+/// Root widget. The Honey theme in light and dark; which one shows is the
+/// user's Settings choice (#35), defaulting to dark — the delivered design
+/// intent. Material You / dynamic colour is a later polish issue.
 ///
 /// Stateful only to own the [AppLifecycleListener] that snapshots the backup
 /// file on pause (#32) — Android Auto Backup uploads whatever is on disk when
@@ -100,7 +102,7 @@ class _WatchnookAppState extends ConsumerState<WatchnookApp> {
       debugShowCheckedModeBanner: false,
       theme: WatchnookTheme.light,
       darkTheme: WatchnookTheme.dark,
-      themeMode: ThemeMode.dark,
+      themeMode: ref.watch(appThemeModeProvider),
       routerConfig: ref.watch(appRouterProvider),
     );
   }

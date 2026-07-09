@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
+import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 
 /// Up Next tab (#21, US-5): this week's episodes for tracked shows, grouped by
@@ -17,18 +18,52 @@ class UpNextScreen extends ConsumerWidget {
         .watch(upcomingThisWeekProvider)
         .when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, _) => _Centered(
+          error: (error, _) => EmptyState(
             icon: Icons.cloud_off,
-            message: "Couldn't load upcoming episodes.",
-            onRetry: () => ref.invalidate(upcomingThisWeekProvider),
+            headline: "Couldn't load upcoming episodes.",
+            body: "You're offline, or the metadata service is unreachable.",
+            actions: [
+              TextButton(
+                onPressed: () => ref.invalidate(upcomingThisWeekProvider),
+                child: const Text('Retry'),
+              ),
+            ],
           ),
           data: (entries) => entries.isEmpty
-              ? const _Centered(
-                  icon: Icons.upcoming_outlined,
-                  message: 'No episodes for your shows this week.',
-                )
+              ? const _NothingUpNext()
               : _DayList(byDay: groupByAirDay(entries)),
         );
+  }
+}
+
+/// An empty Up Next has two causes and they call for opposite advice: a user
+/// tracking no shows needs to add one, while a user tracking twelve just has a
+/// quiet week (#35, US-13).
+///
+/// `trackedShowsProvider` is the same stream `upcomingThisWeek` already
+/// awaited, so watching it here costs nothing. Until it resolves, the
+/// quiet-week copy is the safe default — telling someone with a full library
+/// that they track no shows is the worse of the two wrong answers.
+class _NothingUpNext extends ConsumerWidget {
+  const _NothingUpNext();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tracked = ref.watch(trackedShowsProvider).value;
+    if (tracked != null && tracked.isEmpty) {
+      return const EmptyState(
+        icon: Icons.tv_off_outlined,
+        headline: 'No shows tracked yet',
+        body:
+            'Add a TV show to your library and its next episodes turn up '
+            'here.',
+      );
+    }
+    return const EmptyState(
+      icon: Icons.upcoming_outlined,
+      headline: 'Nothing airing this week',
+      body: 'None of your tracked shows has an episode in the next seven days.',
+    );
   }
 }
 
@@ -81,31 +116,4 @@ class _EpisodeTile extends StatelessWidget {
     // `Navigator.push`.
     onTap: () => context.push('/title/${entry.itemId}'),
   );
-}
-
-class _Centered extends StatelessWidget {
-  const _Centered({required this.icon, required this.message, this.onRetry});
-
-  final IconData icon;
-  final String message;
-  final VoidCallback? onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 48, color: scheme.onSurfaceVariant),
-          const SizedBox(height: WatchnookSpacing.md),
-          Text(message),
-          if (onRetry != null) ...[
-            const SizedBox(height: WatchnookSpacing.md),
-            TextButton(onPressed: onRetry, child: const Text('Retry')),
-          ],
-        ],
-      ),
-    );
-  }
 }

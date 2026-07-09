@@ -82,6 +82,11 @@ void main() {
           upcomingThisWeekProvider.overrideWith(
             (ref) async => const <UpcomingEntry>[],
           ),
+          // Read by the Up Next empty state; the real one is a live Drift
+          // `.watch()` stream and would hang `pumpAndSettle` (CLAUDE.md).
+          trackedShowsProvider.overrideWith(
+            (ref) => Stream.value(const <TrackedShow>[]),
+          ),
           statsProvider.overrideWith(
             (ref) => Stream.value(StatsSnapshot.empty),
           ),
@@ -114,7 +119,7 @@ void main() {
 
     expect(location(), '/up-next');
     expect(selectedTab(tester), 1);
-    expect(find.text('No episodes for your shows this week.'), findsOneWidget);
+    expect(find.text('No shows tracked yet'), findsOneWidget);
 
     await tester.tap(find.text('Stats'));
     await tester.pumpAndSettle();
