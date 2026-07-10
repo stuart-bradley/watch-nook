@@ -12,34 +12,42 @@ String _fixture(String name) =>
 
 /// Routes TMDB endpoints to committed fixtures. An unmatched path returns a
 /// 404 with TMDB's error-body shape so the adversarial test can assert on it.
-MockClient _fixtureClient({http.Request? Function(http.Request)? spy}) =>
-    MockClient((request) async {
-      spy?.call(request);
-      final path = request.url.path;
-      if (path.endsWith('/search/tv')) {
-        return http.Response(_fixture('search_tv.json'), 200);
-      }
-      if (path.endsWith('/search/multi')) {
-        return http.Response(_fixture('search_multi.json'), 200);
-      }
-      if (path.contains('/tv/95396/season/')) {
-        return http.Response(_fixture('tv_season1.json'), 200);
-      }
-      if (path.endsWith('/tv/95396')) {
-        return http.Response(_fixture('tv_details.json'), 200);
-      }
-      if (path.endsWith('/movie/545611')) {
-        return http.Response(_fixture('movie_details.json'), 200);
-      }
-      if (path.contains('/find/')) {
-        return http.Response(_fixture('find_imdb.json'), 200);
-      }
-      return http.Response(
-        '{"success":false,"status_code":34,'
-        '"status_message":"The resource you requested could not be found."}',
-        404,
-      );
-    });
+MockClient _fixtureClient({
+  http.Request? Function(http.Request)? spy,
+}) => MockClient((request) async {
+  spy?.call(request);
+  final path = request.url.path;
+  if (path.endsWith('/search/tv')) {
+    return http.Response(_fixture('search_tv.json'), 200);
+  }
+  if (path.endsWith('/search/multi')) {
+    return http.Response(_fixture('search_multi.json'), 200);
+  }
+  if (path.contains('/tv/95396/season/')) {
+    return http.Response(_fixture('tv_season1.json'), 200);
+  }
+  if (path.endsWith('/tv/95396')) {
+    return http.Response(_fixture('tv_details.json'), 200);
+  }
+  if (path.endsWith('/movie/545611')) {
+    return http.Response(_fixture('movie_details.json'), 200);
+  }
+  if (path.contains('/find/')) {
+    final source = request.url.queryParameters['external_source'];
+    return http.Response(
+      _fixture(source == 'tvdb_id' ? 'find_tvdb.json' : 'find_imdb.json'),
+      200,
+      // The tvdb fixture carries a non-Latin-1 title (Shōgun); http.Response
+      // defaults to latin1 unless the charset says otherwise.
+      headers: {'content-type': 'application/json; charset=utf-8'},
+    );
+  }
+  return http.Response(
+    '{"success":false,"status_code":34,'
+    '"status_message":"The resource you requested could not be found."}',
+    404,
+  );
+});
 
 TmdbSource _source({
   http.Client? client,
@@ -147,6 +155,42 @@ void main() {
       expect(r!.kind, MediaKind.tv);
       expect(r.tmdbId, 95396);
       expect(r.imdbId, 'tt11280740');
+    });
+
+    test(
+      'maps a TVDB id via /find and stamps the tvdbId, not imdbId',
+      () async {
+        // #7: TV Time shows carry only a TVDB id. This is the query that stops
+        // them falling to fuzzy title search under the TMDB backend.
+        final r = await _source().resolveByExternalId(
+          '392573',
+          kind: ExternalIdKind.tvdb,
+        );
+
+        expect(r, isNotNull);
+        expect(r!.kind, MediaKind.tv);
+        expect(r.tmdbId, 202555);
+        expect(r.tvdbId, 392573);
+        expect(r.imdbId, isNull, reason: 'the queried id was a TVDB id');
+        expect(r.originCountry, ['US', 'JP']);
+      },
+    );
+
+    test('sends the right external_source for each id kind', () async {
+      final sources = <String?>[];
+      final client = _fixtureClient(
+        spy: (req) {
+          if (req.url.path.contains('/find/')) {
+            sources.add(req.url.queryParameters['external_source']);
+          }
+          return null;
+        },
+      );
+      final source = _source(client: client);
+      await source.resolveByExternalId('tt11280740');
+      await source.resolveByExternalId('392573', kind: ExternalIdKind.tvdb);
+
+      expect(sources, ['imdb_id', 'tvdb_id']);
     });
   });
 

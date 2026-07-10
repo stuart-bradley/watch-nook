@@ -76,6 +76,7 @@ String normalizeTitle(String title) => title
 /// 1. `imdbId` → [MetadataSource.resolveByExternalId] (universal join key).
 /// 2. an id already in the active source's own namespace → auto, **no network
 ///    call at all**; the record's title/year carry through.
+/// 2b. a *foreign* id the backend can map — a TVDB id under TMDB → `/find`.
 /// 3. `search(title)` → confident iff **exactly one** candidate matches the
 ///    normalized title and its year is within a year. Anything else is
 ///    [Ambiguous] and a human decides.
@@ -113,6 +114,24 @@ class Resolver {
     };
     if (ownId != null) return Auto(record);
 
+    // Rung 2b — a *foreign* id the active backend can map deterministically.
+    // The load-bearing case: a TV Time show carries only a TheTVDB id, and the
+    // active backend is TMDB — map it via /find?external_source=tvdb_id instead
+    // of falling to fuzzy title search (which missed ~1 in 3 shows). A null
+    // answer isn't a failure; fall through to search.
+    final foreign = _foreignId(record);
+    if (foreign != null) {
+      try {
+        final hit = await source.resolveByExternalId(
+          foreign.$1,
+          kind: foreign.$2,
+        );
+        if (hit != null) return Auto(record, hit);
+      } on MetadataException catch (e) {
+        return Unresolved(record, e.toString());
+      }
+    }
+
     // Rung 3 — no ids at all (Letterboxd, TV Time's movie UUIDs).
     final List<MediaSearchResult> hits;
     try {
@@ -141,6 +160,18 @@ class Resolver {
     final got = candidate.year;
     return want == null || got == null || (want - got).abs() <= 1;
   }
+
+  /// A foreign id (and its namespace) the active backend can resolve, or null.
+  /// Only TMDB↔TVDB is bridgeable today: under TMDB a record's TVDB id maps via
+  /// `/find`. Under TVDB the TVDB id is the *own* id (rung 2), so nothing here.
+  (String, ExternalIdKind)? _foreignId(ImportRecord record) =>
+      switch (sourceKind) {
+        MetadataSourceKind.tmdb when record.tvdbId != null => (
+          record.tvdbId!.toString(),
+          ExternalIdKind.tvdb,
+        ),
+        _ => null,
+      };
 
   static MediaKind _kindOf(MediaType type) => switch (type) {
     MediaType.movie => MediaKind.movie,

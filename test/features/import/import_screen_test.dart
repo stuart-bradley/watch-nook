@@ -110,16 +110,16 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('an ambiguous title is confirmable, and the confirmed candidate '
-      'is what lands in the library', (tester) async {
+  testWidgets('the pre-selected top candidate is what lands by default', (
+    tester,
+  ) async {
     await pickFile(tester);
 
-    // One auto-match, one title in the queue with both candidates offered.
+    // One auto-match; one title in the queue with its top candidate (2021)
+    // pre-selected and both candidates offered.
+    expect(find.text('1 title matched automatically.'), findsOneWidget);
     expect(
-      find.text(
-        '1 title matched automatically. '
-        "Pick a match for the rest, or skip the ones you don't want.",
-      ),
+      find.text('Review 1 title — pick a match or skip.'),
       findsOneWidget,
     );
     expect(find.text('From your export'), findsOneWidget);
@@ -127,12 +127,11 @@ void main() {
     expect(find.text('1984 · Film'), findsOneWidget);
 
     // Nothing is written before the user confirms — the sharpest regression
-    // here is an applier that runs at resolve time.
+    // here is an applier that runs at resolve time. The button already counts
+    // the pre-selected Dune (auto 1 + chosen 1).
     expect(await db.libraryDao.getAll(), isEmpty);
-    expect(find.text('Import 1 title'), findsOneWidget);
+    expect(find.text('Import 2 titles'), findsOneWidget);
 
-    await tester.tap(find.text('2021 · Film'));
-    await tester.pumpAndSettle();
     await tester.tap(find.text('Import 2 titles'));
     await tester.pumpAndSettle();
 
@@ -143,10 +142,27 @@ void main() {
     final items = await db.libraryDao.getAll();
     expect(items.map((i) => i.title), containsAll(['Dune', 'The Thing']));
 
-    // The *chosen* candidate's id, not the 1984 one and not null.
+    // The pre-selected 2021 candidate, not the 1984 one and not null.
     final dune = items.firstWhere((i) => i.title == 'Dune');
     expect(dune.tmdbId, 438631);
     expect(dune.year, 2021);
+  });
+
+  testWidgets('picking a different candidate overrides the pre-selection', (
+    tester,
+  ) async {
+    await pickFile(tester);
+
+    // Switch Dune from the pre-selected 2021 to 1984, then import.
+    await tester.tap(find.text('1984 · Film'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import 2 titles'));
+    await tester.pumpAndSettle();
+
+    final items = await db.libraryDao.getAll();
+    final dune = items.firstWhere((i) => i.title == 'Dune');
+    expect(dune.tmdbId, 841, reason: 'the 1984 candidate now, not 2021');
+    expect(dune.year, 1984);
   });
 
   testWidgets('a skipped title is left out of the library entirely', (

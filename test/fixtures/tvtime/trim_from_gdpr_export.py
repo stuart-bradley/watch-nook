@@ -96,4 +96,16 @@ with zipfile.ZipFile(ZIP) as zf:
     episodes = [r for r in body if r[c["entity_type"]] == "episode" and r[c["series_name"]] in SHOWS][:15]
     write("tracking-prod-records.csv", header, movies + episodes)
 
+    # The authoritative per-episode watch log (tracking-prod-records-v2.csv):
+    # every real per-episode row (season+episode populated) for curated shows,
+    # specials included so the importer's is_special filter is exercised. This
+    # is the source the importer actually reads (#11) — the seen_episode_* files
+    # above are kept only to test the fallback path.
+    header, *body = read(zf, "tracking-prod-records-v2.csv")
+    c = {name: i for i, name in enumerate(header)}
+    v2 = [r for r in body
+          if r[c["series_name"]] in SHOWS
+          and r[c["season_number"]] and r[c["episode_number"]]]
+    write("tracking-prod-records-v2.csv", header, v2)
+
 print("done.")

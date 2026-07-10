@@ -86,16 +86,65 @@ void main() {
     expect(_byTitle(parsed, 'Chernobyl').year, isNull);
   });
 
-  test('seen_episode_latest is a delta, unioned onto seen_episode_source', () {
-    final episodes = parsed.records
-        .where((r) => r.mediaType == MediaType.tv)
-        .expand((r) => r.watches);
-    expect(episodes, hasLength(312), reason: '306 source + 6 latest, disjoint');
+  test(
+    'the v2 log is the authoritative episode history, not the seen delta',
+    () {
+      final episodes = parsed.records
+          .where((r) => r.mediaType == MediaType.tv)
+          .expand((r) => r.watches);
+      // The seen_episode_* pair alone imported ~312 (2.6% of the real history —
+      // #11). The v2 log carries the real thousands; this is the under-import
+      // regression guard.
+      expect(episodes.length, 1875, reason: 'every deduped v2 episode-watch');
 
-    // The delta's rows, and only the delta's, carry these coordinates.
-    final boys = _byTitle(parsed, 'The Boys').watches;
-    expect(boys.any((w) => w.season == 5 && w.episode == 7), isTrue);
-    expect(boys.every((w) => !w.isRewatch), isTrue);
+      // Complete per-show, aired-order history (deduped by season+episode).
+      expect(_byTitle(parsed, 'Shōgun').watches, hasLength(10));
+      expect(_byTitle(parsed, 'House of the Dragon').watches, hasLength(20));
+      expect(_byTitle(parsed, 'The Big Bang Theory').watches, hasLength(280));
+
+      final boys = _byTitle(parsed, 'The Boys').watches;
+      expect(boys, hasLength(40));
+      expect(boys.every((w) => !w.isRewatch), isTrue);
+    },
+  );
+
+  test('v2: aggregate roll-up rows and specials are ignored, not skipped', () {
+    // The real curated fixture has neither, so exercise both explicitly: a
+    // blank-coordinate roll-up (a per-show watch count) and a special must be
+    // dropped silently, and only the real episode row survives.
+    final parsed = TvTimeImporter.parse(
+      _archiveOf({
+        TvTimeImporter.followedFile:
+            'tv_show_name,tv_show_id,archived\nTest Show,123,0\n',
+        TvTimeImporter.trackingV2File:
+            'series_name,season_number,episode_number,is_special,created_at\n'
+            'Test Show,1,1,false,2020-01-01 00:00:00\n'
+            'Test Show,,,false,2020-01-01 00:00:00\n'
+            'Test Show,0,1,true,2020-01-01 00:00:00\n',
+      }),
+    );
+    final show = parsed.records.single;
+    expect(show.watches, hasLength(1));
+    expect(show.watches.single.season, 1);
+    expect(show.watches.single.episode, 1);
+    expect(parsed.skippedRows, 0, reason: 'ignored rows are not skips');
+  });
+
+  test('v2 absent → falls back to the seen_episode_* delta pair', () {
+    // Older exports predate v2; the fallback must still union the delta tables.
+    final parsed = TvTimeImporter.parse(
+      _archiveOf({
+        TvTimeImporter.followedFile:
+            'tv_show_name,tv_show_id,archived\nTest Show,123,0\n',
+        TvTimeImporter.seenSourceFile:
+            'tv_show_name,episode_season_number,episode_number,created_at\n'
+            'Test Show,1,1,2020-01-01 00:00:00\n',
+        TvTimeImporter.seenLatestFile:
+            'tv_show_name,episode_season_number,episode_number,created_at\n'
+            'Test Show,1,2,2020-02-01 00:00:00\n',
+      }),
+    );
+    expect(parsed.records.single.watches, hasLength(2));
   });
 
   test('a watched episode keeps its date', () {

@@ -14,20 +14,30 @@ import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 /// a usable id turns a 300-title import into 300 HTTP round-trips).
 
 class _FakeSource implements MetadataSource {
-  _FakeSource({this.byImdb, this.hits = const [], this.failWith});
+  _FakeSource({this.byImdb, this.byTvdb, this.hits = const [], this.failWith});
 
+  /// What `resolveByExternalId` returns for an IMDb / TVDB lookup respectively.
   final MediaSearchResult? byImdb;
+  final MediaSearchResult? byTvdb;
   final List<MediaSearchResult> hits;
   final MetadataException? failWith;
 
   int resolveCalls = 0;
   int searchCalls = 0;
+  ExternalIdKind? lastResolveKind;
 
   @override
-  Future<MediaSearchResult?> resolveByExternalId(String imdbId) async {
+  Future<MediaSearchResult?> resolveByExternalId(
+    String id, {
+    ExternalIdKind kind = ExternalIdKind.imdb,
+  }) async {
     resolveCalls++;
+    lastResolveKind = kind;
     if (failWith case final e?) throw e;
-    return byImdb;
+    return switch (kind) {
+      ExternalIdKind.imdb => byImdb,
+      ExternalIdKind.tvdb => byTvdb,
+    };
   }
 
   @override
@@ -116,14 +126,33 @@ void main() {
     });
 
     test(
-      'a tvdb id on the tmdb backend is useless and falls to search',
+      'a tvdb id on the tmdb backend maps via /find, not fuzzy search',
       () async {
-        final source = _FakeSource(hits: [_hit()]);
+        // The #7 fix: TV Time shows carry only a TVDB id. Under TMDB this used
+        // to fall to fuzzy title search (missed ~1 in 3). Now it maps
+        // deterministically through /find?external_source=tvdb_id.
+        final source = _FakeSource(byTvdb: _hit());
 
         final result = await resolverOn(source).resolve(_record(tvdbId: 73244));
 
         expect(result, isA<Auto>());
-        expect(source.searchCalls, 1);
+        expect((result as Auto).match?.tmdbId, 95396);
+        expect(source.resolveCalls, 1);
+        expect(source.lastResolveKind, ExternalIdKind.tvdb);
+        expect(source.searchCalls, 0, reason: 'the id resolved it — no search');
+      },
+    );
+
+    test(
+      'a tvdb id /find cannot map falls through to title search',
+      () async {
+        final source = _FakeSource(hits: [_hit()]); // byTvdb null → no map
+
+        final result = await resolverOn(source).resolve(_record(tvdbId: 999));
+
+        expect(result, isA<Auto>());
+        expect(source.resolveCalls, 1, reason: 'tried the id first');
+        expect(source.searchCalls, 1, reason: 'then fell through');
       },
     );
 

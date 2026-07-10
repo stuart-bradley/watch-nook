@@ -102,8 +102,14 @@ class TmdbSource implements MetadataSource {
       year: _year((isTv ? r['first_air_date'] : r['release_date']) as String?),
       posterPath: r['poster_path'] as String?,
       overview: r['overview'] as String?,
+      originCountry: _originCountry(r),
     );
   }
+
+  /// TV rows carry `origin_country` (a code array); movie rows don't, so this
+  /// is empty for films. Disambiguates same-titled shows in the import picker.
+  List<String> _originCountry(Map<String, dynamic> r) =>
+      ((r['origin_country'] as List?) ?? const []).whereType<String>().toList();
 
   MediaKind? _kindFromMediaType(String? mediaType) => switch (mediaType) {
     'movie' => MediaKind.movie,
@@ -199,16 +205,20 @@ class TmdbSource implements MetadataSource {
   }
 
   @override
-  Future<MediaSearchResult?> resolveByExternalId(String imdbId) async {
-    final json = await _getJson('/find/$imdbId', {
-      'external_source': 'imdb_id',
+  Future<MediaSearchResult?> resolveByExternalId(
+    String id, {
+    ExternalIdKind kind = ExternalIdKind.imdb,
+  }) async {
+    final json = await _getJson('/find/$id', {
+      'external_source': kind.tmdbSource,
     });
     final tv = (json['tv_results'] as List?) ?? const [];
     if (tv.isNotEmpty) {
       return _findResult(
         tv.first as Map<String, dynamic>,
         MediaKind.tv,
-        imdbId,
+        id,
+        kind,
       );
     }
     final movie = (json['movie_results'] as List?) ?? const [];
@@ -216,26 +226,33 @@ class TmdbSource implements MetadataSource {
       return _findResult(
         movie.first as Map<String, dynamic>,
         MediaKind.movie,
-        imdbId,
+        id,
+        kind,
       );
     }
     return null;
   }
 
+  /// Stamps the queried external id back onto the hit under the *right* field —
+  /// an IMDb lookup sets `imdbId`, a TVDB lookup sets `tvdbId` — so a TV Time
+  /// import keeps a stable link and never re-derives it as an IMDb id.
   MediaSearchResult _findResult(
     Map<String, dynamic> r,
     MediaKind kind,
-    String imdbId,
+    String externalId,
+    ExternalIdKind idKind,
   ) {
     final isTv = kind == MediaKind.tv;
     return MediaSearchResult(
       kind: kind,
       tmdbId: r['id'] as int?,
-      imdbId: imdbId,
+      imdbId: idKind == ExternalIdKind.imdb ? externalId : null,
+      tvdbId: idKind == ExternalIdKind.tvdb ? int.tryParse(externalId) : null,
       title: (isTv ? r['name'] : r['title']) as String? ?? '',
       year: _year((isTv ? r['first_air_date'] : r['release_date']) as String?),
       posterPath: r['poster_path'] as String?,
       overview: r['overview'] as String?,
+      originCountry: _originCountry(r),
     );
   }
 

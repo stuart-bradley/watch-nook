@@ -22,7 +22,14 @@ class TvTimeImporter {
   /// recomputed from the events we do have, so it is deliberately ignored.
   static const userDataFile = 'user_tv_show_data.csv';
 
-  /// The bulk of the watched-episode history.
+  /// The **authoritative, complete** per-episode watch log — one row per
+  /// watched episode (plus per-show aggregate roll-ups with blank coordinates,
+  /// which are ignored). This is the real history; [seenSourceFile] /
+  /// [seenLatestFile] are a tiny recent slice (using them alone imported ~2.6%
+  /// of watched episodes — #11), so they are only a fallback when v2 is absent.
+  static const trackingV2File = 'tracking-prod-records-v2.csv';
+
+  /// Fallback episode history (older exports without [trackingV2File]).
   static const seenSourceFile = 'seen_episode_source.csv';
 
   /// A **delta** on top of [seenSourceFile], not a replacement — the two are
@@ -74,30 +81,14 @@ class TvTimeImporter {
       }
     }
 
-    final watches = <String, Map<(int, int), ImportWatch>>{};
-    for (final file in const [seenSourceFile, seenLatestFile]) {
-      final parsed = _read(archive, file);
-      skipped += parsed.skipped;
-      for (final row in parsed.rows) {
-        final name = row['tv_show_name'] ?? '';
-        final season = int.tryParse(row['episode_season_number'] ?? '');
-        final episode = int.tryParse(row['episode_number'] ?? '');
-        if (season == null || episode == null || !shows.containsKey(name)) {
-          skipped++;
-          continue;
-        }
-        // `putIfAbsent` makes the union idempotent: an episode present in both
-        // tables keeps the older, source-of-truth timestamp.
-        watches.putIfAbsent(name, () => {}).putIfAbsent(
-          (season, episode),
-          () => ImportWatch(
-            season: season,
-            episode: episode,
-            watchedAt: _date(row['created_at']),
-          ),
-        );
-      }
-    }
+    // Prefer the complete v2 log; fall back to the seen_episode_* delta pair
+    // only when the export predates v2. Either way, orphan episode rows (a show
+    // not in [shows]) are skipped and counted.
+    final history = archive.has(trackingV2File)
+        ? _watchesFromV2(archive, shows)
+        : _watchesFromSeenTables(archive, shows);
+    skipped += history.skipped;
+    final watches = history.watches;
 
     final records = [
       for (final show in shows.entries)
@@ -115,6 +106,69 @@ class TvTimeImporter {
     records.addAll(movies);
 
     return (records: records, skippedRows: skipped);
+  }
+
+  /// Per-episode history from the authoritative v2 log. Rows with blank
+  /// coordinates are per-show aggregate roll-ups (a watch count, no episode)
+  /// and are ignored — not counted as skips. Specials (`is_special`) are
+  /// dropped:
+  /// TVDB and TMDB number them differently, so importing them would mark the
+  /// wrong episode, and they are not progress episodes anyway.
+  static ({Map<String, Map<(int, int), ImportWatch>> watches, int skipped})
+  _watchesFromV2(ImportArchive archive, Map<String, int> shows) {
+    final parsed = _read(archive, trackingV2File);
+    var skipped = parsed.skipped;
+    final watches = <String, Map<(int, int), ImportWatch>>{};
+    for (final row in parsed.rows) {
+      if (row['is_special'] == 'true') continue;
+      final name = row['series_name'] ?? '';
+      final season = int.tryParse(row['season_number'] ?? '');
+      final episode = int.tryParse(row['episode_number'] ?? '');
+      if (season == null || episode == null) continue; // aggregate roll-up
+      if (!shows.containsKey(name)) {
+        skipped++;
+        continue;
+      }
+      watches.putIfAbsent(name, () => {}).putIfAbsent(
+        (season, episode),
+        () => ImportWatch(
+          season: season,
+          episode: episode,
+          watchedAt: _date(row['created_at']),
+        ),
+      );
+    }
+    return (watches: watches, skipped: skipped);
+  }
+
+  /// Fallback for exports without [trackingV2File]: union the seen_episode_*
+  /// delta pair (idempotent, keeping the older source-of-truth timestamp).
+  static ({Map<String, Map<(int, int), ImportWatch>> watches, int skipped})
+  _watchesFromSeenTables(ImportArchive archive, Map<String, int> shows) {
+    var skipped = 0;
+    final watches = <String, Map<(int, int), ImportWatch>>{};
+    for (final file in const [seenSourceFile, seenLatestFile]) {
+      final parsed = _read(archive, file);
+      skipped += parsed.skipped;
+      for (final row in parsed.rows) {
+        final name = row['tv_show_name'] ?? '';
+        final season = int.tryParse(row['episode_season_number'] ?? '');
+        final episode = int.tryParse(row['episode_number'] ?? '');
+        if (season == null || episode == null || !shows.containsKey(name)) {
+          skipped++;
+          continue;
+        }
+        watches.putIfAbsent(name, () => {}).putIfAbsent(
+          (season, episode),
+          () => ImportWatch(
+            season: season,
+            episode: episode,
+            watchedAt: _date(row['created_at']),
+          ),
+        );
+      }
+    }
+    return (watches: watches, skipped: skipped);
   }
 
   /// Movies live in `tracking-prod-records.csv`, one row per *event*: a

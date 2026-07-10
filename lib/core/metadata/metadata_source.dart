@@ -11,8 +11,8 @@ import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 /// All ids passed in ([movieDetails]/[showDetails]/[seasonEpisodes]/
 /// [upcomingForTracked]) are **this source's own** ids (TMDB id when TMDB is
 /// active, TVDB id when TVDB is active) — matching the row's `recordedSource`.
-/// [resolveByExternalId] is the exception: it takes the universal IMDb id and
-/// is how a backend switch relinks a title to the new source (ADR-4).
+/// [resolveByExternalId] is the exception: it takes an external id (IMDb, or a
+/// TVDB id from a TV Time import) and maps it to this source (ADR-4).
 abstract interface class MetadataSource {
   /// Full-text search for titles. [kind] narrows to movies or shows; null
   /// searches both.
@@ -33,9 +33,14 @@ abstract interface class MetadataSource {
   /// of the "upcoming" screen. Ids are this source's own show ids.
   Future<List<UpcomingEpisode>> upcomingForTracked(List<int> showSourceIds);
 
-  /// Relinks a title to this source by its IMDb id — the universal join key for
-  /// a backend switch (ADR-4). Returns null when the source can't match it.
-  Future<MediaSearchResult?> resolveByExternalId(String imdbId);
+  /// Relinks a title to this source by an external id. [kind] selects the id
+  /// namespace: IMDb (the universal join key for a backend switch, ADR-4) or
+  /// TVDB (a TV Time export id, mapped to a TMDB title so it need not fall to
+  /// fuzzy title search). Returns null when the source can't match it.
+  Future<MediaSearchResult?> resolveByExternalId(
+    String id, {
+    ExternalIdKind kind = ExternalIdKind.imdb,
+  });
 
   /// Builds a full image URL from a backend-relative [path]. TMDB maps [size]
   /// to its width buckets; TVDB returns full URLs and ignores [size].

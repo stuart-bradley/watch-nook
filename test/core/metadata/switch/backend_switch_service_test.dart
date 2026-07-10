@@ -26,9 +26,12 @@ class _FakeTvdb implements MetadataSource {
   final bool throwOnResolve;
 
   @override
-  Future<MediaSearchResult?> resolveByExternalId(String imdbId) async {
+  Future<MediaSearchResult?> resolveByExternalId(
+    String id, {
+    ExternalIdKind kind = ExternalIdKind.imdb,
+  }) async {
     if (throwOnResolve) throw Exception('network down');
-    return resolve[imdbId];
+    return resolve[id];
   }
 
   @override
