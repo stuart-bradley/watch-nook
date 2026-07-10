@@ -31,12 +31,10 @@ void main() {
           libraryGridProvider.overrideWith(
             (ref, filter) => Stream.value(const <LibraryItem>[]),
           ),
-          trackedShowsProvider.overrideWith(
-            (ref) => Stream.value(const <TrackedShow>[]),
+          libraryItemsProvider.overrideWith(
+            (ref) => Stream.value(const <LibraryItem>[]),
           ),
-          upcomingThisWeekProvider.overrideWith(
-            (ref) async => const <UpcomingEntry>[],
-          ),
+          watchQueueProvider.overrideWith((ref) async => const <QueueEntry>[]),
         ],
         child: const WatchnookApp(),
       ),

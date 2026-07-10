@@ -38,9 +38,12 @@ Future<int> bulkMarkWatched({
 
   final marks = <EpisodeMark>[];
   for (final season in wanted) {
-    // `.last` = the cache when it's fresh, the refetch when it isn't. It emits
-    // at least once or throws, so it never hangs on an empty stream.
-    final episodes = await repo.seasonEpisodes(showSourceId, season).last;
+    // `.first`, not `.last`: take the cache-first emission and don't block the
+    // write on a network revalidation. A whole-show mark walks every season, so
+    // waiting for each season's refetch made the mark appear to "do nothing
+    // until you reload" (the write was stuck behind N round-trips, or aborted
+    // offline). Cold seasons still fetch here; a warmed show marks instantly.
+    final episodes = await repo.seasonEpisodes(showSourceId, season).first;
     for (final e in episodes) {
       if (e.seasonNumber <= 0) continue; // a special listed under a real season
       if (upTo != null &&

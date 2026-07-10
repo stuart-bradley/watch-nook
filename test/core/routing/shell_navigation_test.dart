@@ -79,13 +79,11 @@ void main() {
           libraryGridProvider.overrideWith(
             (ref, filter) => Stream.value([item]),
           ),
-          upcomingThisWeekProvider.overrideWith(
-            (ref) async => const <UpcomingEntry>[],
-          ),
+          watchQueueProvider.overrideWith((ref) async => const <QueueEntry>[]),
           // Read by the Up Next empty state; the real one is a live Drift
           // `.watch()` stream and would hang `pumpAndSettle` (CLAUDE.md).
-          trackedShowsProvider.overrideWith(
-            (ref) => Stream.value(const <TrackedShow>[]),
+          libraryItemsProvider.overrideWith(
+            (ref) => Stream.value(const <LibraryItem>[]),
           ),
           statsProvider.overrideWith(
             (ref) => Stream.value(StatsSnapshot.empty),
