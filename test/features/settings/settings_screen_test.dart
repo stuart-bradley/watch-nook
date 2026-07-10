@@ -1,14 +1,20 @@
+import 'package:drift/drift.dart' show Value;
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:watch_nook/core/database/app_database.dart';
+import 'package:watch_nook/core/database/database_provider.dart';
+import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/import_export/export/auto_backup_service.dart';
 import 'package:watch_nook/core/import_export/export/export_providers.dart';
 import 'package:watch_nook/core/import_export/export/import_export_service.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
 import 'package:watch_nook/features/settings/data/export_share.dart';
 import 'package:watch_nook/features/settings/data/shared_preferences_provider.dart';
 import 'package:watch_nook/features/settings/data/theme_mode_provider.dart';
@@ -52,6 +58,7 @@ class _FakeExportService implements ImportExportService {
 
 class _FakeBackupService implements AutoBackupService {
   int snapshots = 0;
+  int deletes = 0;
   Error? throwOnSnapshot;
 
   @override
@@ -59,6 +66,11 @@ class _FakeBackupService implements AutoBackupService {
     snapshots++;
     if (throwOnSnapshot case final error?) throw error;
   }
+
+  // Faked (no real File I/O) so the widget test's pumpAndSettle doesn't hang;
+  // the real delete is exercised in auto_backup_service_test.
+  @override
+  Future<void> deleteBackup() async => deletes++;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
@@ -258,6 +270,107 @@ void main() {
 
     expect(notice, findsOneWidget);
     expect(find.text('https://www.themoviedb.org/'), findsOneWidget);
+  });
+
+  // US-D1: one action erases everything, across all four surfaces a user's data
+  // can hide in, and returns the app to first-run. The load-bearing step is
+  // deleting the backup file — leave it and the wiped data re-restores.
+  testWidgets('Delete all data wipes every surface and resets first-run', (
+    tester,
+  ) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final dao = db.libraryDao;
+
+    // Seed every surface: a tracked item, a watch event, and cached metadata.
+    final at = DateTime(2026);
+    final id = await dao.insertItem(
+      LibraryItemsCompanion.insert(
+        mediaType: MediaType.tv,
+        recordedSource: MetadataSourceKind.tmdb,
+        title: 'Severance',
+        trackStatus: TrackStatus.watching,
+        addedAt: at,
+        updatedAt: at,
+        tmdbId: const Value(95396),
+      ),
+    );
+    await dao.markWatched(id, season: 1, episode: 1, watchedAt: at);
+    await db.mediaCacheDao.upsertMedia(
+      CachedMediaCompanion.insert(
+        source: MetadataSourceKind.tmdb,
+        mediaType: MediaType.tv,
+        sourceId: 95396,
+        payload: '{}',
+        fetchedAt: at,
+        title: 'Severance',
+      ),
+    );
+
+    final prefs = await prefsWith({onboardingSeenKey: true});
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          appDatabaseProvider.overrideWithValue(db),
+          autoBackupServiceProvider.overrideWith((ref) async => backup),
+          activeMetadataSourceProvider.overrideWithValue(_StubSource()),
+        ],
+        child: const MaterialApp(home: SettingsScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tapTile(tester, 'Delete all data');
+    await tester.tap(find.text('Delete everything'));
+    await tester.pumpAndSettle();
+
+    expect(await dao.getAll(), isEmpty, reason: 'library wiped');
+    expect(await db.select(db.watchEvents).get(), isEmpty, reason: 'history');
+    expect(await db.select(db.cachedMedia).get(), isEmpty, reason: 'cache');
+    expect(backup.deletes, 1, reason: 'the backup file is deleted too');
+    expect(
+      prefs.getBool(onboardingSeenKey),
+      isFalse,
+      reason: 'first-run reset',
+    );
+  });
+
+  testWidgets('Delete all data can be cancelled without wiping anything', (
+    tester,
+  ) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final dao = db.libraryDao;
+    await dao.insertItem(
+      LibraryItemsCompanion.insert(
+        mediaType: MediaType.tv,
+        recordedSource: MetadataSourceKind.tmdb,
+        title: 'Kept',
+        trackStatus: TrackStatus.watching,
+        addedAt: DateTime(2026),
+        updatedAt: DateTime(2026),
+        tmdbId: const Value(1),
+      ),
+    );
+    final prefs = await prefsWith({onboardingSeenKey: true});
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          appDatabaseProvider.overrideWithValue(db),
+          activeMetadataSourceProvider.overrideWithValue(_StubSource()),
+        ],
+        child: const MaterialApp(home: SettingsScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tapTile(tester, 'Delete all data');
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(await dao.getAll(), hasLength(1), reason: 'nothing wiped on cancel');
   });
 
   testWidgets('Dynamic (Material You) is offered and persists (#51)', (

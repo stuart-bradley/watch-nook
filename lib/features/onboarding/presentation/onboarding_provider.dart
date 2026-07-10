@@ -24,4 +24,13 @@ class OnboardingSeen extends _$OnboardingSeen {
     await prefs.setBool(onboardingSeenKey, true);
     state = true;
   }
+
+  /// Clears the flag → the app returns to first-run. Used by the GDPR
+  /// delete-all so a wipe feels like a fresh install; the router redirect
+  /// reacts and sends the user back to `/onboarding`.
+  Future<void> reset() async {
+    final prefs = ref.read(sharedPreferencesProvider);
+    await prefs.setBool(onboardingSeenKey, false);
+    state = false;
+  }
 }
