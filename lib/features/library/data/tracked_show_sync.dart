@@ -73,7 +73,15 @@ class TrackedShowSync {
     final sourceId = sourceIdOf(item, backend);
     if (sourceId == null) return null;
     try {
-      final d = await repo.showDetails(sourceId).first;
+      // `.last`, not `.first`: this is the *refresh* path — its whole job is to
+      // pull fresh episode counts / status / next-air. The SWR stream yields the
+      // cached value first, then (only if stale) revalidates and yields fresh;
+      // `.first` would take the stale cache and cancel before the refetch ever
+      // runs, silently writing the same stale values back. `.last` consumes the
+      // revalidated value (falling back to cache on a swallowed transient
+      // error, and rethrowing on a cold-cache failure — caught below). Contrast
+      // bulk_mark, which wants `.first` for latency.
+      final d = await repo.showDetails(sourceId).last;
       return (
         item.id,
         LibraryItemsCompanion(

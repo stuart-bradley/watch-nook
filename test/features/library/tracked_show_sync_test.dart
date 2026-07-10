@@ -1,9 +1,13 @@
+import 'dart:convert';
+
+import 'package:clock/clock.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/library/data/tracked_show_sync.dart';
 
@@ -22,6 +26,24 @@ class _FakeRepo implements CachingMetadataRepository {
     calls++;
     final d = byId[sourceId];
     return d == null ? Stream.error(StateError('offline')) : Stream.value(d);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
+/// A source that always returns [fresh], counting fetches — to prove the
+/// refresh path actually revalidates a stale cache rather than serving it.
+class _FakeSource implements MetadataSource {
+  _FakeSource(this.fresh);
+
+  final MediaDetails fresh;
+  int calls = 0;
+
+  @override
+  Future<MediaDetails> showDetails(int sourceId) async {
+    calls++;
+    return fresh;
   }
 
   @override
@@ -96,6 +118,49 @@ void main() {
     await syncWith(repo).refresh();
 
     expect(repo.calls, 0);
+  });
+
+  test('a stale cache is revalidated, not served back (uses .last)', () async {
+    // The bug this guards: `.first` on the SWR stream takes the cached value
+    // and cancels before the refetch runs, so the daily/manual refresh silently
+    // writes the stale count back. This drives a *real* repository over a stale
+    // cache and asserts the fresh value lands.
+    await seedShow(); // tmdbId 100, watching TV
+    await db.mediaCacheDao.upsertMedia(
+      CachedMediaCompanion.insert(
+        source: MetadataSourceKind.tmdb,
+        mediaType: MediaType.tv,
+        sourceId: 100,
+        payload: jsonEncode(
+          details(total: 10, status: 'Returning Series').toJson(),
+        ),
+        // Fetched 9 days ago — well past the 12h airing TTL, so stale.
+        fetchedAt: DateTime(2026, 7),
+        title: 'Show',
+        showStatus: const Value('Returning Series'),
+      ),
+    );
+    final source = _FakeSource(details(total: 19, status: 'Returning Series'));
+    final repo = CachingMetadataRepository(
+      source: source,
+      sourceKind: MetadataSourceKind.tmdb,
+      dao: db.mediaCacheDao,
+      clock: Clock.fixed(DateTime(2026, 7, 10, 12)),
+    );
+
+    await TrackedShowSync(
+      dao: db.libraryDao,
+      repo: repo,
+      backend: MetadataSourceKind.tmdb,
+    ).refresh();
+
+    expect(source.calls, 1, reason: 'a stale cache must be revalidated');
+    final item = (await db.libraryDao.getAll()).single;
+    expect(
+      item.episodeCountTotal,
+      19,
+      reason: 'the refresh must write the fresh count, not the stale cache',
+    );
   });
 
   group('shouldDailySync (launch throttle)', () {
