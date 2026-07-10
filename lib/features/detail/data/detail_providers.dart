@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/misc.dart' show StreamProviderFamily;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
+import 'package:watch_nook/core/database/library_item_ids.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
@@ -32,11 +33,9 @@ final StreamProviderFamily<Set<(int, int)>, int> watchedEpisodesProvider =
 /// The backend id to fetch this row's metadata with — **this row's own**
 /// `recordedSource` id, never the other backend's (the episode-identity
 /// invariant). Null for a row with no id for its source (offline add / import):
-/// the detail screen then renders the stored row alone.
-int? detailSourceId(LibraryItem item) => switch (item.recordedSource) {
-  MetadataSourceKind.tmdb => item.tmdbId,
-  MetadataSourceKind.tvdb => item.tvdbId,
-};
+/// the detail screen then renders the stored row alone. Delegates to the
+/// canonical [LibraryItemSourceId.sourceIdFor].
+int? detailSourceId(LibraryItem item) => item.sourceIdFor(item.recordedSource);
 
 /// Cache-first details for the detail screen (#18). Goes through
 /// `metadataRepositoryProvider` (SWR), so it emits the cached value instantly

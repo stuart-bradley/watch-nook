@@ -65,6 +65,26 @@ class _FakeSource implements MetadataSource {
         ),
       ];
     }
+    if (query == 'Solaris') {
+      // Two hits, no year to break the tie → ambiguous. The first is the
+      // pre-selected one, and carries an origin country to disambiguate.
+      return const [
+        MediaSearchResult(
+          kind: MediaKind.movie,
+          title: 'Solaris',
+          tmdbId: 593,
+          year: 1972,
+          originCountry: ['SU'],
+        ),
+        MediaSearchResult(
+          kind: MediaKind.movie,
+          title: 'Solaris',
+          tmdbId: 11004,
+          year: 2002,
+          originCountry: ['US'],
+        ),
+      ];
+    }
     return const [];
   }
 
@@ -180,6 +200,43 @@ void main() {
 
     final items = await db.libraryDao.getAll();
     expect(items.map((i) => i.title), ['The Thing']);
+  });
+
+  testWidgets('two ambiguous titles show the N-of-M counter and country', (
+    tester,
+  ) async {
+    // Both films come out year-less → both ambiguous, both pre-selected. This
+    // exercises the total>1 "Reviewed N of M" header and the candidate country
+    // line — neither of which the single-ambiguous-title fixture above reaches.
+    await tester.pumpWidget(
+      harness(
+        csv:
+            'Date,Name,Year,Letterboxd URI\n'
+            '2024-01-02,Dune,,https://letterboxd.com/film/dune/\n'
+            '2024-01-03,Solaris,,https://letterboxd.com/film/solaris/\n',
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose file'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Reviewed 2 of 2 — pick a match or skip.'),
+      findsOneWidget,
+    );
+    // The origin country renders in the Solaris 1972 candidate's subtitle.
+    expect(find.text('1972 · Film · SU'), findsOneWidget);
+
+    // Toggling the pre-selected candidate off drops the reviewed count. Scroll
+    // it into view first — the second card sits below the fold.
+    await tester.ensureVisible(find.text('1972 · Film · SU'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('1972 · Film · SU'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Reviewed 1 of 2 — pick a match or skip.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('an unrecognized file reports a message and writes nothing', (

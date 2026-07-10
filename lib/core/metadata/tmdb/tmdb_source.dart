@@ -143,6 +143,7 @@ class TmdbSource implements MetadataSource {
       'append_to_response': 'external_ids,next_episode_to_air',
     });
     final next = json['next_episode_to_air'] as Map<String, dynamic>?;
+    final last = json['last_episode_to_air'] as Map<String, dynamic>?;
     return MediaDetails(
       kind: MediaKind.tv,
       tmdbId: json['id'] as int?,
@@ -161,6 +162,7 @@ class TmdbSource implements MetadataSource {
       showStatus: json['status'] as String?,
       episodeCountTotal: json['number_of_episodes'] as int?,
       nextEpisode: next == null ? null : _episode(next),
+      lastEpisode: last == null ? null : _episode(last),
     );
   }
 

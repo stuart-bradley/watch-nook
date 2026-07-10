@@ -90,6 +90,33 @@ class CachingMetadataRepository {
     }
   }
 
+  /// Cache-**only** show details for many [sourceIds] in one query — no
+  /// network, no revalidation. The watch queue recomputes on every library
+  /// write, so it reads all its shows this way (one round-trip, decode-once)
+  /// instead of an N+1 of per-show `showDetails(...).first`. A cold title is
+  /// absent from the map (the tracked-show sync warms it, and the queue
+  /// recomputes when it has); a corrupt/legacy payload is skipped, not fatal.
+  Future<Map<int, MediaDetails>> cachedShowDetails(
+    Iterable<int> sourceIds,
+  ) async {
+    final rows = await _dao.getManyMedia(
+      _sourceKind,
+      MediaType.tv,
+      sourceIds.toList(),
+    );
+    final out = <int, MediaDetails>{};
+    for (final row in rows) {
+      try {
+        out[row.sourceId] = MediaDetails.fromJson(
+          jsonDecode(row.payload) as Map<String, dynamic>,
+        );
+      } on Object {
+        // Skip a corrupt/legacy payload; one bad row can't sink the queue.
+      }
+    }
+    return out;
+  }
+
   /// Cache-first aired-order episodes for one season (ADR-4).
   Stream<List<EpisodeInfo>> seasonEpisodes(
     int showSourceId,

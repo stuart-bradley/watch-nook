@@ -4,11 +4,10 @@ import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
+import 'package:watch_nook/core/database/library_item_ids.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
-import 'package:watch_nook/features/up_next/data/up_next_providers.dart'
-    show sourceIdOf;
 
 part 'tracked_show_sync.g.dart';
 
@@ -70,7 +69,7 @@ class TrackedShowSync {
   }
 
   Future<(int, LibraryItemsCompanion)?> _patchFor(LibraryItem item) async {
-    final sourceId = sourceIdOf(item, backend);
+    final sourceId = item.sourceIdFor(backend);
     if (sourceId == null) return null;
     try {
       // `.last`, not `.first`: this is the *refresh* path — its whole job is to
