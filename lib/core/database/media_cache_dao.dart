@@ -28,6 +28,24 @@ class MediaCacheDao extends DatabaseAccessor<AppDatabase>
           ))
           .getSingleOrNull();
 
+  /// The cached rows for many titles of one kind, in one query — so a consumer
+  /// reading N shows (the watch queue) does one round-trip, not N. Cold titles
+  /// are simply absent from the result; order is unspecified.
+  Future<List<CachedMediaData>> getManyMedia(
+    MetadataSourceKind source,
+    MediaType mediaType,
+    List<int> sourceIds,
+  ) {
+    if (sourceIds.isEmpty) return Future.value(const []);
+    return (select(cachedMedia)..where(
+          (t) =>
+              t.source.equalsValue(source) &
+              t.mediaType.equalsValue(mediaType) &
+              t.sourceId.isIn(sourceIds),
+        ))
+        .get();
+  }
+
   /// Upsert one details row (PK `source,mediaType,sourceId`) — a re-fetch of
   /// the same title replaces the previous cache in place.
   Future<void> upsertMedia(CachedMediaCompanion row) =>

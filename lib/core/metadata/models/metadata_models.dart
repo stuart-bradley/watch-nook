@@ -138,6 +138,7 @@ class MediaDetails {
     this.showStatus,
     this.episodeCountTotal,
     this.nextEpisode,
+    this.lastEpisode,
   });
 
   factory MediaDetails.fromJson(Map<String, dynamic> json) => MediaDetails(
@@ -160,6 +161,9 @@ class MediaDetails {
     nextEpisode: json['nextEpisode'] == null
         ? null
         : EpisodeInfo.fromJson(json['nextEpisode'] as Map<String, dynamic>),
+    lastEpisode: json['lastEpisode'] == null
+        ? null
+        : EpisodeInfo.fromJson(json['lastEpisode'] as Map<String, dynamic>),
   );
 
   final MediaKind kind;
@@ -191,6 +195,12 @@ class MediaDetails {
   /// The next episode to air, if the show has one scheduled.
   final EpisodeInfo? nextEpisode;
 
+  /// The most recently aired episode (TMDB `last_episode_to_air`) — the true
+  /// "has aired up to here" boundary. Unlike [nextEpisode] it stays populated
+  /// between seasons, so the watch queue can tell an aired next season from a
+  /// stubbed-but-unaired one (which has no scheduled [nextEpisode]).
+  final EpisodeInfo? lastEpisode;
+
   Map<String, dynamic> toJson() => {
     'kind': kind.name,
     'title': title,
@@ -207,6 +217,7 @@ class MediaDetails {
     'showStatus': showStatus,
     'episodeCountTotal': episodeCountTotal,
     'nextEpisode': nextEpisode?.toJson(),
+    'lastEpisode': lastEpisode?.toJson(),
   };
 }
 

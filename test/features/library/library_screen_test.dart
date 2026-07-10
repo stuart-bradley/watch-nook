@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:watch_nook/core/database/app_database.dart';
+import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
@@ -143,5 +144,82 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Dune'), findsOneWidget);
     expect(find.text('Severance'), findsNothing);
+  });
+
+  // The widget harness above overrides libraryGridProvider with a hand-mirrored
+  // copy of the status mapping. These drive the REAL provider over a real DAO,
+  // so a divergence in the derived Up-to-date refinement (e.g. dropping the
+  // `!isUpToDate` exclusion that keeps caught-up shows out of Watching) is
+  // actually caught.
+  group('libraryGridProvider (real provider, not the widget override)', () {
+    Future<void> seedCaughtUp({
+      required String title,
+      TrackStatus status = TrackStatus.watching,
+    }) => db.libraryDao.insertItem(
+      LibraryItemsCompanion.insert(
+        mediaType: MediaType.tv,
+        recordedSource: MetadataSourceKind.tmdb,
+        title: title,
+        trackStatus: status,
+        addedAt: now,
+        updatedAt: now,
+        watchedCount: const Value(10),
+        episodeCountTotal: const Value(10),
+        showStatus: const Value('Returning Series'),
+      ),
+    );
+
+    Future<List<LibraryItem>> grid(
+      ProviderContainer c,
+      LibraryStatusFilter status,
+    ) {
+      final key = (status: status, type: null);
+      addTearDown(c.listen(libraryGridProvider(key), (_, _) {}).close);
+      return c.read(libraryGridProvider(key).future);
+    }
+
+    ProviderContainer container() {
+      final c = ProviderContainer(
+        overrides: [appDatabaseProvider.overrideWithValue(db)],
+      );
+      addTearDown(c.dispose);
+      return c;
+    }
+
+    test('a caught-up returning show is Up-to-date, excluded from '
+        'Watching', () async {
+      await seedCaughtUp(title: 'Shogun'); // watching, all aired, returning
+      final c = container();
+
+      expect(
+        (await grid(c, LibraryStatusFilter.upToDate)).map((i) => i.title),
+        ['Shogun'],
+      );
+      expect(
+        await grid(c, LibraryStatusFilter.watching),
+        isEmpty,
+        reason: 'the !isUpToDate exclusion keeps it out of Watching',
+      );
+      expect(
+        (await grid(c, LibraryStatusFilter.all)).map((i) => i.title),
+        ['Shogun'],
+        reason: 'still counted under All',
+      );
+    });
+
+    test('a caught-up completed show is excluded from Completed', () async {
+      await seedCaughtUp(title: 'Archived', status: TrackStatus.completed);
+      final c = container();
+
+      expect(
+        await grid(c, LibraryStatusFilter.completed),
+        isEmpty,
+        reason: 'a returning caught-up show is Up-to-date, not Completed',
+      );
+      expect(
+        (await grid(c, LibraryStatusFilter.upToDate)).map((i) => i.title),
+        ['Archived'],
+      );
+    });
   });
 }

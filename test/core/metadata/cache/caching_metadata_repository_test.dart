@@ -298,6 +298,47 @@ void main() {
     );
   });
 
+  group(
+    'CachingMetadataRepository · cachedShowDetails (batch, cache-only)',
+    () {
+      test('reads many in one query, skips cold + corrupt, never hits the '
+          'source', () async {
+        final src = _FakeSource();
+        await seedShow(id: 100, details: showModel(title: 'A'));
+        await seedShow(id: 200, details: showModel(title: 'B'));
+        // A corrupt/legacy payload must be skipped, not sink the whole batch.
+        await dao.upsertMedia(
+          CachedMediaCompanion.insert(
+            source: MetadataSourceKind.tmdb,
+            mediaType: MediaType.tv,
+            sourceId: 300,
+            payload: '{ not json',
+            fetchedAt: base,
+            title: 'C',
+          ),
+        );
+
+        final out = await repo(
+          src,
+          age: Duration.zero,
+        ).cachedShowDetails([100, 200, 300, 999]);
+
+        expect(out.keys.toSet(), {100, 200}); // 300 corrupt, 999 cold
+        expect(out[100]!.title, 'A');
+        expect(out[200]!.title, 'B');
+        expect(src.showCalls, 0, reason: 'cache-only — never revalidates');
+      });
+
+      test('an empty id list returns an empty map', () async {
+        final out = await repo(
+          _FakeSource(),
+          age: Duration.zero,
+        ).cachedShowDetails(const []);
+        expect(out, isEmpty);
+      });
+    },
+  );
+
   group('CachingMetadataRepository · seasonEpisodes SWR', () {
     test('cold cache → fetches, persists aired order, and emits', () async {
       final src = _FakeSource()..episodes = [ep(1), ep(2), ep(3)];

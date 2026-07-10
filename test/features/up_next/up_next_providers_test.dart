@@ -21,6 +21,7 @@ import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 MediaDetails _show({
   required List<(int season, int episodes)> seasons,
   (int, int)? nextToAir,
+  (int, int)? lastToAir,
 }) => MediaDetails(
   kind: MediaKind.tv,
   title: 'A Show',
@@ -31,6 +32,9 @@ MediaDetails _show({
   nextEpisode: nextToAir == null
       ? null
       : EpisodeInfo(seasonNumber: nextToAir.$1, episodeNumber: nextToAir.$2),
+  lastEpisode: lastToAir == null
+      ? null
+      : EpisodeInfo(seasonNumber: lastToAir.$1, episodeNumber: lastToAir.$2),
 );
 
 LibraryItem _item({
@@ -60,18 +64,18 @@ LibraryItem _item({
   relinkFailed: false,
 );
 
-/// A repository fake: [showDetails] returns the seeded details for a source id,
-/// or errors — a show the queue must SKIP rather than crash the whole list on.
+/// A repository fake: [cachedShowDetails] returns the seeded details for the
+/// requested ids that it has. An id it lacks is simply omitted — the cold show
+/// the queue must SKIP rather than crash the whole list on.
 class _FakeRepo implements CachingMetadataRepository {
   _FakeRepo(this.byId);
 
   final Map<int, MediaDetails> byId;
 
   @override
-  Stream<MediaDetails> showDetails(int sourceId) {
-    final d = byId[sourceId];
-    return d == null ? Stream.error(StateError('offline')) : Stream.value(d);
-  }
+  Future<Map<int, MediaDetails>> cachedShowDetails(
+    Iterable<int> sourceIds,
+  ) async => {for (final id in sourceIds) id: ?byId[id]};
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
@@ -157,6 +161,31 @@ void main() {
         _show(seasons: [(1, 10), (2, 0)]),
       );
       expect(next, isNull);
+    });
+
+    test('does not surface a stubbed-but-unaired next season (bug-2)', () {
+      // Returning show: watched all of S1; S2 already exists in `seasons` with
+      // episodes but has NOT aired (no next-to-air). last-aired is still S1's
+      // finale, so S2E1 hasn't aired and must not be offered — a tick on it
+      // would corrupt the progress pointer.
+      final next = nextUnwatchedAired(
+        1,
+        10,
+        _show(seasons: [(1, 10), (2, 8)], lastToAir: (1, 10)),
+      );
+      expect(next, isNull, reason: 'S2E1 is stubbed but unaired');
+    });
+
+    test('surfaces an aired next season even with no next-to-air', () {
+      // S2 has fully aired (last_episode_to_air is in S2) with a gap before S3,
+      // so next_episode_to_air is null — the aired S2E1 must still surface. The
+      // bug-2 guard must not over-suppress this.
+      final next = nextUnwatchedAired(
+        1,
+        10,
+        _show(seasons: [(1, 10), (2, 8)], lastToAir: (2, 8)),
+      );
+      expect(next, (2, 1));
     });
 
     test('caught up when the finished season is the last that exists', () {
@@ -246,18 +275,18 @@ void main() {
 
   // The watch-queue rewrite is the highest-risk surface here, but every widget
   // test overrides watchQueueProvider with a static list — so the orchestration
-  // (per-show fault-tolerance, sort) never actually runs. This drives the real
-  // provider. (Live re-advance on a tick is verified on-device and guaranteed
-  // by `ref.watch(libraryItemsProvider)`; it's left to the widget layer.)
+  // (skip a cold show, sort) never actually runs. This drives it for real.
+  // (Live re-advance on a tick is verified on-device and guaranteed by
+  // `ref.watch(libraryItemsProvider)`; it's left to the widget layer.)
   group('watchQueue (provider orchestration)', () {
-    test('skips a show whose details error and title-sorts the rest', () async {
+    test('skips a show absent from cache and title-sorts the rest', () async {
       final db = AppDatabase.forTesting(NativeDatabase.memory());
       addTearDown(db.close);
       await _seed(db, title: 'Zeta', tmdbId: 1, lastSeason: 1, lastEpisode: 1);
       await _seed(db, title: 'Alpha', tmdbId: 2, lastSeason: 1, lastEpisode: 1);
       await _seed(
         db,
-        title: 'Broken',
+        title: 'Cold',
         tmdbId: 3,
         lastSeason: 1,
         lastEpisode: 1,
@@ -265,7 +294,7 @@ void main() {
       final repo = _FakeRepo({
         1: _show(seasons: [(1, 10)]),
         2: _show(seasons: [(1, 10)]),
-        // tmdbId 3 absent → showDetails errors → the show must be skipped.
+        // tmdbId 3 absent from cache → omitted from the batch → skipped.
       });
       final container = _containerOver(db, repo);
       addTearDown(container.dispose);
@@ -277,7 +306,7 @@ void main() {
       expect(
         queue.map((e) => e.showTitle),
         ['Alpha', 'Zeta'],
-        reason: 'the erroring show is skipped (not fatal); the rest are sorted',
+        reason: 'the cold show is skipped (not fatal); the rest are sorted',
       );
       expect(queue.every((e) => e.season == 1 && e.episode == 2), isTrue);
     });
