@@ -97,4 +97,26 @@ void main() {
 
     expect(repo.calls, 0);
   });
+
+  group('shouldDailySync (launch throttle)', () {
+    final now = DateTime(2026, 7, 10, 12);
+
+    test('due when never synced', () {
+      expect(shouldDailySync(now, null), isTrue);
+    });
+
+    test('due exactly a day later (the boundary runs)', () {
+      expect(
+        shouldDailySync(now, now.subtract(const Duration(days: 1))),
+        isTrue,
+      );
+    });
+
+    test('not due within the day', () {
+      expect(
+        shouldDailySync(now, now.subtract(const Duration(hours: 23))),
+        isFalse,
+      );
+    });
+  });
 }

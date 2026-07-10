@@ -16,6 +16,15 @@ part 'tracked_show_sync.g.dart';
 /// library is cache-first (instant); this only paces the cold post-import pass.
 const _syncConcurrency = 6;
 
+/// Whether the daily background [TrackedShowSync] is due at launch: never run,
+/// or last run a day or more ago. Pure (takes [now]) so the throttle is
+/// testable without a boot. `main` stamps the run under [lastLibrarySyncKey].
+bool shouldDailySync(DateTime now, DateTime? lastSynced) =>
+    lastSynced == null || now.difference(lastSynced) >= const Duration(days: 1);
+
+/// SharedPreferences key holding the last daily-sync time (epoch millis).
+const lastLibrarySyncKey = 'last_library_sync';
+
 /// Builds the [TrackedShowSync] for the active backend.
 @Riverpod(keepAlive: true)
 TrackedShowSync trackedShowSync(Ref ref) => TrackedShowSync(
