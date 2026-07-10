@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/features/library/presentation/library_screen.dart';
 import 'package:watch_nook/features/settings/data/shared_preferences_provider.dart';
+import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 import 'package:watch_nook/main.dart';
 
 void main() {
@@ -24,11 +25,17 @@ void main() {
       ProviderScope(
         overrides: [
           sharedPreferencesProvider.overrideWithValue(prefs),
-          // Home is now the DB-backed library grid; stub it with a synchronous
-          // empty snapshot so this boot/routing test doesn't hang on a live
-          // Drift `.watch()` stream (see library_screen_test for the why).
+          // The app now boots on Up Next; stub its data (and the library grid)
+          // with synchronous empties so this boot/routing test doesn't hang on a
+          // live Drift `.watch()` stream (see library_screen_test for the why).
           libraryGridProvider.overrideWith(
             (ref, filter) => Stream.value(const <LibraryItem>[]),
+          ),
+          trackedShowsProvider.overrideWith(
+            (ref) => Stream.value(const <TrackedShow>[]),
+          ),
+          upcomingThisWeekProvider.overrideWith(
+            (ref) async => const <UpcomingEntry>[],
           ),
         ],
         child: const WatchnookApp(),

@@ -111,14 +111,15 @@ void main() {
   ) async {
     await pumpShell(tester);
 
-    expect(selectedTab(tester), 0);
+    // Mounted at '/' (Library) — now the second tab; Up Next is first.
+    expect(selectedTab(tester), 1);
     expect(find.text('Severance'), findsOneWidget);
 
     await tester.tap(find.text('Up Next'));
     await tester.pumpAndSettle();
 
     expect(location(), '/up-next');
-    expect(selectedTab(tester), 1);
+    expect(selectedTab(tester), 0);
     expect(find.text('No shows tracked yet'), findsOneWidget);
 
     await tester.tap(find.text('Stats'));
@@ -133,7 +134,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(location(), '/');
-    expect(selectedTab(tester), 0);
+    expect(selectedTab(tester), 1);
     expect(find.text('Severance'), findsOneWidget);
   });
 

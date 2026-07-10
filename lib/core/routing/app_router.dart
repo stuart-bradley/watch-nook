@@ -13,10 +13,14 @@ import 'package:watch_nook/features/up_next/presentation/up_next_screen.dart';
 
 part 'app_router.g.dart';
 
-/// App routes. The bottom-nav shell (AD-5) is the root — a `Library` tab (`/`,
-/// the grid #17), an `Up Next` tab (`/up-next`, #21) and a `Stats` tab
+/// App routes. The bottom-nav shell (AD-5) is the root — an `Up Next` tab
+/// (`/up-next`, #21) **first** (the watch queue is the most-used view, so the
+/// app opens here), then a `Library` tab (`/`, the grid #17) and a `Stats` tab
 /// (`/stats`, #34). Onboarding is the first-run gate; search and settings are
 /// pushed routes reachable from the shell app bar.
+///
+/// The branch order and the [NavigationBar] destinations are index-aligned —
+/// reorder both together or the wrong screen shows under the wrong tab.
 /// Exposed so a test can mount the router at a chosen location.
 final List<RouteBase> appRoutes = <RouteBase>[
   StatefulShellRoute.indexedStack(
@@ -26,16 +30,16 @@ final List<RouteBase> appRoutes = <RouteBase>[
       StatefulShellBranch(
         routes: [
           GoRoute(
-            path: '/',
-            builder: (context, state) => const LibraryScreen(),
+            path: '/up-next',
+            builder: (context, state) => const UpNextScreen(),
           ),
         ],
       ),
       StatefulShellBranch(
         routes: [
           GoRoute(
-            path: '/up-next',
-            builder: (context, state) => const UpNextScreen(),
+            path: '/',
+            builder: (context, state) => const LibraryScreen(),
           ),
         ],
       ),
@@ -106,16 +110,17 @@ class _ShellScaffold extends StatelessWidget {
           i,
           initialLocation: i == navigationShell.currentIndex,
         ),
+        // Index-aligned with the branch order above.
         destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.video_library_outlined),
-            selectedIcon: Icon(Icons.video_library),
-            label: 'Library',
-          ),
           NavigationDestination(
             icon: Icon(Icons.upcoming_outlined),
             selectedIcon: Icon(Icons.upcoming),
             label: 'Up Next',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.video_library_outlined),
+            selectedIcon: Icon(Icons.video_library),
+            label: 'Library',
           ),
           NavigationDestination(
             icon: Icon(Icons.insights_outlined),
@@ -138,7 +143,8 @@ class _ShellScaffold extends StatelessWidget {
 String? onboardingRedirect({required bool seen, required String location}) {
   final atOnboarding = location == '/onboarding';
   if (!seen && !atOnboarding) return '/onboarding';
-  if (seen && atOnboarding) return '/';
+  // Finishing onboarding lands on Up Next — the app's home tab.
+  if (seen && atOnboarding) return '/up-next';
   return null;
 }
 
@@ -151,6 +157,8 @@ GoRouter appRouter(Ref ref) {
   final refresh = _OnboardingRefresh(ref);
   ref.onDispose(refresh.dispose);
   return GoRouter(
+    // Boot on Up Next (the watch queue), not Library.
+    initialLocation: '/up-next',
     routes: appRoutes,
     refreshListenable: refresh,
     redirect: (context, state) => onboardingRedirect(

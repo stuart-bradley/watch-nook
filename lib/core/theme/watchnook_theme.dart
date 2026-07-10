@@ -171,7 +171,9 @@ class WatchnookTheme {
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        titleTextStyle: text.headlineSmall,
+        // headlineMedium, not headlineSmall: the Newsreader serif reads small
+        // at title size, so app-bar/page titles looked undersized on-device.
+        titleTextStyle: text.headlineMedium,
       ),
 
       // Rail card: elevation 0, hairline outline.

@@ -13,8 +13,11 @@ void main() {
       expect(onboardingRedirect(seen: false, location: '/onboarding'), isNull);
     });
 
-    test('a returning user is bounced off the onboarding gate to home', () {
-      expect(onboardingRedirect(seen: true, location: '/onboarding'), '/');
+    test('a returning user is bounced off the onboarding gate to Up Next', () {
+      expect(
+        onboardingRedirect(seen: true, location: '/onboarding'),
+        '/up-next',
+      );
     });
 
     test('a returning user anywhere else is left alone', () {

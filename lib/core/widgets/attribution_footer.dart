@@ -12,8 +12,8 @@ import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 /// change. Neither source bundles a logo yet — `logoAsset` is honoured when one
 /// appears.
 ///
-/// Shown on the detail screen (#18) and in Settings → About (#35). It is a
-/// licensing obligation, not decoration: do not make it conditional.
+/// Shown in Settings → About (#35) — one place, not on every detail page. It is
+/// a licensing obligation, not decoration: do not make it conditional.
 class AttributionFooter extends ConsumerWidget {
   /// Creates an [AttributionFooter].
   const AttributionFooter({super.key});
@@ -27,8 +27,10 @@ class AttributionFooter extends ConsumerWidget {
       padding: const EdgeInsets.all(WatchnookSpacing.xl),
       child: Column(
         children: [
-          if (attribution.logoAsset case final asset?)
+          if (attribution.logoAsset case final asset?) ...[
             Image.asset(asset, height: 20),
+            const SizedBox(height: WatchnookSpacing.md),
+          ],
           Text(
             attribution.notice,
             textAlign: TextAlign.center,
