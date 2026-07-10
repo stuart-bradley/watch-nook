@@ -224,6 +224,30 @@ void main() {
     });
   });
 
+  group('encoding auto-detection (IMDb ships windows-1252, not UTF-8)', () {
+    // `Amélie` (tt0211915): the é is a lone 0xE9 in cp1252 — invalid as UTF-8,
+    // so a naive UTF-8 read yields `Am�lie`, which no longer matches TMDB.
+    ImportArchive ratingsBytes(List<int> bytes) =>
+        ImportArchive({'ratings.csv': Uint8List.fromList(bytes)});
+
+    String amelieRow() =>
+        '$_ratingsHeader\n'
+        'tt0211915,10,2020-01-15,Amélie,Amélie,https://x/,movie,8,122,2001,'
+        'x,1,x,x';
+
+    test('a windows-1252 accented title decodes, not mangled to U+FFFD', () {
+      final parsed = ImdbImporter.parse(
+        ratingsBytes(latin1.encode(amelieRow())),
+      );
+      expect(parsed.records.single.title, 'Amélie');
+    });
+
+    test('a UTF-8 accented title still decodes (the fix keeps both)', () {
+      final parsed = ImdbImporter.parse(ratingsBytes(utf8.encode(amelieRow())));
+      expect(parsed.records.single.title, 'Amélie');
+    });
+  });
+
   group('Title Type whitelist', () {
     test('skips and counts the types this app cannot store', () {
       final parsed = ImdbImporter.parse(
