@@ -14,21 +14,73 @@ import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/core/widgets/poster_placeholder.dart';
 
-/// The library grid filter — status and/or type, either null for "all". A
-/// record so the family key has value equality (same filter reuses the stream).
-typedef LibraryFilter = ({TrackStatus? status, MediaType? type});
+/// A show is **Up to date** — a *derived* category — when it is watched up to
+/// its latest aired episode but is still returning (a new season may come). It
+/// refines both `watching` and `completed`; it excludes ended shows (those are
+/// just completed) and shows whose episode count isn't known yet (not synced).
+/// Depends on `episodeCountTotal`/`showStatus`, which the tracked-show sync
+/// populates after an import.
+bool isUpToDate(LibraryItem item) =>
+    item.mediaType == MediaType.tv &&
+    (item.trackStatus == TrackStatus.watching ||
+        item.trackStatus == TrackStatus.completed) &&
+    item.episodeCountTotal != null &&
+    item.watchedCount >= item.episodeCountTotal! &&
+    !showHasEnded(item.showStatus);
+
+/// The status dimension of the library filter. Most values map 1:1 to a stored
+/// [TrackStatus]; [upToDate] is derived (see [isUpToDate]).
+enum LibraryStatusFilter {
+  all('All'),
+  watchlist('Watchlist'),
+  watching('Watching'),
+  upToDate('Up to date'),
+  completed('Completed'),
+  onHold('On hold'),
+  dropped('Dropped');
+
+  const LibraryStatusFilter(this.label);
+
+  /// The chip caption.
+  final String label;
+}
+
+/// The library grid filter — a status dimension and an optional type. A record
+/// so the family key has value equality (same filter reuses the stream).
+typedef LibraryFilter = ({LibraryStatusFilter status, MediaType? type});
 
 /// The filtered library stream (#17). Plain `StreamProvider` (not `@riverpod`)
 /// because it exposes a Drift-generated row type — the generator throws on
 /// those (CLAUDE.md convention). Reads **only** the denormalized columns via
 /// `watchLibrary`, so the grid never does a cross-domain join and renders
-/// entirely offline.
+/// entirely offline. The derived `upToDate` filter (and the watching/completed
+/// exclusions that keep it from double-counting) are applied in Dart over the
+/// stream, since `showHasEnded` is a Dart heuristic, not expressible in SQL.
 final StreamProviderFamily<List<LibraryItem>, LibraryFilter>
-libraryGridProvider = StreamProvider.family<List<LibraryItem>, LibraryFilter>(
-  (ref, filter) => ref
-      .watch(libraryDaoProvider)
-      .watchLibrary(status: filter.status, type: filter.type),
-);
+libraryGridProvider = StreamProvider.family<List<LibraryItem>, LibraryFilter>((
+  ref,
+  filter,
+) {
+  final dao = ref.watch(libraryDaoProvider);
+  Stream<List<LibraryItem>> byStatus(TrackStatus s) =>
+      dao.watchLibrary(status: s, type: filter.type);
+  return switch (filter.status) {
+    LibraryStatusFilter.all => dao.watchLibrary(type: filter.type),
+    LibraryStatusFilter.upToDate =>
+      dao
+          .watchLibrary(type: filter.type)
+          .map((rows) => rows.where(isUpToDate).toList()),
+    LibraryStatusFilter.watching => byStatus(
+      TrackStatus.watching,
+    ).map((rows) => rows.where((i) => !isUpToDate(i)).toList()),
+    LibraryStatusFilter.completed => byStatus(
+      TrackStatus.completed,
+    ).map((rows) => rows.where((i) => !isUpToDate(i)).toList()),
+    LibraryStatusFilter.watchlist => byStatus(TrackStatus.watchlist),
+    LibraryStatusFilter.onHold => byStatus(TrackStatus.onHold),
+    LibraryStatusFilter.dropped => byStatus(TrackStatus.dropped),
+  };
+});
 
 /// The progress caption under a grid card, built **only** from the denormalized
 /// fields (`watchedCount`, `lastWatched*`, `episodeCountTotal`) — never a
@@ -65,7 +117,7 @@ class LibraryScreen extends ConsumerStatefulWidget {
 }
 
 class _LibraryScreenState extends ConsumerState<LibraryScreen> {
-  TrackStatus? _status;
+  LibraryStatusFilter _status = LibraryStatusFilter.all;
   MediaType? _type;
 
   @override
@@ -90,7 +142,10 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
               headline: "Couldn't load your library.",
             ),
             data: (rows) => rows.isEmpty
-                ? _EmptyLibrary(filtered: _status != null || _type != null)
+                ? _EmptyLibrary(
+                    filtered:
+                        _status != LibraryStatusFilter.all || _type != null,
+                  )
                 : _Grid(rows: rows),
           ),
         ),
@@ -149,9 +204,9 @@ class _FilterBar extends StatelessWidget {
     required this.onType,
   });
 
-  final TrackStatus? status;
+  final LibraryStatusFilter status;
   final MediaType? type;
-  final ValueChanged<TrackStatus?> onStatus;
+  final ValueChanged<LibraryStatusFilter> onStatus;
   final ValueChanged<MediaType?> onType;
 
   @override
@@ -160,9 +215,8 @@ class _FilterBar extends StatelessWidget {
       children: [
         _ChipRow(
           children: [
-            _chip('All', status == null, () => onStatus(null)),
-            for (final s in TrackStatus.values)
-              _chip(_statusLabel(s), status == s, () => onStatus(s)),
+            for (final s in LibraryStatusFilter.values)
+              _chip(s.label, status == s, () => onStatus(s)),
           ],
         ),
         _ChipRow(
@@ -303,11 +357,3 @@ class _Poster extends ConsumerWidget {
     );
   }
 }
-
-String _statusLabel(TrackStatus s) => switch (s) {
-  TrackStatus.watchlist => 'Watchlist',
-  TrackStatus.watching => 'Watching',
-  TrackStatus.completed => 'Completed',
-  TrackStatus.onHold => 'On hold',
-  TrackStatus.dropped => 'Dropped',
-};

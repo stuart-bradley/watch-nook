@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
@@ -13,6 +14,7 @@ import 'package:watch_nook/core/import_export/import/resolver.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/import/domain/import_state.dart';
+import 'package:watch_nook/features/library/data/tracked_show_sync.dart';
 
 part 'import_providers.g.dart';
 
@@ -167,6 +169,10 @@ class ImportController extends _$ImportController {
       await applier.apply(resolutions),
       parseSkipped: parseSkipped,
     );
+    // Fetch the per-show metadata an import can't (episode counts, show
+    // status), so the grid's progress labels and the derived Up-to-date
+    // category are right. Fire-and-forget — the summary is already shown.
+    unawaited(ref.read(trackedShowSyncProvider).refresh());
   }
 
   MetadataSourceKind get _sourceKind =>

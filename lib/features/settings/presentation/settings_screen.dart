@@ -6,6 +6,7 @@ import 'package:watch_nook/core/import_export/export/export_providers.dart';
 import 'package:watch_nook/core/import_export/export/import_export_service.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/attribution_footer.dart';
+import 'package:watch_nook/features/library/data/tracked_show_sync.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
 import 'package:watch_nook/features/settings/data/export_share.dart';
 import 'package:watch_nook/features/settings/data/theme_mode_provider.dart';
@@ -40,6 +41,14 @@ class SettingsScreen extends ConsumerWidget {
               'Letterboxd.',
             ),
             onTap: () => context.push('/import'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.sync),
+            title: const Text('Refresh library'),
+            subtitle: const Text(
+              'Update episode counts and next episodes for your shows.',
+            ),
+            onTap: () => _refreshLibrary(context, ref),
           ),
           ListTile(
             leading: const Icon(Icons.download_outlined),
@@ -246,6 +255,29 @@ Future<void> _deleteAll(BuildContext context, WidgetRef ref) async {
     debugPrint('delete-all failed: $e\n$s');
     messenger.showSnackBar(
       const SnackBar(content: Text("Couldn't delete your data.")),
+    );
+  }
+}
+
+/// Syncs the per-show metadata an import can't fetch (episode counts, show
+/// status), so progress labels and the Up-to-date category are accurate. Runs
+/// automatically after an import; this is the manual re-run.
+Future<void> _refreshLibrary(BuildContext context, WidgetRef ref) async {
+  final messenger = ScaffoldMessenger.of(context)
+    ..showSnackBar(
+      const SnackBar(content: Text('Refreshing your library…')),
+    );
+  try {
+    await ref.read(trackedShowSyncProvider).refresh();
+    if (!context.mounted) return;
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Library refreshed.')),
+    );
+  } on Object catch (e, s) {
+    debugPrint('library refresh failed: $e\n$s');
+    if (!context.mounted) return;
+    messenger.showSnackBar(
+      const SnackBar(content: Text("Couldn't refresh — you may be offline.")),
     );
   }
 }

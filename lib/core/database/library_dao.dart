@@ -200,6 +200,19 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   Future<void> updateItem(int id, LibraryItemsCompanion patch) =>
       (update(libraryItems)..where((t) => t.id.equals(id))).write(patch);
 
+  /// Apply many `(id, patch)` updates in **one** transaction — the tracked-show
+  /// metadata sync, which refreshes `episodeCountTotal` / `showStatus` / poster
+  /// for every tracked show at once. One transaction = one Drift stream
+  /// re-emission, so downstream providers (Up Next, the grid) recompute once,
+  /// not once per show.
+  Future<void> updateManyItems(
+    List<(int id, LibraryItemsCompanion patch)> patches,
+  ) => transaction(() async {
+    for (final (id, patch) in patches) {
+      await (update(libraryItems)..where((t) => t.id.equals(id))).write(patch);
+    }
+  });
+
   /// Change the tracking status, stamping [now] onto `updatedAt`.
   Future<void> updateStatus(
     int id,
