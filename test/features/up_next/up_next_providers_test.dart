@@ -1,6 +1,14 @@
+import 'package:drift/drift.dart' show Value;
+import 'package:drift/native.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
+import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 
@@ -50,6 +58,54 @@ LibraryItem _item({
   addedAt: DateTime(2026),
   updatedAt: DateTime(2026),
   relinkFailed: false,
+);
+
+/// A repository fake: [showDetails] returns the seeded details for a source id,
+/// or errors — a show the queue must SKIP rather than crash the whole list on.
+class _FakeRepo implements CachingMetadataRepository {
+  _FakeRepo(this.byId);
+
+  final Map<int, MediaDetails> byId;
+
+  @override
+  Stream<MediaDetails> showDetails(int sourceId) {
+    final d = byId[sourceId];
+    return d == null ? Stream.error(StateError('offline')) : Stream.value(d);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
+/// A container wiring the real library DAO (over an in-memory DB) and the fake
+/// repo into the queue's providers, so `watchQueue` runs for real.
+ProviderContainer _containerOver(AppDatabase db, _FakeRepo repo) =>
+    ProviderContainer(
+      overrides: [
+        appDatabaseProvider.overrideWithValue(db),
+        activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
+        metadataRepositoryProvider.overrideWithValue(repo),
+      ],
+    );
+
+Future<int> _seed(
+  AppDatabase db, {
+  required String title,
+  required int tmdbId,
+  int? lastSeason,
+  int? lastEpisode,
+}) => db.libraryDao.insertItem(
+  LibraryItemsCompanion.insert(
+    mediaType: MediaType.tv,
+    recordedSource: MetadataSourceKind.tmdb,
+    title: title,
+    trackStatus: TrackStatus.watching,
+    addedAt: DateTime(2026),
+    updatedAt: DateTime(2026),
+    tmdbId: Value(tmdbId),
+    lastWatchedSeason: Value(lastSeason),
+    lastWatchedEpisode: Value(lastEpisode),
+  ),
 );
 
 void main() {
@@ -185,6 +241,45 @@ void main() {
     test('falls back to the coordinate alone', () {
       expect(episodeLabel(2, 5), 'S2E5');
       expect(episodeLabel(2, 5, ''), 'S2E5');
+    });
+  });
+
+  // The watch-queue rewrite is the highest-risk surface here, but every widget
+  // test overrides watchQueueProvider with a static list — so the orchestration
+  // (per-show fault-tolerance, sort) never actually runs. This drives the real
+  // provider. (Live re-advance on a tick is verified on-device and guaranteed
+  // by `ref.watch(libraryItemsProvider)`; it's left to the widget layer.)
+  group('watchQueue (provider orchestration)', () {
+    test('skips a show whose details error and title-sorts the rest', () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      await _seed(db, title: 'Zeta', tmdbId: 1, lastSeason: 1, lastEpisode: 1);
+      await _seed(db, title: 'Alpha', tmdbId: 2, lastSeason: 1, lastEpisode: 1);
+      await _seed(
+        db,
+        title: 'Broken',
+        tmdbId: 3,
+        lastSeason: 1,
+        lastEpisode: 1,
+      );
+      final repo = _FakeRepo({
+        1: _show(seasons: [(1, 10)]),
+        2: _show(seasons: [(1, 10)]),
+        // tmdbId 3 absent → showDetails errors → the show must be skipped.
+      });
+      final container = _containerOver(db, repo);
+      addTearDown(container.dispose);
+      // watchQueue is autoDispose: hold a listener so reading `.future` doesn't
+      // tear it (and its library-stream dependency) down mid-load.
+      addTearDown(container.listen(watchQueueProvider, (_, _) {}).close);
+
+      final queue = await container.read(watchQueueProvider.future);
+      expect(
+        queue.map((e) => e.showTitle),
+        ['Alpha', 'Zeta'],
+        reason: 'the erroring show is skipped (not fatal); the rest are sorted',
+      );
+      expect(queue.every((e) => e.season == 1 && e.episode == 2), isTrue);
     });
   });
 }

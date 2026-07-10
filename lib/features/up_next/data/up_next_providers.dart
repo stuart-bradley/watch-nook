@@ -29,7 +29,7 @@ const _queueConcurrency = 6;
 /// Which tracked shows can contribute to the watch queue.
 ///
 /// - **TV only**, recorded against the active [backend] (so its id column
-///   right catalogue's id).
+///   holds the right catalogue's id).
 /// - **Skip `dropped`** (walked away) and **`watchlist`** (never started — the
 ///   queue is "continue watching", not "start watching").
 /// - **Skip `completed` shows that have ended** — nothing left to watch. A
