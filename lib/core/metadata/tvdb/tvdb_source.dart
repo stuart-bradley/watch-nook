@@ -217,16 +217,19 @@ class TvdbSource implements MetadataSource {
   }
 
   @override
-  Future<MediaSearchResult?> resolveByExternalId(String imdbId) async {
-    // /search/remoteid returns envelopes each holding one of series/movie/etc.
-    final results =
-        (await _getJson('/search/remoteid/$imdbId'))['data'] as List?;
+  Future<MediaSearchResult?> resolveByExternalId(
+    String id, {
+    ExternalIdKind kind = ExternalIdKind.imdb,
+  }) async {
+    // /search/remoteid resolves any remote id (IMDb, TVDB, Zap2it, …) the same
+    // way, so [kind] needs no branch here — the endpoint keys on the id itself.
+    final results = (await _getJson('/search/remoteid/$id'))['data'] as List?;
     for (final raw in results ?? const []) {
       final envelope = raw as Map<String, dynamic>;
       final series = envelope['series'] as Map<String, dynamic>?;
-      if (series != null) return _remoteIdResult(series, MediaKind.tv, imdbId);
+      if (series != null) return _remoteIdResult(series, MediaKind.tv, id);
       final movie = envelope['movie'] as Map<String, dynamic>?;
-      if (movie != null) return _remoteIdResult(movie, MediaKind.movie, imdbId);
+      if (movie != null) return _remoteIdResult(movie, MediaKind.movie, id);
     }
     return null;
   }

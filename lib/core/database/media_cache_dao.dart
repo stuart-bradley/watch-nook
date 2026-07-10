@@ -66,4 +66,11 @@ class MediaCacheDao extends DatabaseAccessor<AppDatabase>
         .go();
     await batch((b) => b.insertAll(cachedEpisodes, rows));
   });
+
+  /// Wipes the entire disposable cache (both tables). Used by the GDPR
+  /// delete-all; everything here re-fetches on demand, so this is always safe.
+  Future<void> clearAll() => transaction(() async {
+    await delete(cachedEpisodes).go();
+    await delete(cachedMedia).go();
+  });
 }

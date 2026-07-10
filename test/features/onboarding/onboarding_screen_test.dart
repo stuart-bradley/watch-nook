@@ -8,6 +8,7 @@ import 'package:watch_nook/features/import/presentation/import_screen.dart';
 import 'package:watch_nook/features/library/presentation/library_screen.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_screen.dart';
 import 'package:watch_nook/features/settings/data/shared_preferences_provider.dart';
+import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 import 'package:watch_nook/main.dart';
 
 void main() {
@@ -21,12 +22,16 @@ void main() {
   Widget app(SharedPreferences prefs) => ProviderScope(
     overrides: [
       sharedPreferencesProvider.overrideWithValue(prefs),
-      // The redirect lands on the DB-backed library grid; stub it empty so
-      // these routing tests don't hang on a live Drift `.watch()` stream (see
-      // library_screen_test for the why).
+      // The redirect lands on Up Next (the home tab); stub its data and the
+      // library grid empty so these routing tests don't hang on a live Drift
+      // `.watch()` stream (see library_screen_test for the why).
       libraryGridProvider.overrideWith(
         (ref, filter) => Stream.value(const <LibraryItem>[]),
       ),
+      libraryItemsProvider.overrideWith(
+        (ref) => Stream.value(const <LibraryItem>[]),
+      ),
+      watchQueueProvider.overrideWith((ref) async => const <QueueEntry>[]),
     ],
     child: const WatchnookApp(),
   );

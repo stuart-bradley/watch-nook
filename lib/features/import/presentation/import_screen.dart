@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:watch_nook/core/import_export/import/merge_applier.dart';
 import 'package:watch_nook/core/import_export/import/resolver.dart';
 import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
@@ -103,36 +104,70 @@ class _Running extends StatelessWidget {
 /// resolver's top candidates plus **Skip** — the escape hatch that matters,
 /// because a wrong auto-match files someone's watch history under the wrong
 /// show and there is no undo.
-class _Confirm extends ConsumerWidget {
+class _Confirm extends ConsumerStatefulWidget {
   const _Confirm(this.state);
 
   final ImportConfirming state;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_Confirm> createState() => _ConfirmState();
+}
+
+class _ConfirmState extends ConsumerState<_Confirm> {
+  // Owned by the state so the scrollbar and list share one controller, and the
+  // always-visible thumb doubles as a "how far through the queue" indicator.
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = widget.state;
     final chosen = state.choices.values.whereType<MediaSearchResult>().length;
     final auto = state.autoResolved.length;
+    final total = state.pending.length;
+    final decided = state.choices.length;
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            '${_titles(auto, '')} matched automatically. '
-            "Pick a match for the rest, or skip the ones you don't want.",
-            style: Theme.of(context).textTheme.bodyMedium,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${_titles(auto, '')} matched automatically.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                total == 1
+                    ? 'Review 1 title — pick a match or skip.'
+                    : 'Reviewed $decided of $total — pick a match or skip.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
           ),
         ),
         Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: state.pending.length,
-            itemBuilder: (context, i) => _AmbiguousCard(
-              ambiguous: state.pending[i],
-              choice: state.choices[i],
-              decided: state.choices.containsKey(i),
-              onChoose: (candidate) => ref
-                  .read(importControllerProvider.notifier)
-                  .choose(i, candidate),
+          child: Scrollbar(
+            controller: _scroll,
+            thumbVisibility: true,
+            child: ListView.builder(
+              controller: _scroll,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              itemCount: total,
+              itemBuilder: (context, i) => _AmbiguousCard(
+                ambiguous: state.pending[i],
+                choice: state.choices[i],
+                decided: state.choices.containsKey(i),
+                onChoose: (candidate) => ref
+                    .read(importControllerProvider.notifier)
+                    .choose(i, candidate),
+              ),
             ),
           ),
         ),
@@ -226,6 +261,9 @@ class _CandidateTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final year = candidate.year;
     final kind = candidate.kind == MediaKind.movie ? 'Film' : 'TV';
+    // Origin country disambiguates same-titled regional versions — the whole
+    // reason these went to the queue (Taskmaster AU vs NZ vs GB, etc.).
+    final country = candidate.originCountry.join('/');
     return ListTile(
       selected: selected,
       leading: _Poster(path: candidate.posterPath),
@@ -234,7 +272,13 @@ class _CandidateTile extends ConsumerWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: Text([if (year != null) '$year', kind].join(' · ')),
+      subtitle: Text(
+        [
+          if (year != null) '$year',
+          kind,
+          if (country.isNotEmpty) country,
+        ].join(' · '),
+      ),
       trailing: selected ? const Icon(Icons.check_circle) : null,
       onTap: onTap,
     );
@@ -268,7 +312,13 @@ class _Done extends ConsumerWidget {
         _Stat('Titles skipped', ambiguous),
         _Stat('Rows we could not read', state.rowsSkipped),
         const SizedBox(height: 24),
-        OutlinedButton(
+        FilledButton(
+          // The primary next step: land on Up Next, not the system back button.
+          onPressed: () => context.go('/up-next'),
+          child: const Text('Continue'),
+        ),
+        const SizedBox(height: 8),
+        TextButton(
           onPressed: () => ref.read(importControllerProvider.notifier).reset(),
           child: const Text('Import another file'),
         ),

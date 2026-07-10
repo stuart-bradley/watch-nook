@@ -4,8 +4,10 @@ import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/import_export/import/import_archive.dart';
 import 'package:watch_nook/core/import_export/import/import_record.dart';
 
-/// Reads a Trakt export: one JSON document with `watched`, `ratings` and
-/// `watchlist` sections, each split into `movies` and `shows`.
+/// Reads a Trakt export — either a single JSON document with `watched`,
+/// `ratings` and `watchlist` sections (each split into `movies`/`shows`), or the
+/// real "Settings → Data → Export" download, a zip of per-endpoint JSON arrays
+/// (`watched-shows.json`, `watched-movies.json`, …); see [_decode].
 ///
 /// Trakt carries a full `ids` block (imdb + tmdb + tvdb), so titles land on the
 /// resolver's id rung with no search. Three things make it less trivial than it
@@ -109,7 +111,15 @@ class TraktImporter {
                   _date(row['last_watched_at']),
                 );
               } else {
+                final before = title.watches.length;
                 skipped += title.addSeasons(row['seasons']);
+                // No episode tree (an export made without extended=full omits
+                // `seasons`). Don't invent episode coordinates, but don't let a
+                // genuinely-watched show import as an empty *watchlist* entry
+                // either — mark it `watching` so it reads as started.
+                if (title.watches.length == before) {
+                  title.trackStatus ??= TrackStatus.watching;
+                }
               }
             case 'ratings':
               final rating = _int(row['rating']);
@@ -132,9 +142,17 @@ class TraktImporter {
     );
   }
 
-  /// The first `.json` entry that decodes to an object carrying at least one
-  /// Trakt section. Every other export in this app is CSV, so this is also the
-  /// format sniff.
+  /// A Trakt export in one of two real shapes, normalised to the single-object
+  /// form the parser reads (`{watched: {movies, shows}, ...}`):
+  ///
+  /// 1. a **single JSON object** carrying a `watched`/`ratings`/`watchlist`
+  ///    section (the API / older shape); or
+  /// 2. the real **"Settings → Data → Export"** download — a zip of
+  ///    per-endpoint JSON *arrays* (e.g. `watched-shows.json`). Without this
+  ///    branch a real export is a single unmatched object → `canRead` false →
+  ///    the whole import silently does nothing.
+  ///
+  /// Every other export here is CSV, so this doubles as the format sniff.
   static Map<String, dynamic>? _decode(ImportArchive archive) {
     for (final entry in archive.entries.entries) {
       if (!entry.key.toLowerCase().endsWith('.json')) continue;
@@ -148,7 +166,30 @@ class TraktImporter {
         return json;
       }
     }
-    return null;
+    return _assembleFromFiles(archive);
+  }
+
+  /// Builds the single-object shape from the multi-file export's watched
+  /// arrays. (Ratings / watchlist per-file shapes aren't assembled yet — watch
+  /// history is the priority; a real export sample can extend this.)
+  static Map<String, dynamic>? _assembleFromFiles(ImportArchive archive) {
+    final movies = _jsonArray(archive, 'watched-movies.json');
+    final shows = _jsonArray(archive, 'watched-shows.json');
+    if (movies == null && shows == null) return null;
+    return {
+      'watched': {'movies': ?movies, 'shows': ?shows},
+    };
+  }
+
+  static List<Object?>? _jsonArray(ImportArchive archive, String name) {
+    final text = archive.readText(name);
+    if (text == null) return null;
+    try {
+      final json = jsonDecode(text);
+      return json is List ? json : null;
+    } on FormatException {
+      return null;
+    }
   }
 }
 
@@ -171,6 +212,10 @@ class _Title {
   final int? tvdbId;
   int? rating;
   DateTime? ratedAt;
+
+  /// Usually null (the applier defaults it); set to `watching` only for a
+  /// watched show that carried no episode tree (the fallback).
+  TrackStatus? trackStatus;
   final watches = <ImportWatch>[];
 
   /// `plays` counts viewings: the first is the watch, every one after it a
@@ -233,6 +278,7 @@ class _Title {
     imdbId: imdbId,
     tmdbId: tmdbId,
     tvdbId: tvdbId,
+    trackStatus: trackStatus,
     rating: rating,
     ratedAt: ratedAt,
     watches: watches,

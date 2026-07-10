@@ -1,0 +1,16 @@
+# Generates the adaptive Android launcher icon from assets/icon/ (see its
+# README). The play-in-a-nook glyph on Honey/gold (#E9BF64), with an Android-13
+# themed (monochrome) layer. Regenerate after changing the source art:
+#
+#   dart run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  ios: false
+  # Full-bleed fallback for pre-adaptive (API < 26) launchers + the store.
+  image_path: "assets/icon/ic_launcher.png"
+  # Adaptive layers (API 26+): solid honey background + the glyph foreground.
+  adaptive_icon_background: "#E9BF64"
+  adaptive_icon_foreground: "assets/icon/ic_foreground.png"
+  # Android-13 themed icon: the system tints this monochrome layer.
+  adaptive_icon_monochrome: "assets/icon/ic_launcher_monochrome.png"
+  min_sdk_android: 21

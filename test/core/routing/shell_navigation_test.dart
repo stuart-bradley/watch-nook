@@ -79,13 +79,11 @@ void main() {
           libraryGridProvider.overrideWith(
             (ref, filter) => Stream.value([item]),
           ),
-          upcomingThisWeekProvider.overrideWith(
-            (ref) async => const <UpcomingEntry>[],
-          ),
+          watchQueueProvider.overrideWith((ref) async => const <QueueEntry>[]),
           // Read by the Up Next empty state; the real one is a live Drift
           // `.watch()` stream and would hang `pumpAndSettle` (CLAUDE.md).
-          trackedShowsProvider.overrideWith(
-            (ref) => Stream.value(const <TrackedShow>[]),
+          libraryItemsProvider.overrideWith(
+            (ref) => Stream.value(const <LibraryItem>[]),
           ),
           statsProvider.overrideWith(
             (ref) => Stream.value(StatsSnapshot.empty),
@@ -111,14 +109,15 @@ void main() {
   ) async {
     await pumpShell(tester);
 
-    expect(selectedTab(tester), 0);
+    // Mounted at '/' (Library) — now the second tab; Up Next is first.
+    expect(selectedTab(tester), 1);
     expect(find.text('Severance'), findsOneWidget);
 
     await tester.tap(find.text('Up Next'));
     await tester.pumpAndSettle();
 
     expect(location(), '/up-next');
-    expect(selectedTab(tester), 1);
+    expect(selectedTab(tester), 0);
     expect(find.text('No shows tracked yet'), findsOneWidget);
 
     await tester.tap(find.text('Stats'));
@@ -133,7 +132,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(location(), '/');
-    expect(selectedTab(tester), 0);
+    expect(selectedTab(tester), 1);
     expect(find.text('Severance'), findsOneWidget);
   });
 

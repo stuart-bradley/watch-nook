@@ -4,7 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
+import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
@@ -113,60 +116,68 @@ void main() {
   });
 
   group('up next', () {
+    LibraryItem trackedShow() => LibraryItem(
+      id: 1,
+      mediaType: MediaType.tv,
+      recordedSource: MetadataSourceKind.tmdb,
+      title: 'Severance',
+      trackStatus: TrackStatus.watching,
+      tmdbId: 95396,
+      watchedCount: 0,
+      addedAt: DateTime(2026),
+      updatedAt: DateTime(2026),
+      relinkFailed: false,
+    );
+
     Future<void> pumpUpNext(
       WidgetTester tester, {
-      required List<TrackedShow> tracked,
+      required List<LibraryItem> items,
     }) => pump(
       tester,
       const UpNextScreen(),
       [
-        trackedShowsProvider.overrideWith((ref) => Stream.value(tracked)),
-        upcomingThisWeekProvider.overrideWith(
-          (ref) async => const <UpcomingEntry>[],
-        ),
+        watchQueueProvider.overrideWith((ref) async => const <QueueEntry>[]),
+        libraryItemsProvider.overrideWith((ref) => Stream.value(items)),
+        activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
       ],
     );
 
     testWidgets('a user tracking no shows is told to add one', (tester) async {
-      await pumpUpNext(tester, tracked: const []);
+      await pumpUpNext(tester, items: const []);
 
       expect(find.text('No shows tracked yet'), findsOneWidget);
-      expect(find.text('Nothing airing this week'), findsNothing);
+      expect(find.text("You're all caught up"), findsNothing);
     });
 
-    // Same empty list, opposite advice. Sharing one string here would tell a
+    // Same empty queue, opposite advice. Sharing one string here would tell a
     // user tracking twelve shows that they track none.
-    testWidgets('a user tracking shows with nothing airing gets other copy', (
+    testWidgets('a user tracking shows but caught up gets the caught-up copy', (
       tester,
     ) async {
-      await pumpUpNext(
-        tester,
-        tracked: const [(sourceId: 1, itemId: 1, title: 'Severance')],
-      );
+      await pumpUpNext(tester, items: [trackedShow()]);
 
-      expect(find.text('Nothing airing this week'), findsOneWidget);
+      expect(find.text("You're all caught up"), findsOneWidget);
       expect(find.text('No shows tracked yet'), findsNothing);
     });
 
-    // Before the tracked set resolves we cannot know which case we are in.
-    // Guessing "you track no shows" at a user with a full library is the worse
-    // mistake, so the neutral copy is the default.
-    testWidgets('an unresolved tracked set falls back to the neutral copy', (
+    // Before the library resolves we cannot know which case we are in. Guessing
+    // "you track no shows" at a user with a full library is the worse mistake,
+    // so the caught-up copy is the default.
+    testWidgets('an unresolved library falls back to the caught-up copy', (
       tester,
     ) async {
       await pump(
         tester,
         const UpNextScreen(),
         [
-          trackedShowsProvider.overrideWith(
-            (ref) => const Stream<List<TrackedShow>>.empty(),
+          watchQueueProvider.overrideWith((ref) async => const <QueueEntry>[]),
+          libraryItemsProvider.overrideWith(
+            (ref) => const Stream<List<LibraryItem>>.empty(),
           ),
-          upcomingThisWeekProvider.overrideWith(
-            (ref) async => const <UpcomingEntry>[],
-          ),
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
         ],
       );
-      expect(find.text('Nothing airing this week'), findsOneWidget);
+      expect(find.text("You're all caught up"), findsOneWidget);
     });
   });
 

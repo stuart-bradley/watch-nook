@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
@@ -13,6 +14,7 @@ import 'package:watch_nook/core/import_export/import/resolver.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/import/domain/import_state.dart';
+import 'package:watch_nook/features/library/data/tracked_show_sync.dart';
 
 part 'import_providers.g.dart';
 
@@ -88,15 +90,19 @@ class ImportController extends _$ImportController {
       sourceKind: _sourceKind,
     );
 
-    final resolutions = <Resolution>[];
-    for (final record in result.records) {
-      state = ImportRunning(
+    state = ImportRunning(
+      ImportPhase.resolving,
+      total: result.records.length,
+    );
+    final resolutions = await _resolveAll(
+      result.records,
+      resolver,
+      onProgress: (done) => state = ImportRunning(
         ImportPhase.resolving,
-        done: resolutions.length,
+        done: done,
         total: result.records.length,
-      );
-      resolutions.add(await resolver.resolve(record));
-    }
+      ),
+    );
 
     final pending = resolutions.whereType<Ambiguous>().toList();
     if (pending.isEmpty) {
@@ -108,7 +114,14 @@ class ImportController extends _$ImportController {
       source: source,
       autoResolved: resolutions.where((r) => r is! Ambiguous).toList(),
       pending: pending,
-      choices: const {},
+      // Pre-select each title's top candidate. TMDB returns them in relevance
+      // order and the first is almost always right (regional versions aside),
+      // so "accept all" is one tap; wrong ones are re-picked or skipped. Titles
+      // with no candidate stay undecided (a skip).
+      choices: {
+        for (final (i, a) in pending.indexed)
+          if (a.candidates.isNotEmpty) i: a.candidates.first,
+      },
       parseSkipped: result.skippedRows,
     );
   }
@@ -156,8 +169,49 @@ class ImportController extends _$ImportController {
       await applier.apply(resolutions),
       parseSkipped: parseSkipped,
     );
+    // Fetch the per-show metadata an import can't (episode counts, show
+    // status), so the grid's progress labels and the derived Up-to-date
+    // category are right. Fire-and-forget — the summary is already shown.
+    unawaited(ref.read(trackedShowSyncProvider).refresh());
   }
 
   MetadataSourceKind get _sourceKind =>
       metadataSourceKindOf(ref.read(activeMetadataBackendProvider));
+}
+
+/// Max metadata lookups in flight during import. Bounding concurrency is the
+/// rate-limit guard: TMDB throttles per IP, so firing a 300-title import all at
+/// once would 429. Six in flight is fast without tripping the limit; the
+/// resolver already degrades a stray 429 to [Unresolved] (the record still
+/// applies), so no explicit backoff is needed.
+const _resolveConcurrency = 6;
+
+/// Resolves [records] with up to [_resolveConcurrency] lookups running at once,
+/// preserving input order. [onProgress] reports the running completed count.
+///
+/// The index grab (`next++`) and the length check run synchronously between
+/// awaits, so the workers never race for the same record on Dart's single
+/// event loop.
+Future<List<Resolution>> _resolveAll(
+  List<ImportRecord> records,
+  Resolver resolver, {
+  required void Function(int done) onProgress,
+}) async {
+  final results = List<Resolution?>.filled(records.length, null);
+  var next = 0;
+  var done = 0;
+
+  Future<void> worker() async {
+    while (next < records.length) {
+      final i = next++;
+      results[i] = await resolver.resolve(records[i]);
+      onProgress(++done);
+    }
+  }
+
+  await Future.wait([
+    for (var w = 0; w < _resolveConcurrency && w < records.length; w++)
+      worker(),
+  ]);
+  return results.cast<Resolution>();
 }

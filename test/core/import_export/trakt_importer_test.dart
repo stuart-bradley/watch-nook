@@ -30,6 +30,13 @@ ImportArchive _json(String source) => ImportArchive({
   'export.json': Uint8List.fromList(utf8.encode(source)),
 });
 
+/// A multi-file archive keyed by basename — the real "Settings → Data → Export"
+/// download is a zip of per-endpoint JSON arrays, not one object.
+ImportArchive _archiveOf(Map<String, String> files) => ImportArchive({
+  for (final entry in files.entries)
+    entry.key: Uint8List.fromList(utf8.encode(entry.value)),
+});
+
 ImportRecord _byTitle(ParseResult parsed, String title) =>
     parsed.records.firstWhere((r) => r.title == title);
 
@@ -55,6 +62,93 @@ void main() {
 
     test('rejects JSON that is not a Trakt export', () {
       expect(TraktImporter.canRead(_json('{"films": []}')), isFalse);
+    });
+
+    test('accepts the real multi-file export (watched-*.json arrays)', () {
+      // The real download is a zip of per-endpoint arrays, not one object —
+      // without recognising it the whole import silently does nothing.
+      final archive = _archiveOf({'watched-shows.json': '[]'});
+      expect(TraktImporter.canRead(archive), isTrue);
+    });
+  });
+
+  group('multi-file export (Settings → Data → Export)', () {
+    ImportArchive realExport() => _archiveOf({
+      'watched-shows.json': jsonEncode([
+        {
+          'plays': 3,
+          'show': {
+            'title': 'Severance',
+            'year': 2022,
+            'ids': {'tmdb': 95396, 'imdb': 'tt11280740'},
+          },
+          'seasons': [
+            {
+              'number': 1,
+              'episodes': [
+                {
+                  'number': 1,
+                  'plays': 1,
+                  'last_watched_at': '2022-02-18T00:00:00Z',
+                },
+                {'number': 2, 'plays': 1},
+              ],
+            },
+          ],
+        },
+      ]),
+      'watched-movies.json': jsonEncode([
+        {
+          'plays': 1,
+          'last_watched_at': '2021-10-22T00:00:00Z',
+          'movie': {
+            'title': 'Dune',
+            'year': 2021,
+            'ids': {'tmdb': 438631},
+          },
+        },
+      ]),
+    });
+
+    test('reads per-episode history and movies from the array files', () {
+      final parsed = TraktImporter.parse(realExport());
+
+      final show = _byTitle(parsed, 'Severance');
+      expect(show.watches, hasLength(2), reason: 'two episodes watched');
+      expect(show.tmdbId, 95396);
+
+      final movie = _byTitle(parsed, 'Dune');
+      expect(movie.mediaType, MediaType.movie);
+      expect(movie.watches, hasLength(1));
+    });
+  });
+
+  group('watched show with no episode tree (G1 fallback)', () {
+    test('imports as watching, not an empty watchlist entry', () {
+      // An export made without extended=full omits `seasons`. Don't invent
+      // episode coordinates, but don't drop the show to watchlist either.
+      final parsed = TraktImporter.parse(
+        _json(
+          jsonEncode({
+            'watched': {
+              'shows': [
+                {
+                  'plays': 12,
+                  'last_watched_at': '2024-01-01T00:00:00Z',
+                  'show': {
+                    'title': 'Slow Horses',
+                    'year': 2022,
+                    'ids': {'tmdb': 95396},
+                  },
+                },
+              ],
+            },
+          }),
+        ),
+      );
+      final show = parsed.records.single;
+      expect(show.trackStatus, TrackStatus.watching);
+      expect(show.hasFirstWatch, isFalse, reason: 'no episode coords invented');
     });
   });
 

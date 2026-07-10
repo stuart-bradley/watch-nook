@@ -67,6 +67,15 @@ class AutoBackupService {
     await _temp.rename(file.path);
   }
 
+  /// Deletes the on-device snapshot (and any in-flight temp). Part of the GDPR
+  /// delete-all: the manifest allowlist backs up exactly this file, so removing
+  /// it is what stops wiped data being re-restored on the next launch or
+  /// re-uploaded by Android Auto Backup.
+  Future<void> deleteBackup() async {
+    if (file.existsSync()) await file.delete();
+    if (_temp.existsSync()) await _temp.delete();
+  }
+
   /// Fresh-install restore. Returns true when it actually put items back.
   ///
   /// Keyed on an **empty library**, not on a "first run" pref — prefs are

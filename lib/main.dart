@@ -9,6 +9,7 @@ import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/import_export/export/export_providers.dart';
 import 'package:watch_nook/core/routing/app_router.dart';
 import 'package:watch_nook/core/theme/watchnook_theme.dart';
+import 'package:watch_nook/features/library/data/tracked_show_sync.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
 import 'package:watch_nook/features/settings/data/shared_preferences_provider.dart';
 import 'package:watch_nook/features/settings/data/theme_mode_provider.dart';
@@ -53,6 +54,35 @@ Future<void> main() async {
       child: const WatchnookApp(),
     ),
   );
+
+  // Daily tracked-show metadata refresh (Epic B, periodic). Keeps episode
+  // counts, show status and next-air dates current so the user never has to hit
+  // Settings → Refresh. After runApp, fire-and-forget and self-guarded — an
+  // offline launch or a sync failure must never touch the boot path — and
+  // throttled to once a day so a launch-heavy day isn't a TMDB-call-heavy one.
+  unawaited(_dailyLibrarySync(container, prefs));
+}
+
+/// Runs [TrackedShowSync] at most once a day, stamping the run under
+/// [lastLibrarySyncKey]. The sync is per-show fault-tolerant and cache-first,
+/// so a warm library is near-free; only a genuine throw skips the stamp, so it
+/// retries next launch rather than hammering every launch.
+Future<void> _dailyLibrarySync(
+  ProviderContainer container,
+  SharedPreferences prefs,
+) async {
+  try {
+    final raw = prefs.getInt(lastLibrarySyncKey);
+    final last = raw == null ? null : DateTime.fromMillisecondsSinceEpoch(raw);
+    if (!shouldDailySync(DateTime.now(), last)) return;
+    await container.read(trackedShowSyncProvider).refresh();
+    await prefs.setInt(
+      lastLibrarySyncKey,
+      DateTime.now().millisecondsSinceEpoch,
+    );
+  } on Object catch (e, s) {
+    debugPrint('daily library sync skipped: $e\n$s');
+  }
 }
 
 /// Root widget. The Honey theme in light and dark; which one shows is the

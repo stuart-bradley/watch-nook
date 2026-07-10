@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/import_export/export/export_providers.dart';
 import 'package:watch_nook/core/import_export/export/import_export_service.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/attribution_footer.dart';
+import 'package:watch_nook/features/library/data/tracked_show_sync.dart';
+import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
 import 'package:watch_nook/features/settings/data/export_share.dart';
 import 'package:watch_nook/features/settings/data/theme_mode_provider.dart';
 
@@ -40,6 +43,14 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => context.push('/import'),
           ),
           ListTile(
+            leading: const Icon(Icons.sync),
+            title: const Text('Refresh library'),
+            subtitle: const Text(
+              'Update episode counts and next episodes for your shows.',
+            ),
+            onTap: () => _refreshLibrary(context, ref),
+          ),
+          ListTile(
             leading: const Icon(Icons.download_outlined),
             title: const Text('Export JSON'),
             subtitle: const Text('Everything you track, in one file.'),
@@ -70,6 +81,21 @@ class SettingsScreen extends ConsumerWidget {
               'Refresh the file Android Auto Backup uploads.',
             ),
             onTap: () => _backUpNow(context, ref),
+          ),
+          ListTile(
+            leading: Icon(
+              Icons.delete_forever_outlined,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            title: Text(
+              'Delete all data',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+            subtitle: const Text(
+              'Erase your library, watch history, cache and backup. This '
+              'cannot be undone.',
+            ),
+            onTap: () => _deleteAll(context, ref),
           ),
           const _SectionHeader('About'),
           const ListTile(
@@ -176,6 +202,82 @@ Future<void> _export(
     if (!context.mounted) return;
     messenger.showSnackBar(
       const SnackBar(content: Text("Couldn't export your data.")),
+    );
+  }
+}
+
+/// GDPR "delete everything" (US-D1). Wipes all four surfaces a user's data can
+/// hide in — the library + watch events, the disposable metadata cache, and the
+/// Auto Backup snapshot — then resets first-run so the app returns to a
+/// fresh-install state (the router redirect reacts and reopens onboarding).
+/// Deleting the backup file is load-bearing: the manifest allowlist backs up
+/// exactly that file, so leaving it would silently re-restore the wiped data on
+/// the next launch.
+Future<void> _deleteAll(BuildContext context, WidgetRef ref) async {
+  // Captured before the await so the SnackBar doesn't reach across the gap.
+  final messenger = ScaffoldMessenger.of(context);
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Delete all data?'),
+      content: const Text(
+        'This erases your entire library, watch history, cached metadata and '
+        'the on-device backup. It cannot be undone.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Delete everything'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+
+  try {
+    await ref.read(libraryDaoProvider).deleteAllUserData();
+    await ref.read(mediaCacheDaoProvider).clearAll();
+    final backup = await ref.read(autoBackupServiceProvider.future);
+    await backup.deleteBackup();
+    // Last: resetting first-run flips the router redirect back to onboarding.
+    await ref.read(onboardingSeenProvider.notifier).reset();
+    messenger.showSnackBar(
+      const SnackBar(content: Text('All data deleted.')),
+    );
+  } on Object catch (e, s) {
+    debugPrint('delete-all failed: $e\n$s');
+    messenger.showSnackBar(
+      const SnackBar(content: Text("Couldn't delete your data.")),
+    );
+  }
+}
+
+/// Syncs the per-show metadata an import can't fetch (episode counts, show
+/// status), so progress labels and the Up-to-date category are accurate. Runs
+/// automatically after an import; this is the manual re-run.
+Future<void> _refreshLibrary(BuildContext context, WidgetRef ref) async {
+  final messenger = ScaffoldMessenger.of(context)
+    ..showSnackBar(
+      const SnackBar(content: Text('Refreshing your library…')),
+    );
+  try {
+    await ref.read(trackedShowSyncProvider).refresh();
+    if (!context.mounted) return;
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Library refreshed.')),
+    );
+  } on Object catch (e, s) {
+    debugPrint('library refresh failed: $e\n$s');
+    if (!context.mounted) return;
+    messenger.showSnackBar(
+      const SnackBar(content: Text("Couldn't refresh — you may be offline.")),
     );
   }
 }

@@ -41,13 +41,25 @@ class ImportArchive {
     return null;
   }
 
-  /// [read], decoded as UTF-8 with the byte-order mark stripped (IMDb's export
-  /// ships one, and a leading `﻿` would corrupt the first CSV header).
-  /// Malformed bytes are replaced rather than thrown on (AD-7).
+  /// [read], decoded with the encoding auto-detected and the byte-order mark
+  /// stripped (some exports ship one; a leading `﻿` would corrupt the first CSV
+  /// header). Most exports are UTF-8, but **IMDb's CSVs are windows-1252** —
+  /// reading those as UTF-8 mangles accented titles (é becomes a `?` box) and
+  /// breaks id-less matching. A strict UTF-8 decode throws on cp1252 bytes, so
+  /// on that throw fall back to latin1 (0xA0-0xFF is cp1252's accents).
+  ///
+  /// ponytail: latin1 ~ cp1252 for accents only; cp1252's 0x80-0x9F (smart
+  /// quotes, em dash) decode to control chars. A real cp1252 codec only if a
+  /// title needs those — accented letters are the case that breaks matching.
   String? readText(String name) {
     final bytes = read(name);
     if (bytes == null) return null;
-    final text = utf8.decode(bytes, allowMalformed: true);
+    String text;
+    try {
+      text = utf8.decode(bytes); // strict — throws on non-UTF-8 (e.g. cp1252)
+    } on FormatException {
+      text = latin1.decode(bytes);
+    }
     return text.startsWith('﻿') ? text.substring(1) : text;
   }
 

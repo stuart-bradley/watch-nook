@@ -67,14 +67,28 @@ void main() {
   Widget harness(List<LibraryItem> items) => ProviderScope(
     overrides: [
       activeMetadataSourceProvider.overrideWithValue(_ThrowingSource()),
-      libraryGridProvider.overrideWith(
-        (ref, filter) => Stream.value([
+      libraryGridProvider.overrideWith((ref, filter) {
+        // Mirror the real provider's status mapping (incl. the derived
+        // Up-to-date refinement) over the snapshot.
+        bool statusMatch(LibraryItem i) => switch (filter.status) {
+          LibraryStatusFilter.all => true,
+          LibraryStatusFilter.upToDate => isUpToDate(i),
+          LibraryStatusFilter.watching =>
+            i.trackStatus == TrackStatus.watching && !isUpToDate(i),
+          LibraryStatusFilter.completed =>
+            i.trackStatus == TrackStatus.completed && !isUpToDate(i),
+          LibraryStatusFilter.watchlist =>
+            i.trackStatus == TrackStatus.watchlist,
+          LibraryStatusFilter.onHold => i.trackStatus == TrackStatus.onHold,
+          LibraryStatusFilter.dropped => i.trackStatus == TrackStatus.dropped,
+        };
+        return Stream.value([
           for (final item in items)
-            if ((filter.status == null || item.trackStatus == filter.status) &&
+            if (statusMatch(item) &&
                 (filter.type == null || item.mediaType == filter.type))
               item,
-        ]),
-      ),
+        ]);
+      }),
     ],
     child: const MaterialApp(home: Scaffold(body: LibraryScreen())),
   );

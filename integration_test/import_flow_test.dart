@@ -419,7 +419,10 @@ class _FakeSource implements MetadataSource {
   ) async => [];
 
   @override
-  Future<MediaSearchResult?> resolveByExternalId(String imdbId) async => null;
+  Future<MediaSearchResult?> resolveByExternalId(
+    String id, {
+    ExternalIdKind kind = ExternalIdKind.imdb,
+  }) async => null;
 
   @override
   String imageUrl(String path, ImageSize size) =>

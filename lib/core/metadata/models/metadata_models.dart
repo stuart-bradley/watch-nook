@@ -12,6 +12,21 @@ enum MediaKind {
   static MediaKind fromName(String name) => MediaKind.values.byName(name);
 }
 
+/// Which external-id namespace an id belongs to, for a source's
+/// `resolveByExternalId`. IMDb is universal; a **TVDB** id comes
+/// from a TV Time export and maps to a TMDB title via TMDB's
+/// `/find?external_source=tvdb_id` — the rung that stops TV Time shows falling
+/// to fuzzy title search under the TMDB backend.
+enum ExternalIdKind {
+  imdb('imdb_id'),
+  tvdb('tvdb_id');
+
+  const ExternalIdKind(this.tmdbSource);
+
+  /// The value TMDB's `/find` endpoint expects for `external_source`.
+  final String tmdbSource;
+}
+
 /// Whether a freeform backend `showStatus` means the show has finished airing.
 ///
 /// A heuristic: both providers phrase it differently ("Ended", "Canceled",
@@ -45,6 +60,7 @@ class MediaSearchResult {
     this.year,
     this.posterPath,
     this.overview,
+    this.originCountry = const [],
   });
 
   /// Round-trips through the cache `payload`. `as`-casts throw `TypeError` on a
@@ -60,6 +76,9 @@ class MediaSearchResult {
         year: json['year'] as int?,
         posterPath: json['posterPath'] as String?,
         overview: json['overview'] as String?,
+        // Older cache payloads predate this field — default, don't throw.
+        originCountry:
+            (json['originCountry'] as List?)?.cast<String>() ?? const [],
       );
 
   final MediaKind kind;
@@ -81,6 +100,10 @@ class MediaSearchResult {
   final String? posterPath;
   final String? overview;
 
+  /// ISO-3166-1 origin-country codes (e.g. `['US']`, `['JP']`). Disambiguates
+  /// same-titled candidates in the import picker (multiple regional versions).
+  final List<String> originCountry;
+
   Map<String, dynamic> toJson() => {
     'kind': kind.name,
     'title': title,
@@ -90,6 +113,7 @@ class MediaSearchResult {
     'year': year,
     'posterPath': posterPath,
     'overview': overview,
+    'originCountry': originCountry,
   };
 }
 

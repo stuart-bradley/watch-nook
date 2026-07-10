@@ -16,7 +16,6 @@ import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/tmdb/tmdb_source.dart';
-import 'package:watch_nook/core/metadata/tvdb/tvdb_source.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
 
@@ -181,42 +180,20 @@ void main() {
     expect(find.text('Hello, Ms.'), findsNothing);
   });
 
-  testWidgets('TMDB attribution is present on the detail screen', (
+  testWidgets('attribution is not on detail (it moved to Settings)', (
     tester,
   ) async {
+    // The TMDB logo + notice moved to Settings → About; a copy on every title's
+    // detail page was excessive. settings_screen_test guards that it renders
+    // there. This guards that it stays off the detail screen.
     await pumpDetail(
       tester,
       active: TmdbSource(client: noNetwork(), apiKey: 'k'),
       repoSource: _FakeSource(details: details),
     );
 
-    expect(
-      find.text(
-        'This product uses TMDB and the TMDB APIs but is not endorsed, '
-        'certified, or otherwise approved by TMDB.',
-      ),
-      findsOneWidget,
-    );
-    expect(find.text('https://www.themoviedb.org/'), findsOneWidget);
-    // The TVDB credit must not leak onto a TMDB-backed screen.
-    expect(find.text('Metadata provided by TheTVDB.'), findsNothing);
-  });
-
-  testWidgets('TheTVDB attribution replaces it when TVDB is the backend', (
-    tester,
-  ) async {
-    await pumpDetail(
-      tester,
-      active: TvdbSource(client: noNetwork(), apiKey: 'k'),
-      repoSource: _FakeSource(details: details),
-    );
-
-    expect(find.text('Metadata provided by TheTVDB.'), findsOneWidget);
-    expect(find.text('https://www.thetvdb.com/'), findsOneWidget);
-    expect(
-      find.textContaining('not endorsed, certified'),
-      findsNothing,
-    );
+    expect(find.textContaining('not endorsed, certified'), findsNothing);
+    expect(find.text('https://www.themoviedb.org/'), findsNothing);
   });
 
   testWidgets('a stale cache still renders when the source is offline', (
@@ -257,10 +234,8 @@ void main() {
       repoSource: _FakeSource(offline: true),
     );
 
-    // The stored row still renders; the details region says so, and the
-    // attribution footer is still mandatory.
+    // The stored row still renders; the details region says so.
     expect(find.text('Severance'), findsWidgets);
     expect(find.text("Couldn't load details. You're offline."), findsOneWidget);
-    expect(find.textContaining('not endorsed, certified'), findsOneWidget);
   });
 }

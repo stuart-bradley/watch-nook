@@ -24,18 +24,23 @@ import 'package:watch_nook/features/detail/data/bulk_mark.dart';
 /// - Offline + cold cache asserts **zero** rows: a per-season write loop would
 ///   leave the first season marked and the rest not.
 
-/// Serves only the seasons in [bySeason]; anything else is a 500 (offline).
+/// Serves only the seasons in [bySeason]; anything else throws [onMissing]
+/// (a 500/offline by default; pass a 404 to stand in for a non-transient error).
 class _RecordingSource implements MetadataSource {
-  _RecordingSource(this.bySeason);
+  _RecordingSource(
+    this.bySeason, {
+    this.onMissing = const MetadataException(500, 'offline'),
+  });
 
   final Map<int, List<EpisodeInfo>> bySeason;
+  final MetadataException onMissing;
   final fetched = <int>[];
 
   @override
   Future<List<EpisodeInfo>> seasonEpisodes(int showId, int season) async {
     fetched.add(season);
     final rows = bySeason[season];
-    if (rows == null) throw const MetadataException(500, 'offline');
+    if (rows == null) throw onMissing;
     return rows;
   }
 
@@ -66,25 +71,29 @@ void main() {
     ),
   );
 
-  /// Seeds a **fresh** cached season (fetchedAt == the fixed clock's now), so
-  /// the repository serves it without touching the source.
-  Future<void> cacheSeason(int season, List<EpisodeInfo> episodes) =>
-      db.mediaCacheDao.replaceSeasonEpisodes(
-        MetadataSourceKind.tmdb,
-        showId,
-        season,
-        [
-          for (final e in episodes)
-            CachedEpisodesCompanion.insert(
-              source: MetadataSourceKind.tmdb,
-              showSourceId: showId,
-              seasonNumber: e.seasonNumber,
-              episodeNumber: e.episodeNumber,
-              fetchedAt: now,
-              runtimeMinutes: Value(e.runtimeMinutes),
-            ),
-        ],
-      );
+  /// Seeds a cached season. [fetchedAt] defaults to the fixed clock's now (a
+  /// **fresh** cache the repository serves without touching the source); pass
+  /// an older time to seed a **stale** one that would revalidate.
+  Future<void> cacheSeason(
+    int season,
+    List<EpisodeInfo> episodes, {
+    DateTime? fetchedAt,
+  }) => db.mediaCacheDao.replaceSeasonEpisodes(
+    MetadataSourceKind.tmdb,
+    showId,
+    season,
+    [
+      for (final e in episodes)
+        CachedEpisodesCompanion.insert(
+          source: MetadataSourceKind.tmdb,
+          showSourceId: showId,
+          seasonNumber: e.seasonNumber,
+          episodeNumber: e.episodeNumber,
+          fetchedAt: fetchedAt ?? now,
+          runtimeMinutes: Value(e.runtimeMinutes),
+        ),
+    ],
+  );
 
   CachingMetadataRepository repoOver(_RecordingSource source) =>
       CachingMetadataRepository(
@@ -195,6 +204,27 @@ void main() {
     // Season 1 resolved fine — a per-season write loop would have marked it.
     expect(await db.libraryDao.watchEventsFor(id), isEmpty);
     expect((await db.libraryDao.getItem(id))!.watchedCount, 0);
+  });
+
+  test('a stale cached season still marks from cache (uses .first)', () async {
+    // Regression guard for "does nothing until reload": a stale cache must mark
+    // from its cache-first emission, not abort on the revalidation. With a
+    // non-transient (404) upstream error the SWR stream errors *after* the
+    // cache emission — `.last` would rethrow and mark nothing; `.first` marks
+    // from cache and completes.
+    final id = await insertShow();
+    await cacheSeason(
+      1,
+      [episode(1, 1), episode(1, 2)],
+      fetchedAt: DateTime(2026, 6), // stale: > 12h before the clock's now
+    );
+    final source = _RecordingSource(
+      const {},
+      onMissing: const MetadataException(404, 'gone'),
+    );
+
+    expect(await bulk(source, id, seasons: [1]), 2);
+    expect(await watched(id), {(1, 1), (1, 2)});
   });
 
   test('watchedAt is stamped from the injected clock', () async {

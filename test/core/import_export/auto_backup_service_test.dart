@@ -182,6 +182,31 @@ void main() {
     },
   );
 
+  test(
+    'deleteBackup removes the snapshot so a wipe is not re-restored',
+    () async {
+      await seed(title: 'Wiped');
+      await backup.snapshot();
+      expect(backup.file.existsSync(), isTrue);
+
+      await backup.deleteBackup();
+
+      expect(backup.file.existsSync(), isFalse);
+      expect(File('${backup.file.path}.tmp').existsSync(), isFalse);
+      expect(contents(), isEmpty);
+
+      // The GDPR delete-all wiped the DB too; with the backup gone, a fresh
+      // install finds nothing to resurrect.
+      await dao.deleteAllUserData();
+      expect(await backup.restoreIfEmpty(), isFalse);
+    },
+  );
+
+  test('deleteBackup on a missing file is a no-op, not a throw', () async {
+    await backup.deleteBackup();
+    expect(contents(), isEmpty);
+  });
+
   test('restore never resurrects the disposable cache', () async {
     await seed();
     await db
