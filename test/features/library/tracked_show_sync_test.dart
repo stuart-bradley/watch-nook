@@ -121,16 +121,26 @@ void main() {
     expect(item.genresCsv, 'Drama,Sci-Fi');
   });
 
-  test('a detail with no runtime leaves an existing runtime intact', () async {
-    // Absent, not null: a partial detail must not clobber a known runtime.
+  test('a partial detail leaves existing runtime and genres intact', () async {
+    // Absent, not null: a detail carrying no runtime/genres must not clobber
+    // values a search-add already snapshotted onto the item.
     final id = await seedShow();
     await db.libraryDao.updateManyItems([
-      (id, const LibraryItemsCompanion(runtimeMinutes: Value(50))),
+      (
+        id,
+        const LibraryItemsCompanion(
+          runtimeMinutes: Value(50),
+          genresCsv: Value('Drama'),
+        ),
+      ),
     ]);
 
+    // details() defaults to null runtime and empty genres.
     await syncWith(_FakeRepo({100: details(total: 10)})).refresh();
 
-    expect((await db.libraryDao.getAll()).single.runtimeMinutes, 50);
+    final item = (await db.libraryDao.getAll()).single;
+    expect(item.runtimeMinutes, 50);
+    expect(item.genresCsv, 'Drama');
   });
 
   test('an offline/unknown show is skipped, not fatal to the pass', () async {

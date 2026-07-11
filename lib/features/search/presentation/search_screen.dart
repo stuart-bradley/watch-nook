@@ -5,13 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
-import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/core/widgets/poster_placeholder.dart';
+import 'package:watch_nook/core/widgets/track_status_ui.dart';
 import 'package:watch_nook/features/search/data/search_providers.dart';
 
 /// Debounce before a keystroke fires a network search (#16).
@@ -123,22 +123,7 @@ Future<void> _pickStatusAndAdd(
   WidgetRef ref,
   MediaSearchResult result,
 ) async {
-  final status = await showModalBottomSheet<TrackStatus>(
-    context: context,
-    builder: (context) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final s in TrackStatus.values)
-            ListTile(
-              leading: Icon(_statusIcon(s)),
-              title: Text(_statusLabel(s)),
-              onTap: () => Navigator.pop(context, s),
-            ),
-        ],
-      ),
-    ),
-  );
+  final status = await showTrackStatusPicker(context);
   if (status == null) return;
 
   final added = await addToLibrary(
@@ -152,7 +137,7 @@ Future<void> _pickStatusAndAdd(
   if (!context.mounted) return;
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text('Added "${added.title}" to ${_statusLabel(status)}'),
+      content: Text('Added "${added.title}" to ${status.label}'),
     ),
   );
 }
@@ -195,19 +180,3 @@ class _Poster extends ConsumerWidget {
     );
   }
 }
-
-String _statusLabel(TrackStatus s) => switch (s) {
-  TrackStatus.watchlist => 'Watchlist',
-  TrackStatus.watching => 'Watching',
-  TrackStatus.completed => 'Completed',
-  TrackStatus.onHold => 'On hold',
-  TrackStatus.dropped => 'Dropped',
-};
-
-IconData _statusIcon(TrackStatus s) => switch (s) {
-  TrackStatus.watchlist => Icons.bookmark_add_outlined,
-  TrackStatus.watching => Icons.play_circle_outline,
-  TrackStatus.completed => Icons.check_circle_outline,
-  TrackStatus.onHold => Icons.pause_circle_outline,
-  TrackStatus.dropped => Icons.cancel_outlined,
-};

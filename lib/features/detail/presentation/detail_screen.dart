@@ -11,6 +11,7 @@ import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
+import 'package:watch_nook/core/widgets/track_status_ui.dart';
 import 'package:watch_nook/features/detail/data/bulk_mark.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 
@@ -183,7 +184,7 @@ class _Header extends StatelessWidget {
     final caption = <String>[
       if (year != null) '$year',
       kind,
-      _statusLabel(item.trackStatus),
+      item.trackStatus.label,
       ?showStatus,
     ].join(' · ');
 
@@ -268,8 +269,8 @@ class _StatusRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ActionChip(
-      avatar: Icon(_statusIcon(item.trackStatus)),
-      label: Text(_statusLabel(item.trackStatus)),
+      avatar: Icon(item.trackStatus.icon),
+      label: Text(item.trackStatus.label),
       onPressed: () => unawaited(_pickStatus(context, ref, item)),
     );
   }
@@ -280,22 +281,7 @@ Future<void> _pickStatus(
   WidgetRef ref,
   LibraryItem item,
 ) async {
-  final picked = await showModalBottomSheet<TrackStatus>(
-    context: context,
-    builder: (context) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final s in TrackStatus.values)
-            ListTile(
-              leading: Icon(_statusIcon(s)),
-              title: Text(_statusLabel(s)),
-              onTap: () => Navigator.pop(context, s),
-            ),
-        ],
-      ),
-    ),
-  );
+  final picked = await showTrackStatusPicker(context);
   if (picked == null) return;
   await ref
       .read(libraryDaoProvider)
@@ -623,19 +609,3 @@ String _isoDate(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-'
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
-
-String _statusLabel(TrackStatus s) => switch (s) {
-  TrackStatus.watchlist => 'Watchlist',
-  TrackStatus.watching => 'Watching',
-  TrackStatus.completed => 'Completed',
-  TrackStatus.onHold => 'On hold',
-  TrackStatus.dropped => 'Dropped',
-};
-
-IconData _statusIcon(TrackStatus s) => switch (s) {
-  TrackStatus.watchlist => Icons.bookmark_add_outlined,
-  TrackStatus.watching => Icons.play_circle_outline,
-  TrackStatus.completed => Icons.check_circle_outline,
-  TrackStatus.onHold => Icons.pause_circle_outline,
-  TrackStatus.dropped => Icons.cancel_outlined,
-};
