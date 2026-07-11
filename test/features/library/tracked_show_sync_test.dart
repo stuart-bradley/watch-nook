@@ -55,13 +55,19 @@ void main() {
   setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));
   tearDown(() => db.close());
 
-  MediaDetails details({int? total, String? status}) => MediaDetails(
+  MediaDetails details({
+    int? total,
+    String? status,
+    int? runtime,
+    List<String> genres = const [],
+  }) => MediaDetails(
     kind: MediaKind.tv,
     title: 'Show',
-    genres: const [],
+    genres: genres,
     seasons: const [],
     episodeCountTotal: total,
     showStatus: status,
+    runtimeMinutes: runtime,
     posterPath: '/p.jpg',
   );
 
@@ -97,6 +103,34 @@ void main() {
     expect(item.episodeCountTotal, 19);
     expect(item.showStatus, 'Returning Series');
     expect(item.posterPath, '/p.jpg');
+  });
+
+  test('backfills per-episode runtime and genres onto the item', () async {
+    // Imports carry neither runtime nor genres, so stats read 0h with no genre
+    // breakdown until the refresh enriches the item. The `item.runtimeMinutes`
+    // fallback then estimates hours, and `genresCsv` feeds the genre breakdown.
+    await seedShow();
+    await syncWith(
+      _FakeRepo({
+        100: details(total: 10, runtime: 42, genres: ['Drama', 'Sci-Fi']),
+      }),
+    ).refresh();
+
+    final item = (await db.libraryDao.getAll()).single;
+    expect(item.runtimeMinutes, 42);
+    expect(item.genresCsv, 'Drama,Sci-Fi');
+  });
+
+  test('a detail with no runtime leaves an existing runtime intact', () async {
+    // Absent, not null: a partial detail must not clobber a known runtime.
+    final id = await seedShow();
+    await db.libraryDao.updateManyItems([
+      (id, const LibraryItemsCompanion(runtimeMinutes: Value(50))),
+    ]);
+
+    await syncWith(_FakeRepo({100: details(total: 10)})).refresh();
+
+    expect((await db.libraryDao.getAll()).single.runtimeMinutes, 50);
   });
 
   test('an offline/unknown show is skipped, not fatal to the pass', () async {

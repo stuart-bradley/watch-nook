@@ -73,7 +73,13 @@ class _Body extends ConsumerWidget {
             children: [
               _Header(item: item, details: details),
               const SizedBox(height: WatchnookSpacing.md),
-              _RatingRow(item: item),
+              Row(
+                children: [
+                  _RatingRow(item: item),
+                  const SizedBox(width: WatchnookSpacing.sm),
+                  _StatusRow(item: item),
+                ],
+              ),
               if (item.mediaType == MediaType.movie) ...[
                 const SizedBox(height: WatchnookSpacing.md),
                 _MovieWatchActions(item: item),
@@ -249,6 +255,51 @@ Future<void> _pickRating(
   await ref
       .read(libraryDaoProvider)
       .updateRating(item.id, picked == -1 ? null : picked, now: clock.now());
+}
+
+/// The show's track status (`LibraryItems.trackStatus`). Tapping opens a picker
+/// so a title can be moved between statuses — On hold, Dropped, etc. — from the
+/// detail page; `updateStatus` was otherwise unreachable in the UI.
+class _StatusRow extends ConsumerWidget {
+  const _StatusRow({required this.item});
+
+  final LibraryItem item;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ActionChip(
+      avatar: Icon(_statusIcon(item.trackStatus)),
+      label: Text(_statusLabel(item.trackStatus)),
+      onPressed: () => unawaited(_pickStatus(context, ref, item)),
+    );
+  }
+}
+
+Future<void> _pickStatus(
+  BuildContext context,
+  WidgetRef ref,
+  LibraryItem item,
+) async {
+  final picked = await showModalBottomSheet<TrackStatus>(
+    context: context,
+    builder: (context) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final s in TrackStatus.values)
+            ListTile(
+              leading: Icon(_statusIcon(s)),
+              title: Text(_statusLabel(s)),
+              onTap: () => Navigator.pop(context, s),
+            ),
+        ],
+      ),
+    ),
+  );
+  if (picked == null) return;
+  await ref
+      .read(libraryDaoProvider)
+      .updateStatus(item.id, picked, now: clock.now());
 }
 
 /// A movie's watched toggle + rewatch log (#19, US-2/US-4). Watched-ness is the
@@ -579,4 +630,12 @@ String _statusLabel(TrackStatus s) => switch (s) {
   TrackStatus.completed => 'Completed',
   TrackStatus.onHold => 'On hold',
   TrackStatus.dropped => 'Dropped',
+};
+
+IconData _statusIcon(TrackStatus s) => switch (s) {
+  TrackStatus.watchlist => Icons.bookmark_add_outlined,
+  TrackStatus.watching => Icons.play_circle_outline,
+  TrackStatus.completed => Icons.check_circle_outline,
+  TrackStatus.onHold => Icons.pause_circle_outline,
+  TrackStatus.dropped => Icons.cancel_outlined,
 };

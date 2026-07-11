@@ -55,4 +55,14 @@ void main() {
     expect(light.colorScheme.primary, honeyLightPrimary);
     expect(dark.colorScheme.primary, honeyDarkPrimary);
   });
+
+  test('app-bar title is the larger serif (32sp) with negative tracking', () {
+    // Regression for undersized page titles: the serif reads small at title
+    // size, so the app-bar style must be headlineLarge (32sp) with the
+    // prototype's ≈-0.01em tracking, not a smaller headline step.
+    final style = WatchnookTheme.dark.appBarTheme.titleTextStyle;
+    expect(style?.fontSize, 32);
+    expect(style?.letterSpacing, isNotNull);
+    expect(style?.letterSpacing, lessThan(0));
+  });
 }

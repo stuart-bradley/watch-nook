@@ -109,9 +109,11 @@ void main() {
   ) async {
     await pumpShell(tester);
 
-    // Mounted at '/' (Library) — now the second tab; Up Next is first.
+    // Mounted at '/' (Library) — now the second tab; Up Next is first. The
+    // shell titles each tab, so the app bar tracks the active branch.
     expect(selectedTab(tester), 1);
     expect(find.text('Severance'), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Library'), findsOneWidget);
 
     await tester.tap(find.text('Up Next'));
     await tester.pumpAndSettle();
@@ -119,6 +121,7 @@ void main() {
     expect(location(), '/up-next');
     expect(selectedTab(tester), 0);
     expect(find.text('No shows tracked yet'), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Up Next'), findsOneWidget);
 
     await tester.tap(find.text('Stats'));
     await tester.pumpAndSettle();
@@ -127,6 +130,7 @@ void main() {
     expect(selectedTab(tester), 2);
     // The empty snapshot — this asserts the tab resolves, not what it computes.
     expect(find.text('No stats yet'), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Stats'), findsOneWidget);
 
     await tester.tap(find.text('Library'));
     await tester.pumpAndSettle();
@@ -134,6 +138,7 @@ void main() {
     expect(location(), '/');
     expect(selectedTab(tester), 1);
     expect(find.text('Severance'), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Library'), findsOneWidget);
   });
 
   testWidgets('the app-bar search action pushes the search route', (

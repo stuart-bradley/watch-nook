@@ -33,9 +33,10 @@ TrackedShowSync trackedShowSync(Ref ref) => TrackedShowSync(
 );
 
 /// Refreshes the per-show metadata an import can't fetch — `episodeCountTotal`,
-/// `showStatus`, poster — onto the tracked `LibraryItems` rows, so the grid's
-/// progress labels ("3 left") and the derived **Up to date** category are
-/// accurate. Cache-first per show (a warm library is cheap), bounded, and
+/// `showStatus`, poster, per-episode `runtimeMinutes` and `genresCsv` — onto
+/// the tracked `LibraryItems` rows, so the grid's progress labels ("3 left"),
+/// the derived **Up to date** category, and the Stats hours/genre breakdowns
+/// are accurate. Cache-first per show (a warm library is cheap), bounded, and
 /// per-show fault-tolerant (an offline / 404 show is skipped, not fatal). All
 /// writes land in one transaction, so the grid and Up Next recompute once.
 class TrackedShowSync {
@@ -86,6 +87,17 @@ class TrackedShowSync {
         LibraryItemsCompanion(
           episodeCountTotal: Value(d.episodeCountTotal),
           showStatus: Value(d.showStatus),
+          // Per-episode runtime + genres: the stats-snapshot enrichment an
+          // export can't carry. Import stays honest; the refresh backfills both
+          // so imported history contributes estimated hours (via the item
+          // runtime fallback) and a genre breakdown, clearing the "missing
+          // data" footnote. Absent, not null, on a partial detail.
+          runtimeMinutes: d.runtimeMinutes != null
+              ? Value(d.runtimeMinutes)
+              : const Value.absent(),
+          genresCsv: d.genres.isNotEmpty
+              ? Value(d.genres.join(','))
+              : const Value.absent(),
           // Don't clobber an existing poster with null on a partial detail.
           posterPath: d.posterPath != null
               ? Value(d.posterPath)

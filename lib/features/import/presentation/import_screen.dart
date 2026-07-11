@@ -52,7 +52,7 @@ class _Idle extends ConsumerWidget {
       const SizedBox(height: 16),
       Text(
         'Bring your history across',
-        style: Theme.of(context).textTheme.titleLarge,
+        style: Theme.of(context).textTheme.headlineSmall,
         textAlign: TextAlign.center,
       ),
       const SizedBox(height: 8),

@@ -171,9 +171,16 @@ class WatchnookTheme {
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        // headlineMedium, not headlineSmall: the Newsreader serif reads small
-        // at title size, so app-bar/page titles looked undersized on-device.
-        titleTextStyle: text.headlineMedium,
+        // Explicit 32sp, not a bare type-scale step: the GoogleFonts headline
+        // styles carry a null fontSize (the size is merged from typography
+        // geometry at build time), so swapping headlineSmall→Medium→Large moved
+        // the title's size unreliably — the prior "larger titles" fix barely
+        // showed. A hard fontSize makes the title deterministically large, plus
+        // the prototype's ≈-0.01em tracking for the low-x-height Newsreader.
+        titleTextStyle: text.headlineLarge?.copyWith(
+          fontSize: 32,
+          letterSpacing: -0.32,
+        ),
       ),
 
       // Rail card: elevation 0, hairline outline.

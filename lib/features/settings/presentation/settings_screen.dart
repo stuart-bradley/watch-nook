@@ -12,8 +12,9 @@ import 'package:watch_nook/features/settings/data/export_share.dart';
 import 'package:watch_nook/features/settings/data/theme_mode_provider.dart';
 
 /// ponytail: one string beats a `package_info_plus` dependency and a platform
-/// channel. Swap it in if this ever drifts from `pubspec.yaml`'s `version:`.
-const appVersion = '0.1.0';
+/// channel. A guard test (`version_test.dart`) keeps it in lockstep with
+/// `pubspec.yaml`'s `version:` so it can't silently drift.
+const appVersion = '0.2.0';
 
 /// Settings (#35, US-14): appearance, the data you own, and the **mandatory**
 /// metadata attribution. Pushed route `/settings` off the shell app bar.
@@ -135,6 +136,10 @@ class _ThemeModePicker extends ConsumerWidget {
         vertical: WatchnookSpacing.sm,
       ),
       child: SegmentedButton<AppAppearance>(
+        // No leading check on the selected segment: it reserves ~24dp that,
+        // across four segments on a narrow screen, wrapped "System"/"Dynamic"
+        // onto two lines.
+        showSelectedIcon: false,
         segments: const [
           ButtonSegment(value: AppAppearance.system, label: Text('System')),
           ButtonSegment(value: AppAppearance.light, label: Text('Light')),
