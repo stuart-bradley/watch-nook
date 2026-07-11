@@ -257,6 +257,18 @@ void main() {
     );
   });
 
+  testWidgets('the appearance picker hides the selected-check so labels fit '
+      'one line', (tester) async {
+    // Regression: the selected-segment check reserved ~24dp that, across four
+    // segments on a narrow screen, wrapped "System"/"Dynamic" onto two lines.
+    await pump(tester, stored: {themeModeKey: 'system'});
+
+    final picker = tester.widget<SegmentedButton<AppAppearance>>(
+      find.byType(SegmentedButton<AppAppearance>),
+    );
+    expect(picker.showSelectedIcon, isFalse);
+  });
+
   // The TMDB/TheTVDB credit is a licensing obligation (CLAUDE.md), and it
   // follows the active source rather than being hardcoded.
   testWidgets('the mandatory attribution renders the active source credit', (

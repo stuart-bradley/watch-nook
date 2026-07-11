@@ -11,6 +11,7 @@ import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
+import 'package:watch_nook/core/widgets/track_status_ui.dart';
 import 'package:watch_nook/features/detail/data/bulk_mark.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 
@@ -73,7 +74,13 @@ class _Body extends ConsumerWidget {
             children: [
               _Header(item: item, details: details),
               const SizedBox(height: WatchnookSpacing.md),
-              _RatingRow(item: item),
+              Row(
+                children: [
+                  _RatingRow(item: item),
+                  const SizedBox(width: WatchnookSpacing.sm),
+                  _StatusRow(item: item),
+                ],
+              ),
               if (item.mediaType == MediaType.movie) ...[
                 const SizedBox(height: WatchnookSpacing.md),
                 _MovieWatchActions(item: item),
@@ -177,7 +184,7 @@ class _Header extends StatelessWidget {
     final caption = <String>[
       if (year != null) '$year',
       kind,
-      _statusLabel(item.trackStatus),
+      item.trackStatus.label,
       ?showStatus,
     ].join(' · ');
 
@@ -249,6 +256,36 @@ Future<void> _pickRating(
   await ref
       .read(libraryDaoProvider)
       .updateRating(item.id, picked == -1 ? null : picked, now: clock.now());
+}
+
+/// The show's track status (`LibraryItems.trackStatus`). Tapping opens a picker
+/// so a title can be moved between statuses — On hold, Dropped, etc. — from the
+/// detail page; `updateStatus` was otherwise unreachable in the UI.
+class _StatusRow extends ConsumerWidget {
+  const _StatusRow({required this.item});
+
+  final LibraryItem item;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ActionChip(
+      avatar: Icon(item.trackStatus.icon),
+      label: Text(item.trackStatus.label),
+      onPressed: () => unawaited(_pickStatus(context, ref, item)),
+    );
+  }
+}
+
+Future<void> _pickStatus(
+  BuildContext context,
+  WidgetRef ref,
+  LibraryItem item,
+) async {
+  final picked = await showTrackStatusPicker(context);
+  if (picked == null) return;
+  await ref
+      .read(libraryDaoProvider)
+      .updateStatus(item.id, picked, now: clock.now());
 }
 
 /// A movie's watched toggle + rewatch log (#19, US-2/US-4). Watched-ness is the
@@ -572,11 +609,3 @@ String _isoDate(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-'
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
-
-String _statusLabel(TrackStatus s) => switch (s) {
-  TrackStatus.watchlist => 'Watchlist',
-  TrackStatus.watching => 'Watching',
-  TrackStatus.completed => 'Completed',
-  TrackStatus.onHold => 'On hold',
-  TrackStatus.dropped => 'Dropped',
-};

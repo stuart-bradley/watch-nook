@@ -88,7 +88,12 @@ class _ShellScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Watchnook'),
+        // Per-screen title, index-aligned with the NavigationDestination order
+        // below (Up Next=0, Library=1, Stats=2) — matches the prototype, which
+        // titles each screen rather than showing a single static app name.
+        title: Text(
+          const ['Up Next', 'Library', 'Stats'][navigationShell.currentIndex],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.search),

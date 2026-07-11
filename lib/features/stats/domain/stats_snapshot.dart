@@ -143,10 +143,13 @@ const _maxStreakLookback = 366;
 /// Counting rules — this is the test contract:
 /// - **Counts** use non-rewatch rows; **hours** include rewatches.
 /// - Runtime per event coalesces `event.runtimeMinutes ?? item.runtimeMinutes`,
-///   then contributes zero. The item fallback exists for the *mixed* case — a
-///   title added via search (so the item carries a runtime) whose episodes were
-///   later marked by an import (so the event does not). It is not a fix for a
-///   pure import, where both are null; that shows up as
+///   then contributes zero. The item fallback covers two cases: the *mixed*
+///   case — a title added via search (so the item carries a runtime) whose
+///   episodes were later marked by an import (so the event does not) — and a
+///   *refreshed import*, where `TrackedShowSync` backfills the item's
+///   `runtimeMinutes` from metadata so imported episodes contribute estimated
+///   hours (episode-weighted by the show's typical runtime). It is not a fix
+///   for a pure, never-refreshed import, where both are null; that shows up as
 ///   [StatsSnapshot.hasMissingData].
 /// - Both breakdowns are **episode-weighted**: a 62-episode drama adds 62 to
 ///   each of its genres and 62 to its decade. They answer *"where did my hours

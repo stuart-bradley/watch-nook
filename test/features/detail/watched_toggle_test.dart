@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -259,5 +261,91 @@ void main() {
     expect(find.text('Season 1'), findsNothing);
     expect(find.byTooltip('Mark watched'), findsNothing); // no icon toggle
     expect(find.text('Mark watched'), findsOneWidget); // the movie button
+  });
+
+  testWidgets('the status chip moves the show to On hold, then Dropped', (
+    tester,
+  ) async {
+    // The bug: On hold / Dropped (indeed every status) were unreachable — the
+    // detail screen had no status control at all. The chip label reads the
+    // stubbed row (always 'Watching'), so the assertions read the DB instead.
+    final id = await insertShow(); // seeded as TrackStatus.watching
+    await pumpDetail(tester, itemId: id, details: showDetails);
+
+    // Only the status chip carries the exact text 'Watching' (the header
+    // caption is a single joined string), so this taps the chip, not it.
+    await tester.tap(find.text('Watching'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('On hold'));
+    await tester.pumpAndSettle();
+    expect((await db.libraryDao.getItem(id))!.trackStatus, TrackStatus.onHold);
+
+    // Row stream is stubbed at 'watching', so the chip still reads Watching;
+    // re-open and pick Dropped — proving each status is reachable.
+    await tester.tap(find.text('Watching'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dropped'));
+    await tester.pumpAndSettle();
+    expect((await db.libraryDao.getItem(id))!.trackStatus, TrackStatus.dropped);
+  });
+
+  testWidgets('a status change repaints the header from the live row', (
+    tester,
+  ) async {
+    // The stronger half of the status test: not just the DB write, but that
+    // the header the user sees actually updates. A controllable stream stands
+    // in for the live `watchItem` (a real Drift `.watch()` never quiesces under
+    // fake-async and hangs `pumpAndSettle` — CLAUDE.md), so re-emitting the
+    // persisted row proves the header is bound to the stream, not a snapshot.
+    final id = await insertShow(); // TrackStatus.watching
+    final rows = StreamController<LibraryItem?>();
+    addTearDown(rows.close);
+    rows.add(await db.libraryDao.getItem(id));
+
+    tester.view.physicalSize = const Size(1000, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final source = _FakeSource(details: showDetails, episodes: episodes);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appDatabaseProvider.overrideWithValue(db), // so updateStatus persists
+          activeMetadataSourceProvider.overrideWithValue(source),
+          metadataRepositoryProvider.overrideWithValue(
+            CachingMetadataRepository(
+              source: source,
+              sourceKind: MetadataSourceKind.tmdb,
+              dao: db.mediaCacheDao,
+            ),
+          ),
+          libraryItemProvider.overrideWith((ref, i) => rows.stream),
+          watchedEpisodesProvider.overrideWith(
+            (ref, i) => Stream.value(const <(int, int)>{}),
+          ),
+        ],
+        child: MaterialApp(home: DetailScreen(itemId: id)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The caption starts on "Watching".
+    expect(find.textContaining('· Watching'), findsOneWidget);
+
+    await tester.tap(find.text('Watching')); // the status chip
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('On hold'));
+    await tester.pumpAndSettle();
+
+    // The write persisted...
+    final updated = (await db.libraryDao.getItem(id))!;
+    expect(updated.trackStatus, TrackStatus.onHold);
+    // ...and the header is bound to the row stream: it still reads "Watching"
+    // until the (stubbed live) stream re-emits the persisted row.
+    expect(find.textContaining('· Watching'), findsOneWidget);
+    rows.add(updated);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('· On hold'), findsOneWidget);
+    expect(find.textContaining('· Watching'), findsNothing);
   });
 }

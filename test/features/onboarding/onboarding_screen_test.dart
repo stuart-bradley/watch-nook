@@ -43,15 +43,15 @@ void main() {
     await tester.pumpWidget(app(prefs));
     await tester.pumpAndSettle();
 
-    // Fresh install → the onboarding gate.
+    // Fresh install → the onboarding gate (no shell app bar / tab title yet).
     expect(find.text('Get started'), findsOneWidget);
-    expect(find.widgetWithText(AppBar, 'Watchnook'), findsNothing);
+    expect(find.widgetWithText(AppBar, 'Up Next'), findsNothing);
 
     await tester.tap(find.text('Get started'));
     await tester.pumpAndSettle();
 
-    // markSeen → refreshListenable → redirect home; the gate is gone.
-    expect(find.widgetWithText(AppBar, 'Watchnook'), findsOneWidget);
+    // markSeen → refreshListenable → redirect home (Up Next tab); gate is gone.
+    expect(find.widgetWithText(AppBar, 'Up Next'), findsOneWidget);
     expect(find.text('Get started'), findsNothing);
 
     // Adversarial: the flag is actually persisted, so a relaunch skips

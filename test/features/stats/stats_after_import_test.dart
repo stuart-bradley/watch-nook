@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
@@ -88,6 +89,53 @@ void main() {
 
       // ...so the screen tells the user, rather than showing a bare "0 h".
       expect(stats.hasMissingData, isTrue);
+    },
+  );
+
+  test(
+    'once the refresh backfills runtime and genres, hours and genres appear',
+    () async {
+      // The enrichment path: TrackedShowSync writes per-episode runtime AND
+      // genres onto the item from metadata. Stats' `item.runtimeMinutes`
+      // fallback turns imported episodes into estimated hours, `genresCsv`
+      // feeds the genre breakdown, and both clear the missing-data footnote.
+      await applier.apply(const [
+        Auto(
+          ImportRecord(
+            mediaType: MediaType.tv,
+            title: 'Mr. Robot',
+            year: 2015,
+            tmdbId: 62560,
+            watches: [
+              ImportWatch(season: 1, episode: 1),
+              ImportWatch(season: 1, episode: 2),
+            ],
+          ),
+        ),
+      ]);
+
+      // Simulate the refresh backfill (TrackedShowSync sets both columns).
+      final id = (await dao.getAll()).single.id;
+      await dao.updateManyItems([
+        (
+          id,
+          const LibraryItemsCompanion(
+            runtimeMinutes: Value(45),
+            genresCsv: Value('Drama,Thriller'),
+          ),
+        ),
+      ]);
+
+      final stats = statsFrom(await dao.watchAllEvents().first, now);
+
+      // 2 episodes × 45m via the item fallback — the hours fix.
+      expect(stats.timeWatched, const Duration(minutes: 90));
+      expect(stats.episodesWatched, 2);
+      // Genres now feed the breakdown (episode-weighted: 2 each).
+      expect(stats.byGenre, contains(const StatBucket('Drama', 2)));
+      expect(stats.byGenre, contains(const StatBucket('Thriller', 2)));
+      // ...and with both runtime and genres present, the footnote is gone.
+      expect(stats.hasMissingData, isFalse);
     },
   );
 }

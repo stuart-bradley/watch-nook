@@ -41,8 +41,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Seen onboarding → router lands on home, not the onboarding gate.
-    expect(find.widgetWithText(AppBar, 'Watchnook'), findsOneWidget);
+    // Seen onboarding → router lands on home (the Up Next tab), not the
+    // onboarding gate. The shell titles each tab, so home reads "Up Next".
+    expect(find.widgetWithText(AppBar, 'Up Next'), findsOneWidget);
     expect(find.text('Get started'), findsNothing);
 
     // Adversarial: debug banner off, and the app drives a router — leaving both
