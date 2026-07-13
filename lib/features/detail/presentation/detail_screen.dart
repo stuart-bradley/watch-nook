@@ -4,6 +4,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
@@ -12,27 +14,52 @@ import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/track_status_ui.dart';
+import 'package:watch_nook/features/detail/data/add_to_library.dart';
 import 'package:watch_nook/features/detail/data/bulk_mark.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 
 /// Title detail (#18, US-6): backdrop, overview, the user's rating, the
-/// seasons→episodes list, and the **mandatory** per-source attribution footer.
-/// Route `/title/:id`, where `id` is the `LibraryItems` row — detail is only
-/// reachable for a tracked title (search adds first).
+/// seasons→episodes list, and the per-source attribution footer.
+///
+/// **Two entry points, one screen.**
+/// - `/title/:id` ([itemId]) — a **tracked** row: status dropdown, rating,
+///   watch actions, per-episode toggles.
+/// - `/preview` ([result]) — an **untracked** search hit: the same backdrop,
+///   overview and seasons/episodes, but *no write controls at all* — only an
+///   "Add to library" button. There is no library row to write against yet, so
+///   every mark/rate/status control is absent, not merely disabled.
+///
+/// Neither given renders the not-found notice (a restored deep link to
+/// `/preview`, whose `extra` doesn't survive the trip).
 ///
 /// Metadata comes from `titleDetailsProvider` (SWR, cache-first), so the screen
 /// renders offline from cache and a failed revalidation never blanks it. The
 /// per-episode watched toggle and the movie mark/rewatch buttons (#19) write
 /// through `LibraryDao`, which owns the idempotent-toggle invariant.
 class DetailScreen extends ConsumerWidget {
-  /// Creates the detail screen for the `LibraryItems` row [itemId].
-  const DetailScreen({required this.itemId, super.key});
+  /// Creates the detail screen for the tracked `LibraryItems` row [itemId].
+  const DetailScreen({this.itemId, this.result, super.key});
 
-  /// The `LibraryItems.id` from the route.
-  final int itemId;
+  /// The `LibraryItems.id` from the route — null when previewing a search hit.
+  final int? itemId;
+
+  /// The untracked search hit being previewed — null for a tracked title.
+  final MediaSearchResult? result;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final itemId = this.itemId;
+    final result = this.result;
+
+    if (itemId == null) {
+      return Scaffold(
+        appBar: AppBar(title: Text(result?.title ?? '')),
+        body: result == null
+            ? const _Notice("Couldn't open this title.")
+            : _Body(result: result),
+      );
+    }
+
     final item = ref.watch(libraryItemProvider(itemId));
     return Scaffold(
       appBar: AppBar(title: Text(item.value?.title ?? '')),
@@ -47,21 +74,73 @@ class DetailScreen extends ConsumerWidget {
   }
 }
 
+/// The screen body in either mode. Exactly one of [item] (tracked) / [result]
+/// (preview) is non-null; `item == null` is the single switch every write
+/// control below reads as "not tracked yet — offer nothing to write".
 class _Body extends ConsumerWidget {
-  const _Body({required this.item});
+  const _Body({this.item, this.result});
 
-  final LibraryItem item;
+  final LibraryItem? item;
+  final MediaSearchResult? result;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final sourceId = detailSourceId(item);
+    final theme = Theme.of(context);
+    final entry = this.item;
+    final result = this.result;
+
+    final mediaType = entry?.mediaType ?? mediaTypeOf(result!.kind);
+    // The id to fetch details with. For a tracked row that's its own
+    // `recordedSource` id; for a preview it's the active backend's id off the
+    // hit — the same choice `addToLibrary` makes, so what you preview is what
+    // gets added.
+    final sourceId = entry != null
+        ? detailSourceId(entry)
+        : addSourceId(
+            result!,
+            metadataSourceKindOf(ref.watch(activeMetadataBackendProvider)),
+          );
+
     // ponytail: conditional watch — a row with no id for its own backend has no
     // details to fetch, so it renders from the stored columns alone.
     final async = sourceId == null
         ? null
-        : ref.watch(titleDetailsProvider(item.mediaType, sourceId));
+        : ref.watch(titleDetailsProvider(mediaType, sourceId));
     final details = async?.value;
     final coldCache = async != null && !async.hasValue;
+    final seasons = details?.seasons ?? const <SeasonInfo>[];
+
+    // A search hit we already track is NOT a preview — it's that row's detail
+    // page, and must never offer to add what's already in the library (US-3).
+    // Search resolves this at tap time, but from the raw hit; TMDB's `search`
+    // carries no `imdbId`, so an imdb-keyed import can slip through and only
+    // become matchable once the details land. Re-resolve here with the enriched
+    // identity — the same one `addToLibrary`'s dedupe uses, so the two can't
+    // disagree about whether this title is tracked.
+    final trackedId = result == null
+        ? null
+        : ref
+              .watch(
+                trackedItemProvider((
+                  mediaType: mediaType,
+                  imdbId: details?.imdbId ?? result.imdbId,
+                  tmdbId: result.tmdbId,
+                  tvdbId: result.tvdbId,
+                  title: details?.title ?? result.title,
+                  year: details?.year ?? result.year,
+                )),
+              )
+              .value
+              ?.id;
+    // Re-read the resolved row through the **live** provider, not the one-shot
+    // lookup above: from here on this is an ordinary tracked detail screen, and
+    // its controls must repaint off the row like any other (a watch write
+    // recomputes `watchedCount`).
+    final item =
+        entry ??
+        (trackedId == null
+            ? null
+            : ref.watch(libraryItemProvider(trackedId)).value);
 
     return ListView(
       children: [
@@ -72,28 +151,31 @@ class _Body extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Header(item: item, details: details),
-              const SizedBox(height: WatchnookSpacing.md),
-              Row(
-                children: [
-                  _RatingRow(item: item),
-                  const SizedBox(width: WatchnookSpacing.sm),
-                  _StatusRow(item: item),
-                ],
+              _Header(
+                title: details?.title ?? item?.title ?? result!.title,
+                year: details?.year ?? item?.year ?? result?.year,
+                mediaType: mediaType,
+                showStatus: details?.showStatus ?? item?.showStatus,
               ),
-              if (item.mediaType == MediaType.movie) ...[
+              const SizedBox(height: WatchnookSpacing.md),
+              // The one adaptive line: tracked titles get the controls that
+              // manage them; an untracked one gets the single action that makes
+              // it trackable.
+              if (item == null)
+                _AddButton(result: result!)
+              else
+                Wrap(
+                  spacing: WatchnookSpacing.sm,
+                  runSpacing: WatchnookSpacing.sm,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _StatusDropdown(item: item),
+                    _RatingRow(item: item),
+                  ],
+                ),
+              if (item != null && item.mediaType == MediaType.movie) ...[
                 const SizedBox(height: WatchnookSpacing.md),
                 _MovieWatchActions(item: item),
-              ],
-              if (details?.seasons.any((s) => s.seasonNumber > 0) ?? false) ...[
-                const SizedBox(height: WatchnookSpacing.md),
-                _BulkButton(
-                  icon: Icons.done_all,
-                  label: 'Mark show watched',
-                  itemId: item.id,
-                  showSourceId: sourceId!,
-                  seasons: _seasonNumbers(details!),
-                ),
               ],
               if (coldCache && async.hasError) ...[
                 const SizedBox(height: WatchnookSpacing.md),
@@ -102,7 +184,7 @@ class _Body extends ConsumerWidget {
               if (details?.overview case final overview?
                   when overview.isNotEmpty) ...[
                 const SizedBox(height: WatchnookSpacing.md),
-                Text(overview, style: Theme.of(context).textTheme.bodyMedium),
+                Text(overview, style: theme.textTheme.bodyMedium),
               ],
               if (details?.nextEpisode case final next?) ...[
                 const SizedBox(height: WatchnookSpacing.md),
@@ -111,10 +193,45 @@ class _Body extends ConsumerWidget {
             ],
           ),
         ),
-        // Seasons come from the details fetch; a movie has none.
-        for (final season in details?.seasons ?? const <SeasonInfo>[])
+        // Seasons come from the details fetch; a movie has none. "Mark show
+        // watched" is the *section action* for the list below it — it used to
+        // sit up with the status control, where it read as the only thing you
+        // could do with a title.
+        if (seasons.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              WatchnookSpacing.screen,
+              0,
+              WatchnookSpacing.screen,
+              WatchnookSpacing.sm,
+            ),
+            // Wrap, not Row+Expanded: on a 360dp phone the label and a button
+            // this wide don't share a line, and an Expanded label would be
+            // squeezed to ~20dp and wrap one letter per line. This drops the
+            // button to its own line instead.
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: WatchnookSpacing.sm,
+              runSpacing: WatchnookSpacing.xs,
+              children: [
+                Text('Seasons', style: theme.textTheme.titleMedium),
+                // Specials-only shows have nothing to bulk-mark (the bulk
+                // helpers exclude season 0), so the button would mark nothing.
+                if (item != null && seasons.any((s) => s.seasonNumber > 0))
+                  _BulkButton(
+                    icon: Icons.done_all,
+                    label: 'Mark show watched',
+                    itemId: item.id,
+                    showSourceId: sourceId!,
+                    seasons: _seasonNumbers(details!),
+                  ),
+              ],
+            ),
+          ),
+        for (final season in seasons)
           _SeasonTile(
-            itemId: item.id,
+            itemId: item?.id,
             showSourceId: sourceId!,
             season: season,
             allSeasons: _seasonNumbers(details!),
@@ -167,34 +284,39 @@ class _BackdropPlaceholder extends StatelessWidget {
   }
 }
 
-/// Title + a "2022 · TV · Watching · Returning Series" caption. Falls back to
-/// the stored row when details haven't loaded, so it renders offline.
+/// Title + a "2022 · TV · Returning Series" caption. Falls back to the stored
+/// row (or the search hit) when details haven't loaded, so it renders offline.
+///
+/// The track status is deliberately **not** in the caption: the status dropdown
+/// below states it, and a title's category shouldn't read as a fact about the
+/// show alongside its year.
 class _Header extends StatelessWidget {
-  const _Header({required this.item, required this.details});
+  const _Header({
+    required this.title,
+    required this.year,
+    required this.mediaType,
+    required this.showStatus,
+  });
 
-  final LibraryItem item;
-  final MediaDetails? details;
+  final String title;
+  final int? year;
+  final MediaType mediaType;
+  final String? showStatus;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final year = details?.year ?? item.year;
-    final showStatus = details?.showStatus ?? item.showStatus;
-    final kind = item.mediaType == MediaType.movie ? 'Film' : 'TV';
+    final kind = mediaType == MediaType.movie ? 'Film' : 'TV';
     final caption = <String>[
       if (year != null) '$year',
       kind,
-      item.trackStatus.label,
       ?showStatus,
     ].join(' · ');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          details?.title ?? item.title,
-          style: theme.textTheme.headlineSmall,
-        ),
+        Text(title, style: theme.textTheme.headlineSmall),
         const SizedBox(height: WatchnookSpacing.xs),
         Text(
           caption,
@@ -258,34 +380,103 @@ Future<void> _pickRating(
       .updateRating(item.id, picked == -1 ? null : picked, now: clock.now());
 }
 
-/// The show's track status (`LibraryItems.trackStatus`). Tapping opens a picker
-/// so a title can be moved between statuses — On hold, Dropped, etc. — from the
-/// detail page; `updateStatus` was otherwise unreachable in the UI.
-class _StatusRow extends ConsumerWidget {
-  const _StatusRow({required this.item});
+/// The show's track status (`LibraryItems.trackStatus`) — a labelled Material 3
+/// [DropdownMenu], not a chip. It replaced an `ActionChip` pill that read as a
+/// badge: nothing about it said "this is how you move a title between
+/// Watchlist, Watching, On hold…".
+class _StatusDropdown extends ConsumerWidget {
+  const _StatusDropdown({required this.item});
 
   final LibraryItem item;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return ActionChip(
-      avatar: Icon(item.trackStatus.icon),
-      label: Text(item.trackStatus.label),
-      onPressed: () => unawaited(_pickStatus(context, ref, item)),
+    return DropdownMenu<TrackStatus>(
+      initialSelection: item.trackStatus,
+      label: const Text('Status'),
+      leadingIcon: Icon(item.trackStatus.icon),
+      // It's a selector, not a combobox — never raise the keyboard, and don't
+      // let a stray keystroke filter the five statuses.
+      requestFocusOnTap: false,
+      onSelected: (status) {
+        if (status == null) return;
+        unawaited(
+          ref
+              .read(libraryDaoProvider)
+              .updateStatus(item.id, status, now: clock.now()),
+        );
+      },
+      dropdownMenuEntries: [
+        for (final status in TrackStatus.values)
+          DropdownMenuEntry(
+            value: status,
+            label: status.label,
+            leadingIcon: Icon(status.icon),
+          ),
+      ],
     );
   }
 }
 
-Future<void> _pickStatus(
+/// The preview mode's one action (US-2): read the details, *then* decide. Picks
+/// a status, adds via the shared [addToLibrary] (which snapshots the stats
+/// fields and dedupes), and replaces this route with the tracked one — so Back
+/// returns to search, not to an "Add" page for a title that's now in the
+/// library.
+class _AddButton extends ConsumerWidget {
+  const _AddButton({required this.result});
+
+  final MediaSearchResult result;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => FilledButton.icon(
+    icon: const Icon(Icons.add),
+    label: const Text('Add to library'),
+    onPressed: () => unawaited(_addTitle(context, ref, result)),
+  );
+}
+
+Future<void> _addTitle(
   BuildContext context,
   WidgetRef ref,
-  LibraryItem item,
+  MediaSearchResult result,
 ) async {
-  final picked = await showTrackStatusPicker(context);
-  if (picked == null) return;
-  await ref
-      .read(libraryDaoProvider)
-      .updateStatus(item.id, picked, now: clock.now());
+  final status = await showTrackStatusPicker(context);
+  if (status == null || !context.mounted) return;
+
+  // Captured before the await, so no `BuildContext` crosses the async gap.
+  final messenger = ScaffoldMessenger.of(context);
+  final router = GoRouter.of(context);
+  try {
+    final (:item, :created) = await addToLibrary(
+      repo: ref.read(metadataRepositoryProvider),
+      sourceKind: metadataSourceKindOf(ref.read(activeMetadataBackendProvider)),
+      dao: ref.read(libraryDaoProvider),
+      result: result,
+      status: status,
+    );
+    // Membership changed, so every cached "is this tracked?" answer is stale —
+    // the search list underneath us is still mounted, and would go on showing
+    // this title as un-added.
+    ref.invalidate(trackedItemProvider);
+    unawaited(router.pushReplacement('/title/${item.id}'));
+    messenger.showSnackBar(
+      SnackBar(
+        // Re-adding a tracked title is a no-op — the dedupe returns that row
+        // untouched, so the picked status was NOT applied. Saying "Added … to
+        // Watching" here would be a lie about the user's own data.
+        content: Text(
+          created
+              ? 'Added "${item.title}" to ${status.label}'
+              : '"${item.title}" is already in your library',
+        ),
+      ),
+    );
+  } on Object {
+    messenger.showSnackBar(
+      const SnackBar(content: Text("Couldn't add this title.")),
+    );
+  }
 }
 
 /// A movie's watched toggle + rewatch log (#19, US-2/US-4). Watched-ness is the
@@ -359,7 +550,11 @@ class _NextEpisode extends StatelessWidget {
 
 /// One collapsible season. `ExpansionTile` doesn't build its children while
 /// collapsed, so the episode fetch happens on expand — one season at a time.
-class _SeasonTile extends StatelessWidget {
+///
+/// The bulk control lives on the **bar**, not inside the expanded body: marking
+/// season 3 shouldn't mean expanding season 3 first. The expand chevron moves
+/// to the leading edge (`controlAffinity`) to free `trailing` for it.
+class _SeasonTile extends ConsumerWidget {
   const _SeasonTile({
     required this.itemId,
     required this.showSourceId,
@@ -367,7 +562,9 @@ class _SeasonTile extends StatelessWidget {
     required this.allSeasons,
   });
 
-  final int itemId;
+  /// The tracked row, or null in preview mode — where there is nothing to mark.
+  final int? itemId;
+
   final int showSourceId;
   final SeasonInfo season;
 
@@ -376,30 +573,54 @@ class _SeasonTile extends StatelessWidget {
   final List<int> allSeasons;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final itemId = this.itemId;
     final name = season.name ?? 'Season ${season.seasonNumber}';
+
+    // Same provider instance `_SeasonEpisodes` watches (family-keyed on the
+    // item), so the progress count costs no extra query.
+    final watched = itemId == null
+        ? const <(int, int)>{}
+        : ref.watch(watchedEpisodesProvider(itemId)).value ??
+              const <(int, int)>{};
+    final watchedHere = watched
+        .where((c) => c.$1 == season.seasonNumber)
+        .length;
+    final complete =
+        season.episodeCount > 0 && watchedHere >= season.episodeCount;
+
+    // Specials (season 0) have no bulk action — they're excluded from
+    // aired-order progress, so the button would mark nothing.
+    final bulkable = itemId != null && season.seasonNumber > 0;
+
     return ExpansionTile(
+      controlAffinity: ListTileControlAffinity.leading,
       title: Text(name),
-      subtitle: Text('${season.episodeCount} episodes'),
-      children: [
-        // Specials (season 0) have no bulk action — they're excluded from
-        // aired-order progress, so the button would mark nothing.
-        if (season.seasonNumber > 0)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: WatchnookSpacing.screen,
-              ),
-              child: _BulkButton(
-                icon: Icons.playlist_add_check,
-                label: 'Mark season watched',
-                itemId: itemId,
-                showSourceId: showSourceId,
-                seasons: [season.seasonNumber],
-              ),
+      subtitle: Text(
+        itemId == null
+            ? '${season.episodeCount} episodes'
+            : '$watchedHere/${season.episodeCount} watched',
+      ),
+      trailing: !bulkable
+          ? null
+          : IconButton(
+              icon: const Icon(Icons.done_all),
+              tooltip: complete ? 'Season watched' : 'Mark season watched',
+              // Marking is idempotent, but a disabled button says "already
+              // done" without costing a tap to find out.
+              onPressed: complete
+                  ? null
+                  : () => unawaited(
+                      _runBulk(
+                        context,
+                        ref,
+                        itemId: itemId,
+                        showSourceId: showSourceId,
+                        seasons: [season.seasonNumber],
+                      ),
+                    ),
             ),
-          ),
+      children: [
         _SeasonEpisodes(
           itemId: itemId,
           showSourceId: showSourceId,
@@ -497,22 +718,26 @@ class _SeasonEpisodes extends ConsumerWidget {
     required this.allSeasons,
   });
 
-  final int itemId;
+  /// Null in preview mode — the episode rows then carry no watch controls.
+  final int? itemId;
+
   final int showSourceId;
   final int seasonNumber;
   final List<int> allSeasons;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final itemId = this.itemId;
     final episodes = ref.watch(
       seasonEpisodesProvider(showSourceId, seasonNumber),
     );
     // Before the first emission nothing is known to be watched — an unwatched
     // toggle that marks is the safe default (marking is idempotent; unwatching
     // is destructive).
-    final watched =
-        ref.watch(watchedEpisodesProvider(itemId)).value ??
-        const <(int, int)>{};
+    final watched = itemId == null
+        ? const <(int, int)>{}
+        : ref.watch(watchedEpisodesProvider(itemId)).value ??
+              const <(int, int)>{};
     return episodes.when(
       loading: () => const Padding(
         padding: EdgeInsets.all(WatchnookSpacing.lg),
@@ -529,7 +754,7 @@ class _SeasonEpisodes extends ConsumerWidget {
               subtitle: e.airDate == null ? null : Text(_isoDate(e.airDate!)),
               // "Watch up to here" (#20): everything aired-order ≤ this
               // episode, across the earlier seasons too.
-              onLongPress: e.seasonNumber <= 0
+              onLongPress: itemId == null || e.seasonNumber <= 0
                   ? null
                   : () => unawaited(
                       _runBulk(
@@ -541,11 +766,16 @@ class _SeasonEpisodes extends ConsumerWidget {
                         upTo: (e.seasonNumber, e.episodeNumber),
                       ),
                     ),
-              trailing: _EpisodeToggle(
-                itemId: itemId,
-                episode: e,
-                watched: watched.contains((e.seasonNumber, e.episodeNumber)),
-              ),
+              trailing: itemId == null
+                  ? null
+                  : _EpisodeToggle(
+                      itemId: itemId,
+                      episode: e,
+                      watched: watched.contains((
+                        e.seasonNumber,
+                        e.episodeNumber,
+                      )),
+                    ),
             ),
         ],
       ),

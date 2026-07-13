@@ -165,6 +165,19 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// What the status dropdown is *showing* — read off its internal controller,
+  /// not off a `find.text`, which would also match the menu entry of the same
+  /// name while the menu is open.
+  String? statusLabel(WidgetTester tester) => tester
+      .widget<TextField>(
+        find.descendant(
+          of: find.byType(DropdownMenu<TrackStatus>),
+          matching: find.byType(TextField),
+        ),
+      )
+      .controller
+      ?.text;
+
   testWidgets('tapping an episode toggle marks it watched, once', (
     tester,
   ) async {
@@ -263,40 +276,46 @@ void main() {
     expect(find.text('Mark watched'), findsOneWidget); // the movie button
   });
 
-  testWidgets('the status chip moves the show to On hold, then Dropped', (
+  testWidgets('the status dropdown moves the show to On hold, then Dropped', (
     tester,
   ) async {
     // The bug: On hold / Dropped (indeed every status) were unreachable — the
-    // detail screen had no status control at all. The chip label reads the
-    // stubbed row (always 'Watching'), so the assertions read the DB instead.
+    // detail screen had no status control at all. It then had one, but as a
+    // chip that read as a badge. The label reads the stubbed row, so the
+    // assertions read the DB instead.
     final id = await insertShow(); // seeded as TrackStatus.watching
     await pumpDetail(tester, itemId: id, details: showDetails);
 
-    // Only the status chip carries the exact text 'Watching' (the header
-    // caption is a single joined string), so this taps the chip, not it.
-    await tester.tap(find.text('Watching'));
+    expect(statusLabel(tester), 'Watching');
+
+    await tester.tap(find.byType(DropdownMenu<TrackStatus>));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('On hold'));
+    await tester.tap(find.text('On hold').last);
     await tester.pumpAndSettle();
     expect((await db.libraryDao.getItem(id))!.trackStatus, TrackStatus.onHold);
 
-    // Row stream is stubbed at 'watching', so the chip still reads Watching;
-    // re-open and pick Dropped — proving each status is reachable.
-    await tester.tap(find.text('Watching'));
+    // Re-open and pick another — proving every status is reachable, not just
+    // the first one the menu happens to render.
+    await tester.tap(find.byType(DropdownMenu<TrackStatus>));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Dropped'));
+    await tester.tap(find.text('Dropped').last);
     await tester.pumpAndSettle();
     expect((await db.libraryDao.getItem(id))!.trackStatus, TrackStatus.dropped);
   });
 
-  testWidgets('a status change repaints the header from the live row', (
+  testWidgets('an out-of-band status change repaints the status control', (
     tester,
   ) async {
-    // The stronger half of the status test: not just the DB write, but that
-    // the header the user sees actually updates. A controllable stream stands
-    // in for the live `watchItem` (a real Drift `.watch()` never quiesces under
-    // fake-async and hangs `pumpAndSettle` — CLAUDE.md), so re-emitting the
-    // persisted row proves the header is bound to the stream, not a snapshot.
+    // The status now lives ONLY in the dropdown (it was dropped from the header
+    // caption, where it read as a fact about the show rather than a category
+    // you choose). So the dropdown is the one thing that must stay bound to the
+    // live row — a DropdownMenu holds its label in an internal controller, and
+    // a stale one would show "Watching" over a row the DB says is "On hold".
+    //
+    // The write here does NOT come from the dropdown: an import, a backend sync
+    // or a restore all move a status behind the screen's back. A controllable
+    // stream stands in for the live `watchItem` (a real Drift `.watch()` never
+    // quiesces under fake-async and hangs `pumpAndSettle` — CLAUDE.md).
     final id = await insertShow(); // TrackStatus.watching
     final rows = StreamController<LibraryItem?>();
     addTearDown(rows.close);
@@ -329,23 +348,17 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The caption starts on "Watching".
-    expect(find.textContaining('· Watching'), findsOneWidget);
+    expect(statusLabel(tester), 'Watching');
+    // The caption must NOT carry the status any more — one control, one place.
+    expect(find.textContaining('· Watching'), findsNothing);
 
-    await tester.tap(find.text('Watching')); // the status chip
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('On hold'));
-    await tester.pumpAndSettle();
-
-    // The write persisted...
+    await db.libraryDao.updateStatus(id, TrackStatus.onHold, now: now);
     final updated = (await db.libraryDao.getItem(id))!;
-    expect(updated.trackStatus, TrackStatus.onHold);
-    // ...and the header is bound to the row stream: it still reads "Watching"
-    // until the (stubbed live) stream re-emits the persisted row.
-    expect(find.textContaining('· Watching'), findsOneWidget);
+
+    // Still bound to the stream, not a snapshot: nothing changes till it emits.
+    expect(statusLabel(tester), 'Watching');
     rows.add(updated);
     await tester.pumpAndSettle();
-    expect(find.textContaining('· On hold'), findsOneWidget);
-    expect(find.textContaining('· Watching'), findsNothing);
+    expect(statusLabel(tester), 'On hold');
   });
 }

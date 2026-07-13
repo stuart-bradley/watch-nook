@@ -2,9 +2,10 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
-import 'package:watch_nook/features/search/data/search_providers.dart';
+import 'package:watch_nook/features/detail/data/add_to_library.dart';
 
 /// #16 AD-3 snapshot-at-add. Adversarial: prove the snapshot actually lands on
 /// the row (not left to the disposable cache), that an offline add still
@@ -16,10 +17,19 @@ import 'package:watch_nook/features/search/data/search_providers.dart';
 /// throws to simulate offline). Counts detail calls so a test can prove the
 /// fetch happens exactly once. Unused members throw via [noSuchMethod].
 class _FakeSource implements MetadataSource {
-  _FakeSource({this.details, this.offline = false});
+  _FakeSource({
+    this.details,
+    this.offline = false,
+    this.kind = MetadataSourceKind.tmdb,
+  });
 
   final MediaDetails? details;
   final bool offline;
+
+  /// Which catalogue this stands in for — the cache is namespaced per backend,
+  /// so the repo wrapping it must agree with the add's `sourceKind`.
+  final MetadataSourceKind kind;
+
   int detailCalls = 0;
 
   @override
@@ -43,6 +53,15 @@ void main() {
 
   setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));
   tearDown(() => db.close());
+
+  /// The add goes through the SWR cache (not the bare source) so it warms the
+  /// cache Up Next reads — see `up_next_after_add_test.dart`.
+  CachingMetadataRepository repoOver(_FakeSource source) =>
+      CachingMetadataRepository(
+        source: source,
+        sourceKind: source.kind,
+        dao: db.mediaCacheDao,
+      );
 
   const severance = MediaSearchResult(
     kind: MediaKind.tv,
@@ -70,8 +89,8 @@ void main() {
       'onto the row', () async {
     final source = _FakeSource(details: severanceDetails);
 
-    final item = await addToLibrary(
-      source: source,
+    final (:item, created: _) = await addToLibrary(
+      repo: repoOver(source),
       sourceKind: MetadataSourceKind.tmdb,
       dao: db.libraryDao,
       result: severance,
@@ -99,8 +118,8 @@ void main() {
       'stats fields left null to backfill later', () async {
     final source = _FakeSource(details: severanceDetails, offline: true);
 
-    final item = await addToLibrary(
-      source: source,
+    final (:item, created: _) = await addToLibrary(
+      repo: repoOver(source),
       sourceKind: MetadataSourceKind.tmdb,
       dao: db.libraryDao,
       result: severance,
@@ -123,15 +142,15 @@ void main() {
     () async {
       final source = _FakeSource(details: severanceDetails);
 
-      final first = await addToLibrary(
-        source: source,
+      final (item: first, created: firstCreated) = await addToLibrary(
+        repo: repoOver(source),
         sourceKind: MetadataSourceKind.tmdb,
         dao: db.libraryDao,
         result: severance,
         status: TrackStatus.watching,
       );
-      final second = await addToLibrary(
-        source: source,
+      final (item: second, created: secondCreated) = await addToLibrary(
+        repo: repoOver(source),
         sourceKind: MetadataSourceKind.tmdb,
         dao: db.libraryDao,
         result: severance,
@@ -144,6 +163,12 @@ void main() {
       // Dedupe returns the pre-existing row untouched — it does not
       // overwrite the first status with the second.
       expect(second.trackStatus, TrackStatus.watching);
+
+      // ...and it SAYS so. The second call applied nothing, so a caller that
+      // reports "Added X to Completed" off the back of it is lying about the
+      // user's own data — `created` is the only way to tell the two apart.
+      expect(firstCreated, isTrue);
+      expect(secondCreated, isFalse);
     },
   );
 
@@ -155,6 +180,7 @@ void main() {
       year: 2021,
     );
     final source = _FakeSource(
+      kind: MetadataSourceKind.tvdb,
       details: const MediaDetails(
         kind: MediaKind.movie,
         title: 'Dune',
@@ -165,8 +191,8 @@ void main() {
       ),
     );
 
-    final item = await addToLibrary(
-      source: source,
+    final (:item, created: _) = await addToLibrary(
+      repo: repoOver(source),
       sourceKind: MetadataSourceKind.tvdb,
       dao: db.libraryDao,
       result: tvdbHit,

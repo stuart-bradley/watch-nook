@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:watch_nook/core/config/remote_config_provider.dart';
-import 'package:watch_nook/core/database/database_provider.dart';
+import 'package:go_router/go_router.dart';
+import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
@@ -12,13 +12,15 @@ import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/core/widgets/poster_placeholder.dart';
 import 'package:watch_nook/core/widgets/track_status_ui.dart';
+import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/search/data/search_providers.dart';
 
 /// Debounce before a keystroke fires a network search (#16).
 const _debounce = Duration(milliseconds: 350);
 
-/// Search films & shows on the active backend and add a hit to the library
-/// with a chosen status (#16, US-1). Route `/search`.
+/// Search films & shows on the active backend (#16, US-1). Route `/search`.
+/// Tapping a hit opens its detail screen — adding happens there, after you've
+/// read it.
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
 
@@ -103,6 +105,9 @@ class _ResultTile extends ConsumerWidget {
     final year = result.year;
     final kind = result.kind == MediaKind.movie ? 'Film' : 'TV';
     final subtitle = <String>[if (year != null) '$year', kind].join(' · ');
+    // Already tracked? Then say so on the row, rather than making the user tap
+    // each hit to find out which of the six "Severance"s is the one they have.
+    final tracked = ref.watch(trackedItemProvider(identityOfHit(result))).value;
     return ListTile(
       leading: _Poster(path: result.posterPath),
       title: Text(
@@ -111,35 +116,69 @@ class _ResultTile extends ConsumerWidget {
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(subtitle),
-      onTap: () => unawaited(_pickStatusAndAdd(context, ref, result)),
+      trailing: tracked == null
+          ? null
+          : _InLibraryBadge(status: tracked.trackStatus),
+      onTap: () => unawaited(_openTitle(context, ref, result)),
     );
   }
 }
 
-/// Opens the status picker; on a choice, snapshots + adds the title and
-/// confirms with a SnackBar.
-Future<void> _pickStatusAndAdd(
+/// "You already have this, and here's where you put it." The status is more use
+/// than a bare "in library" tick — it's the thing you'd have opened the row to
+/// check.
+class _InLibraryBadge extends StatelessWidget {
+  const _InLibraryBadge({required this.status});
+
+  final TrackStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: 'In your library',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(status.icon, size: 16, color: theme.colorScheme.primary),
+          const SizedBox(width: WatchnookSpacing.xs),
+          Text(
+            status.label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.primary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Opens the hit's detail screen — a tap **reads**, it never writes (US-1). It
+/// used to add on the spot, which meant committing a title to the library
+/// having seen nothing but its poster and year.
+///
+/// Which detail screen depends on whether we already track it: the same
+/// `findByIdentity` cascade the add-dedupe uses (imdb → tmdb → tvdb → title +
+/// year), so a title already in the library opens its tracked page rather than
+/// an "Add to library" page for something you already have.
+Future<void> _openTitle(
   BuildContext context,
   WidgetRef ref,
   MediaSearchResult result,
 ) async {
-  final status = await showTrackStatusPicker(context);
-  if (status == null) return;
-
-  final added = await addToLibrary(
-    source: ref.read(activeMetadataSourceProvider),
-    sourceKind: metadataSourceKindOf(ref.read(activeMetadataBackendProvider)),
-    dao: ref.read(libraryDaoProvider),
-    result: result,
-    status: status,
+  // The same answer the badge is showing — one lookup, not two that could
+  // disagree.
+  final existing = await ref.read(
+    trackedItemProvider(identityOfHit(result)).future,
   );
-
   if (!context.mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text('Added "${added.title}" to ${status.label}'),
-    ),
-  );
+
+  if (existing == null) {
+    unawaited(context.push('/preview', extra: result));
+  } else {
+    unawaited(context.push('/title/${existing.id}'));
+  }
 }
 
 /// Poster thumbnail — offline-safe via the shared [PosterCacheManager], with a

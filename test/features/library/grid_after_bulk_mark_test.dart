@@ -151,9 +151,12 @@ void main() {
     expect(find.text('4 episodes'), findsOneWidget);
 
     await pumpDetail(tester, id);
-    await tester.tap(find.text('Season 1'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Mark season watched'));
+    await tester.tap(
+      find.descendant(
+        of: find.widgetWithText(ExpansionTile, 'Season 1'),
+        matching: find.byTooltip('Mark season watched'),
+      ),
+    );
     await tester.pumpAndSettle();
 
     // Back to the grid, reading the row the bulk write left behind.
