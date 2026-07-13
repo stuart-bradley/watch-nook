@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
 import 'package:watch_nook/features/import/presentation/import_screen.dart';
 import 'package:watch_nook/features/library/presentation/library_screen.dart';
@@ -65,13 +66,28 @@ final List<RouteBase> appRoutes = <RouteBase>[
   // Reachable from Settings → Import, and from the first-run onboarding page.
   GoRoute(path: '/import', builder: (context, state) => const ImportScreen()),
   GoRoute(
-    // `id` is a `LibraryItems` row id — detail is only reachable for a tracked
-    // title. A non-numeric or unknown id renders the "not in your library"
+    // `id` is a `LibraryItems` row id — this route is the **tracked** detail
+    // screen. A non-numeric or unknown id renders the "not in your library"
     // state rather than throwing.
     path: '/title/:id',
     builder: (context, state) => DetailScreen(
       itemId: int.tryParse(state.pathParameters['id'] ?? '') ?? -1,
     ),
+  ),
+  GoRoute(
+    // The **untracked** detail screen: search pushes a hit here so you can read
+    // a title before adding it. The hit rides in `extra` (it renders instantly
+    // from the search fields while the details fetch streams in), which is
+    // push-only by design — it does not survive a deep link or a process
+    // restore. `is`, not `as`: a bare cast on a missing/foreign `extra` throws
+    // a `TypeError`; this degrades to the screen's not-found notice instead.
+    path: '/preview',
+    builder: (context, state) {
+      final extra = state.extra;
+      return DetailScreen(
+        result: extra is MediaSearchResult ? extra : null,
+      );
+    },
   ),
 ];
 

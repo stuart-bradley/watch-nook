@@ -134,7 +134,7 @@ class MergeApplier {
           year: year,
         );
 
-        final item = await dao.addOrGetItem(
+        final (:item, created: _) = await dao.addOrGetItem(
           LibraryItemsCompanion.insert(
             mediaType: record.mediaType,
             recordedSource: sourceKind,

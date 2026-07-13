@@ -26,8 +26,10 @@ extension TrackStatusUi on TrackStatus {
 }
 
 /// The shared status-picker bottom sheet: one row per [TrackStatus], returning
-/// the chosen value (or null if dismissed). Used to change a title's status on
-/// the detail screen and to pick a status when adding from search.
+/// the chosen value (or null if dismissed). Used to pick a status when
+/// **adding** a title (the detail screen's preview mode). An already-tracked
+/// changes status through the `DropdownMenu` there instead — this sheet is for
+/// the one status you set before the row exists.
 Future<TrackStatus?> showTrackStatusPicker(BuildContext context) {
   return showModalBottomSheet<TrackStatus>(
     context: context,

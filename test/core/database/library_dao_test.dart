@@ -419,10 +419,17 @@ void main() {
         aShow(title: 'Severance (re-add)'),
       );
 
-      expect(second.id, first.id); // same row returned
+      expect(second.item.id, first.item.id); // same row returned
       expect(await db.libraryDao.getAll(), hasLength(1)); // not duplicated
       // The original title wins — the existing row is returned untouched.
-      expect(second.title, 'Severance');
+      expect(second.item.title, 'Severance');
+
+      // And it reports which it did. This is the ONLY place that can answer
+      // that atomically (the check is inside the insert's transaction), so a
+      // caller must never re-run the cascade to find out — the UI's "Added X to
+      // Watching" hangs off this flag, and a wrong one lies to the user.
+      expect(first.created, isTrue);
+      expect(second.created, isFalse);
     });
 
     test('findByIdentity matches by imdbId even when tmdbId differs', () async {

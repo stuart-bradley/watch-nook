@@ -85,7 +85,11 @@ void main() {
     ),
   );
 
-  Future<void> pumpDetail(WidgetTester tester, int itemId) async {
+  Future<void> pumpDetail(
+    WidgetTester tester,
+    int itemId, {
+    Set<(int, int)> alreadyWatched = const {},
+  }) async {
     tester.view.physicalSize = const Size(1000, 4000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -106,7 +110,7 @@ void main() {
           ),
           libraryItemProvider.overrideWith((ref, id) => Stream.value(item)),
           watchedEpisodesProvider.overrideWith(
-            (ref, id) => Stream.value(const {}),
+            (ref, id) => Stream.value(alreadyWatched),
           ),
         ],
         child: MaterialApp(home: DetailScreen(itemId: itemId)),
@@ -119,6 +123,19 @@ void main() {
     for (final r in await db.libraryDao.watchEventsFor(itemId))
       (r.seasonNumber!, r.episodeNumber!),
   };
+
+  /// The bulk control on one season's **bar**. Scoped to the named tile, so a
+  /// test can't accidentally hit a different season's button.
+  Finder seasonButton(String name) => find.descendant(
+    of: find.widgetWithText(ExpansionTile, name),
+    matching: find.byTooltip('Mark season watched'),
+  );
+
+  /// A season bar's progress caption, scoped to its own tile.
+  Finder seasonSays(String name, String caption) => find.descendant(
+    of: find.widgetWithText(ExpansionTile, name),
+    matching: find.text(caption),
+  );
 
   testWidgets('"Mark show watched" marks every season but the specials', (
     tester,
@@ -143,15 +160,51 @@ void main() {
     expect(find.text('Already watched.'), findsOneWidget);
   });
 
-  testWidgets('"Mark season watched" touches only its own season', (
+  testWidgets('"Mark show watched" sits above the seasons, not above all', (
+    tester,
+  ) async {
+    // It used to sit directly under the status control, at the top of the
+    // screen, where it read as *the* thing you do with a title — drowning out
+    // the category control next to it. It belongs to the seasons list below it.
+    final id = await insertShow();
+    await pumpDetail(tester, id);
+
+    final button = tester.getTopLeft(find.text('Mark show watched')).dy;
+    expect(
+      button,
+      greaterThan(tester.getTopLeft(find.byType(DropdownMenu<TrackStatus>)).dy),
+    );
+    expect(
+      button,
+      lessThan(tester.getTopLeft(find.byType(ExpansionTile).first).dy),
+    );
+  });
+
+  testWidgets('a season is marked from its bar, without expanding it', (
+    tester,
+  ) async {
+    // The point of the control: marking season 2 must not mean expanding
+    // season 2 first. A test that expanded would keep passing with the button
+    // buried inside the tile, so this one never expands anything.
+    final id = await insertShow();
+    await pumpDetail(tester, id);
+
+    expect(find.text('Episode 1'), findsNothing); // nothing is expanded
+
+    await tester.tap(seasonButton('Season 2'));
+    await tester.pumpAndSettle();
+
+    expect(await watched(id), {(2, 1), (2, 2)}); // season 1 untouched
+    expect(find.text('Episode 1'), findsNothing); // and still nothing expanded
+  });
+
+  testWidgets('a season bar marks only its own season, with runtimes', (
     tester,
   ) async {
     final id = await insertShow();
     await pumpDetail(tester, id);
 
-    await tester.tap(find.text('Season 1'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Mark season watched'));
+    await tester.tap(seasonButton('Season 1'));
     await tester.pumpAndSettle();
 
     expect(await watched(id), {(1, 1), (1, 2)});
@@ -164,9 +217,47 @@ void main() {
     final id = await insertShow();
     await pumpDetail(tester, id);
 
-    await tester.tap(find.text('Specials'));
-    await tester.pumpAndSettle();
-    expect(find.text('Mark season watched'), findsNothing);
+    expect(seasonButton('Specials'), findsNothing);
+    // Two real seasons, two buttons — and none on the specials.
+    expect(find.byTooltip('Mark season watched'), findsNWidgets(2));
+  });
+
+  testWidgets('each season bar shows its own watched progress', (tester) async {
+    // Adversarial: a filter that counts every watched episode into every season
+    // (or forgets to filter at all) reads "1/2 watched" on both.
+    final id = await insertShow();
+    await pumpDetail(tester, id, alreadyWatched: const {(1, 1)});
+
+    expect(seasonSays('Season 1', '1/2 watched'), findsOneWidget);
+    expect(seasonSays('Season 2', '0/2 watched'), findsOneWidget);
+  });
+
+  testWidgets('a fully-watched season says so and disables its button', (
+    tester,
+  ) async {
+    final id = await insertShow();
+    await pumpDetail(tester, id, alreadyWatched: const {(1, 1), (1, 2)});
+
+    expect(seasonSays('Season 1', '2/2 watched'), findsOneWidget);
+
+    // It re-reads as a state, not an invitation: marking is idempotent, but a
+    // live button says "maybe there's something left" when there isn't.
+    final tile = find.widgetWithText(ExpansionTile, 'Season 1');
+    expect(
+      find.descendant(of: tile, matching: find.byTooltip('Season watched')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<IconButton>(
+            find.descendant(of: tile, matching: find.byType(IconButton)),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    // Season 2 is untouched and still actionable.
+    expect(seasonButton('Season 2'), findsOneWidget);
   });
 
   testWidgets('long-pressing an episode watches up to it, inclusive', (
