@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
@@ -12,7 +13,6 @@ import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/core/widgets/poster_placeholder.dart';
 import 'package:watch_nook/core/widgets/track_status_ui.dart';
-import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/search/data/search_providers.dart';
 
 /// Debounce before a keystroke fires a network search (#16).
@@ -107,7 +107,7 @@ class _ResultTile extends ConsumerWidget {
     final subtitle = <String>[if (year != null) '$year', kind].join(' · ');
     // Already tracked? Then say so on the row, rather than making the user tap
     // each hit to find out which of the six "Severance"s is the one they have.
-    final tracked = ref.watch(trackedItemProvider(identityOfHit(result))).value;
+    final tracked = ref.watch(trackedItemProvider(identityOf(result))).value;
     return ListTile(
       leading: _Poster(path: result.posterPath),
       title: Text(
@@ -170,7 +170,7 @@ Future<void> _openTitle(
   // The same answer the badge is showing — one lookup, not two that could
   // disagree.
   final existing = await ref.read(
-    trackedItemProvider(identityOfHit(result)).future,
+    trackedItemProvider(identityOf(result)).future,
   );
   if (!context.mounted) return;
 

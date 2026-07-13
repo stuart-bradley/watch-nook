@@ -1,9 +1,14 @@
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
+import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/detail/data/add_to_library.dart';
@@ -20,10 +25,11 @@ import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 /// happened to warm the cache (a detail view, an import, the daily sync) —
 /// which is exactly the "I added a show and it didn't show up" report.
 ///
-/// Adversarial framing: the assertion is on the **queue**, not the cache, and
-/// `TrackedShowSync` is never run. A regression that goes back to the bare
-/// source still writes a perfectly good `LibraryItems` row — the library grid
-/// and stats would look fine — and only this test fails.
+/// Adversarial framing: the assertion is on the **real `watchQueueProvider`**,
+/// the exact code the Up Next tab renders — not a local re-implementation of
+/// its rules — and `TrackedShowSync` never runs. A regression back to the raw
+/// source still writes a perfectly good `LibraryItems` row (the grid and stats
+/// would look fine), and only this test fails.
 
 /// Serves details, and counts fetches so a cache hit is distinguishable from a
 /// refetch. Never the network.
@@ -77,32 +83,24 @@ void main() {
         dao: db.mediaCacheDao,
       );
 
-  /// The queue exactly as `watchQueueProvider` computes it — cache-only, so
-  /// this is what the Up Next tab would render right now.
+  /// The queue the Up Next tab actually renders: the REAL `watchQueueProvider`,
+  /// over the real DAO and a real `CachingMetadataRepository`. Re-implementing
+  /// its rules here would only test the copy — a `watchQueue` that started
+  /// hitting the network, or dropped a filter, would still pass.
   Future<List<QueueEntry>> queue(CachingMetadataRepository repo) async {
-    final items = await db.libraryDao.getAll();
-    final shows = showsForQueue(items, MetadataSourceKind.tmdb);
-    final cached = await repo.cachedShowDetails([
-      for (final s in shows)
-        if (s.tmdbId case final int id) id,
-    ]);
-    return [
-      for (final item in shows)
-        if (cached[item.tmdbId] case final d?)
-          if (nextUnwatchedAired(
-                item.lastWatchedSeason,
-                item.lastWatchedEpisode,
-                d,
-              )
-              case final next?)
-            (
-              itemId: item.id,
-              showTitle: item.title,
-              posterPath: item.posterPath,
-              season: next.$1,
-              episode: next.$2,
-            ),
-    ];
+    final container = ProviderContainer(
+      overrides: [
+        appDatabaseProvider.overrideWithValue(db),
+        activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
+        metadataRepositoryProvider.overrideWithValue(repo),
+      ],
+    );
+    addTearDown(container.dispose);
+    // Hold a listener while we read: without one the queue's underlying Drift
+    // stream is never subscribed, and `.future` hangs forever. (Same reason
+    // `up_next_providers_test` does this.)
+    addTearDown(container.listen(watchQueueProvider, (_, _) {}).close);
+    return container.read(watchQueueProvider.future);
   }
 
   test(

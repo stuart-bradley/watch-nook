@@ -178,22 +178,48 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   /// tracked ([findByIdentity]) — the add flow's dedupe (#16 acceptance:
   /// re-adding must not duplicate). Runs in one transaction so the
   /// find-then-insert can't race a duplicate in.
-  Future<LibraryItem> addOrGetItem(LibraryItemsCompanion entry) =>
-      transaction(() async {
-        final existing = await findByIdentity(
-          mediaType: entry.mediaType.value,
-          imdbId: entry.imdbId.present ? entry.imdbId.value : null,
-          tmdbId: entry.tmdbId.present ? entry.tmdbId.value : null,
-          tvdbId: entry.tvdbId.present ? entry.tvdbId.value : null,
-          title: entry.title.present ? entry.title.value : null,
-          year: entry.year.present ? entry.year.value : null,
-        );
-        if (existing != null) return existing;
-        final id = await into(libraryItems).insert(entry);
-        return (select(
-          libraryItems,
-        )..where((t) => t.id.equals(id))).getSingle();
-      });
+  ///
+  /// Reports `created: false` when it returned an existing row **untouched** —
+  /// re-adding is a no-op, NOT a status change. This is the only place that can
+  /// answer that atomically (the check is inside the insert's transaction), so
+  /// callers must not re-run the cascade themselves to find out: a caller that
+  /// asks separately can be told "new" by a read that raced the insert, and a
+  /// UI that reports "Added X to Watching" off it lies about the user's data.
+  Future<({LibraryItem item, bool created})> addOrGetItem(
+    LibraryItemsCompanion entry,
+  ) => transaction(() async {
+    final existing = await findByIdentity(
+      mediaType: entry.mediaType.value,
+      imdbId: entry.imdbId.present ? entry.imdbId.value : null,
+      tmdbId: entry.tmdbId.present ? entry.tmdbId.value : null,
+      tvdbId: entry.tvdbId.present ? entry.tvdbId.value : null,
+      title: entry.title.present ? entry.title.value : null,
+      year: entry.year.present ? entry.year.value : null,
+    );
+    if (existing != null) return (item: existing, created: false);
+    final id = await into(libraryItems).insert(entry);
+    final item = await (select(
+      libraryItems,
+    )..where((t) => t.id.equals(id))).getSingle();
+    return (item: item, created: true);
+  });
+
+  /// Ticks on **every** `LibraryItems` write — the single live signal that any
+  /// cached "is this title tracked, and under what status?" answer is stale.
+  ///
+  /// Exists because membership has many writers (add, import merge, restore,
+  /// delete-all, backend relink) and status has more (the detail dropdown, a
+  /// sync). A cache invalidated by hand only stays correct until someone adds
+  /// the next writer and doesn't know to invalidate; watching this can't drift.
+  ///
+  /// ponytail: decodes every row to hash it. One shared stream, and writes are
+  /// user-paced — if a large library makes this hurt, swap the body for a
+  /// `count(*) + max(updatedAt)` aggregate; the contract stays the same.
+  Stream<int> watchRevision() => select(libraryItems).watch().map(
+    (rows) => Object.hashAll([
+      for (final r in rows) Object.hash(r.id, r.updatedAt, r.trackStatus),
+    ]),
+  );
 
   /// Patch one item by id. Used by the backend-switch service to relink ids /
   /// set `relinkFailed` without rewriting the whole row.

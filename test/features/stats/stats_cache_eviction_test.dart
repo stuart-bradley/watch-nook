@@ -31,7 +31,7 @@ void main() {
 
   test('wiping both cache tables leaves every figure identical', () async {
     // A show and a film, both fully snapshotted at add-time.
-    final show = await dao.addOrGetItem(
+    final (item: show, created: _) = await dao.addOrGetItem(
       LibraryItemsCompanion.insert(
         mediaType: MediaType.tv,
         recordedSource: MetadataSourceKind.tmdb,
@@ -45,7 +45,7 @@ void main() {
         runtimeMinutes: const Value(45),
       ),
     );
-    final film = await dao.addOrGetItem(
+    final (item: film, created: _) = await dao.addOrGetItem(
       LibraryItemsCompanion.insert(
         mediaType: MediaType.movie,
         recordedSource: MetadataSourceKind.tmdb,

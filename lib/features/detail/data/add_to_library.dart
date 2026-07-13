@@ -2,9 +2,9 @@ import 'package:clock/clock.dart';
 import 'package:drift/drift.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
+import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
-import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 
 /// **AD-3 snapshot-at-add.** Adds [result] with the chosen [status], fetching
@@ -44,50 +44,49 @@ Future<({LibraryItem item, bool created})> addToLibrary({
 
   MediaDetails? details;
   if (sourceId != null) {
+    final stream = result.kind == MediaKind.tv
+        ? repo.showDetails(sourceId)
+        : repo.movieDetails(sourceId);
     try {
-      // `.last`: the revalidated value when there's one, the cached value when
-      // the cache is fresh (the detail screen we came from usually just warmed
-      // it). Either way the cache write has happened by the time this returns.
-      details = result.kind == MediaKind.tv
-          ? await repo.showDetails(sourceId).last
-          : await repo.movieDetails(sourceId).last;
+      // Keep the newest emission rather than taking `.last`. The SWR stream
+      // yields the cached value FIRST and then rethrows a non-transient
+      // revalidation failure (a 404/401 on refresh) — and `Stream.last` forwards
+      // that error, throwing away the perfectly good details it had already
+      // handed us. Losing them would silently drop the AD-3 snapshot and write
+      // the row from the thin search-hit fields instead. The cache write has
+      // happened by the time the fresh value arrives, either way.
+      await for (final fetched in stream) {
+        details = fetched;
+      }
     } on Object {
-      // Offline / fetch error: fall back to the search-hit fields; the stats
-      // fields backfill on the next detail view (plan §7). The queue picks the
-      // show up once the cache warms.
-      details = null;
+      // Offline / hard failure with nothing cached: fall back to the search-hit
+      // fields; the stats fields backfill on the next detail view (plan §7) and
+      // the queue picks the show up once the cache warms.
     }
   }
 
   final genres = details?.genres ?? const <String>[];
   final now = clock.now();
 
-  // Ask first, so the caller can tell an add from a no-op. `addOrGetItem` below
-  // still runs the same check inside its transaction — that's the race guard;
-  // this is the *report*. Both read the details-enriched ids (the `imdbId` a
-  // TMDB search never carries), so they agree on what "already tracked" means.
-  final existing = await dao.findByIdentity(
-    mediaType: mediaTypeOf(result.kind),
-    imdbId: details?.imdbId ?? result.imdbId,
-    tmdbId: result.tmdbId,
-    tvdbId: result.tvdbId,
-    title: details?.title ?? result.title,
-    year: details?.year ?? result.year,
-  );
-  if (existing != null) return (item: existing, created: false);
+  // ONE identity, built by the shared [identityOf] — the same record the
+  // membership check uses, so the screen and the dedupe can't disagree about
+  // whether this title is already tracked.
+  final id = identityOf(result, details);
 
-  final item = await dao.addOrGetItem(
+  // `addOrGetItem` reports created-vs-deduped from **inside** its transaction —
+  // the only place that can answer it without racing the insert.
+  return dao.addOrGetItem(
     LibraryItemsCompanion.insert(
-      mediaType: mediaTypeOf(result.kind),
+      mediaType: id.mediaType,
       recordedSource: sourceKind,
-      title: details?.title ?? result.title,
+      title: id.title,
       trackStatus: status,
       addedAt: now,
       updatedAt: now,
-      tmdbId: Value(result.tmdbId),
-      tvdbId: Value(result.tvdbId),
-      imdbId: Value(details?.imdbId ?? result.imdbId),
-      year: Value(details?.year ?? result.year),
+      tmdbId: Value(id.tmdbId),
+      tvdbId: Value(id.tvdbId),
+      imdbId: Value(id.imdbId),
+      year: Value(id.year),
       posterPath: Value(details?.posterPath ?? result.posterPath),
       genresCsv: Value(genres.isEmpty ? null : genres.join(',')),
       runtimeMinutes: Value(details?.runtimeMinutes),
@@ -95,7 +94,6 @@ Future<({LibraryItem item, bool created})> addToLibrary({
       episodeCountTotal: Value(details?.episodeCountTotal),
     ),
   );
-  return (item: item, created: true);
 }
 
 /// The backend id to use for an **untracked** search hit — [sourceKind]'s own

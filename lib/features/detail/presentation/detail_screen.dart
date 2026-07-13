@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
+import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
@@ -115,23 +116,11 @@ class _Body extends ConsumerWidget {
     // Search resolves this at tap time, but from the raw hit; TMDB's `search`
     // carries no `imdbId`, so an imdb-keyed import can slip through and only
     // become matchable once the details land. Re-resolve here with the enriched
-    // identity — the same one `addToLibrary`'s dedupe uses, so the two can't
-    // disagree about whether this title is tracked.
+    // identity — `identityOf` is the same builder `addToLibrary` uses, so the
+    // two cannot disagree about whether this title is tracked.
     final trackedId = result == null
         ? null
-        : ref
-              .watch(
-                trackedItemProvider((
-                  mediaType: mediaType,
-                  imdbId: details?.imdbId ?? result.imdbId,
-                  tmdbId: result.tmdbId,
-                  tvdbId: result.tvdbId,
-                  title: details?.title ?? result.title,
-                  year: details?.year ?? result.year,
-                )),
-              )
-              .value
-              ?.id;
+        : ref.watch(trackedItemProvider(identityOf(result, details))).value?.id;
     // Re-read the resolved row through the **live** provider, not the one-shot
     // lookup above: from here on this is an ordinary tracked detail screen, and
     // its controls must repaint off the row like any other (a watch write
@@ -455,10 +444,11 @@ Future<void> _addTitle(
       result: result,
       status: status,
     );
-    // Membership changed, so every cached "is this tracked?" answer is stale —
-    // the search list underneath us is still mounted, and would go on showing
-    // this title as un-added.
-    ref.invalidate(trackedItemProvider);
+    // No invalidation needed: `trackedItemProvider` is live off the library, so
+    // the search list underneath re-badges this row on the write itself. (It
+    // used to `ref.invalidate` here — which throws a StateError if the preview
+    // was popped mid-add, and the catch below would then have reported a
+    // *successful* add as "Couldn't add this title.")
     unawaited(router.pushReplacement('/title/${item.id}'));
     messenger.showSnackBar(
       SnackBar(

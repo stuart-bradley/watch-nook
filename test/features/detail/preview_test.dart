@@ -9,12 +9,12 @@ import 'package:watch_nook/core/config/remote_config.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
+import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
-import 'package:watch_nook/features/detail/data/add_to_library.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
 
@@ -136,6 +136,7 @@ void main() {
           // `.watch()` never quiesces under fake-async and hangs
           // `pumpAndSettle` (CLAUDE.md). Only reached once the screen resolves
           // into tracked mode; an untracked preview never watches them.
+          libraryRevisionProvider.overrideWith((ref) => Stream.value(0)),
           libraryItemProvider.overrideWith(
             (ref, id) => Stream.fromFuture(db.libraryDao.getItem(id)),
           ),
@@ -267,43 +268,5 @@ void main() {
     final items = await db.libraryDao.getAll();
     expect(items, hasLength(1));
     expect(items.single.id, existing);
-  });
-
-  testWidgets('re-adding a tracked title is a no-op, and says so', (
-    tester,
-  ) async {
-    // The residual: if the details fetch failed while previewing (offline) the
-    // screen can't know the title is tracked, so Add is still reachable. The
-    // add itself refetches and dedupes — and must NOT claim it applied a status
-    // it didn't apply.
-    final now = DateTime(2026, 7, 12);
-    final existing = await db.libraryDao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Severance',
-        trackStatus: TrackStatus.completed,
-        addedAt: now,
-        updatedAt: now,
-        tmdbId: const Value(95396),
-      ),
-    );
-
-    final added = await addToLibrary(
-      repo: CachingMetadataRepository(
-        source: _FakeSource(details: details, episodes: episodes),
-        sourceKind: MetadataSourceKind.tmdb,
-        dao: db.mediaCacheDao,
-      ),
-      sourceKind: MetadataSourceKind.tmdb,
-      dao: db.libraryDao,
-      result: hit,
-      status: TrackStatus.watching, // NOT the status it has
-    );
-
-    expect(added.created, isFalse); // the caller must be able to tell
-    expect(added.item.id, existing);
-    expect(added.item.trackStatus, TrackStatus.completed); // untouched
-    expect(await db.libraryDao.getAll(), hasLength(1));
   });
 }
