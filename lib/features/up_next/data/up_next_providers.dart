@@ -121,7 +121,7 @@ List<LibraryItem> showsForQueue(
   // Aired? Everything strictly before the next-to-air episode has aired.
   final nextAir = details.nextEpisode;
   if (nextAir != null &&
-      !_before(candidate, (nextAir.seasonNumber, nextAir.episodeNumber))) {
+      !airsBefore(candidate, (nextAir.seasonNumber, nextAir.episodeNumber))) {
     return null;
   }
   // ...and nothing strictly after the last aired episode has. TMDB reports a
@@ -131,7 +131,7 @@ List<LibraryItem> showsForQueue(
   // and corrupting the progress pointer when ticked.
   final lastAir = details.lastEpisode;
   if (lastAir != null &&
-      _before((lastAir.seasonNumber, lastAir.episodeNumber), candidate)) {
+      airsBefore((lastAir.seasonNumber, lastAir.episodeNumber), candidate)) {
     return null;
   }
   return candidate;
@@ -152,7 +152,7 @@ SeasonInfo? _firstSeasonAfter(List<SeasonInfo> seasons, int n) {
 }
 
 /// `(s1,e1)` airs strictly before `(s2,e2)` in aired order.
-bool _before((int, int) a, (int, int) b) =>
+bool airsBefore((int, int) a, (int, int) b) =>
     a.$1 < b.$1 || (a.$1 == b.$1 && a.$2 < b.$2);
 
 /// `S2E5`, plus the episode title when the backend supplied one.
@@ -175,9 +175,18 @@ const upcomingHorizonMonths = 6;
 /// `[today, today + `[upcomingHorizonMonths]`]`:
 ///
 /// - The **lower** bound is load-bearing. `nextEpisode` comes from a cache that
-///   may be stale (the sync is daily), so its air date can already have passed.
-///   An episode that has aired must never sit in Upcoming — it belongs in the
-///   watch queue, and the next sync will move it there.
+///   may be stale (airing shows have a 12h TTL), so its air date can already
+///   have passed. An episode that has aired must never sit in Upcoming.
+///
+///   **Known gap:** such a show lands in NEITHER list until the cache
+///   refreshes.
+///   Upcoming drops it by *date* (here); the queue drops it by *coordinate*
+///   (`nextUnwatchedAired` compares against the same stale `nextEpisode`, so
+///   the just-aired episode still reads as "not yet airing"). So on the day an
+///   episode airs, a caught-up show can briefly vanish from the page. Bounded
+///   by the 12h airing TTL, healed by the next sync / app resume. Pinned by
+///   "a stale-aired show falls into NEITHER list" in up_next_providers_test —
+///   change that test deliberately, not by accident.
 /// - An **ended** show carries no `nextEpisode` at all, so it excludes itself;
 ///   no show-status check is needed here.
 UpcomingEntry? upcomingFor(

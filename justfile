@@ -25,10 +25,17 @@ format-check:
 format:
     dart format $(git ls-files '*.dart' ':!docs/')
 
-# Unit + widget tests. No TZ pin — Watchnook has no timezone-sensitive engine
-# (the wellquill occurrence engine's DST tests don't apply here).
+# Unit + widget tests.
+#
+# TZ IS PINNED, and load-bearing. `daysUntil` (up_next) counts calendar days by
+# normalising to UTC midnights; the tempting-but-wrong version normalises to
+# LOCAL midnights, where a spring-forward day is 23 hours and `.inDays` silently
+# floors a day away. Under UTC there is no DST, so the broken and correct
+# implementations are IDENTICAL — and GitHub runners default to UTC, so without
+# this pin that regression ships green. Europe/London gives the tests real teeth
+# (verified: the buggy version returns 0 instead of 1 across 29->30 Mar 2026).
 test:
-    flutter test --no-pub
+    TZ=Europe/London flutter test --no-pub
 
 # Full CI check (same as what runs on PRs)
 check: codegen analyze format-check test

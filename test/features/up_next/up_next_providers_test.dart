@@ -428,6 +428,56 @@ void main() {
     });
   });
 
+  // A KNOWN GAP, pinned so it is a decision and not a surprise. The two lists
+  // reject a just-aired episode by different rules: Upcoming by DATE, the queue
+  // by COORDINATE against the same (stale) nextEpisode. So between an episode
+  // airing and the cache refreshing (≤12h airing TTL), a caught-up show sits in
+  // NEITHER section — it briefly vanishes from the page on the very day its
+  // episode airs. If you fix this, delete the test; do not let it fail quietly.
+  test(
+    'a stale-aired show falls into NEITHER list until the cache refreshes',
+    () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      // Caught up through S1E4. The cache still calls S1E5 the next-to-air,
+      // but its air date was yesterday — it aired; the cache has not caught up.
+      await _seed(
+        db,
+        title: 'Severance',
+        tmdbId: 1,
+        lastSeason: 1,
+        lastEpisode: 4,
+      );
+      final repo = _FakeRepo({
+        1: _show(
+          seasons: [(1, 10)],
+          nextToAir: (1, 5),
+          nextAirDate: DateTime(2026, 7, 13), // yesterday
+          lastToAir: (1, 4),
+        ),
+      });
+      final container = _containerOver(db, repo);
+      addTearDown(container.dispose);
+      addTearDown(container.listen(upNextBoardProvider, (_, _) {}).close);
+
+      final board = await withClock(
+        Clock.fixed(DateTime(2026, 7, 14)),
+        () => container.read(upNextBoardProvider.future),
+      );
+
+      expect(
+        board.queue,
+        isEmpty,
+        reason: 'the queue rejects S1E5 by coordinate — it IS the next-to-air',
+      );
+      expect(
+        board.upcoming,
+        isEmpty,
+        reason: 'Upcoming rejects S1E5 by date — it already aired',
+      );
+    },
+  );
+
   group('upcomingFor', () {
     final now = DateTime(2026, 7, 14);
     final item = _item();
@@ -520,22 +570,33 @@ void main() {
       expect(daysUntil(DateTime(2026, 7, 14), DateTime(2026, 7, 13)), -1);
     });
 
-    // The exact bug `_streakDays` (stats_snapshot.dart) documents: across a DST
-    // transition a local "day" is 23 or 25 hours, so `difference().inDays` on
-    // raw instants rounds a day away. In the UK, 29 Mar 2026 is the spring
-    // forward — the 28th→29th "day" is 23 hours and would floor to 0.
-    test('is exact across a DST transition', () {
+    // The bug `_streakDays` (stats_snapshot.dart) documents: normalise to
+    // LOCAL midnights and diff, and a spring-forward "day" is only 23 hours,
+    // so `.inDays` floors it away. `daysUntil` uses UTC midnights instead.
+    //
+    // THIS TEST ONLY BITES IN A DST-OBSERVING TIMEZONE. Under UTC the broken
+    // and correct implementations are IDENTICAL (no DST to get wrong), and
+    // GitHub runners default to UTC — so `just test` pins TZ=Europe/London.
+    // Without that pin these assertions are decoration.
+    //
+    // Both cases below were verified against the buggy implementation. The
+    // obvious-looking ones (28->29 Mar, 24->25 Oct) are deliberately NOT here:
+    // they pass either way. The UK shift is at 01:00, so those midnights are
+    // still a clean 24h apart, and a 25-hour autumn day still floors to 1.
+    test('is exact across a DST transition (needs a DST timezone)', () {
+      // 29 Mar 2026 01:00: clocks jump to 02:00. Local midnight on the 29th
+      // (GMT) to midnight on the 30th (BST) is 23 hours → buggy returns 0.
       expect(
-        daysUntil(DateTime(2026, 3, 28), DateTime(2026, 3, 29)),
+        daysUntil(DateTime(2026, 3, 29), DateTime(2026, 3, 30)),
         1,
-        reason: 'a 23-hour day is still one day',
+        reason: 'a 23-hour day is still one day (buggy impl returns 0)',
       );
+      // A week straddling the same transition is 167 hours → buggy returns 6.
       expect(
-        daysUntil(DateTime(2026, 10, 24), DateTime(2026, 10, 25)),
-        1,
-        reason: 'a 25-hour day is still one day',
+        daysUntil(DateTime(2026, 3, 25), DateTime(2026, 4)),
+        7,
+        reason: 'seven calendar days, not 167/24 (buggy impl returns 6)',
       );
-      expect(daysUntil(DateTime(2026, 3, 25), DateTime(2026, 4)), 7);
     });
   });
 

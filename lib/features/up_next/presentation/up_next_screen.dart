@@ -79,12 +79,14 @@ class _NothingUpNext extends ConsumerWidget {
             'Add a TV show to your library and its next episode turns up here.',
       );
     }
+    // Deliberately does NOT claim "nothing is scheduled". Upcoming is built
+    // from `showsForQueue`, which excludes `watchlist` — but `hasShows` counts
+    // a watchlist show as tracked. A user whose library is one watchlist show
+    // premiering on Friday reaches here, and that claim would be false.
     return const EmptyState(
       icon: Icons.check_circle_outline,
       headline: "You're all caught up",
-      body:
-          'Every tracked show is watched up to its latest aired episode, and '
-          'nothing is scheduled.',
+      body: 'Every tracked show is watched up to its latest aired episode.',
     );
   }
 }
@@ -148,7 +150,11 @@ class _Board extends StatelessWidget {
         ];
 }
 
-/// Section heading, matching the one in Settings.
+/// Section heading. Same anatomy as Settings' `_SectionHeader` (titleSmall, in
+/// `primary`) but deliberately **bolder** — these divide the page into two
+/// different affordances (tickable vs not), where Settings' merely label groups
+/// of rows. Not shared: the weight is the whole difference, and one widget with
+/// a `bold` flag would be an abstraction that earns nothing.
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader(this.title);
 
