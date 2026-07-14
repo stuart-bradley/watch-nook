@@ -161,18 +161,6 @@ void main() {
     });
   });
 
-  group('upcomingForTracked', () {
-    test("emits each show's next dated episode", () async {
-      final upcoming = await _source().upcomingForTracked([371980]);
-
-      expect(upcoming, hasLength(1));
-      expect(upcoming.single.tvdbId, 371980);
-      expect(upcoming.single.imdbId, 'tt11280740');
-      expect(upcoming.single.airDate, DateTime.parse('2027-01-15'));
-      expect(upcoming.single.episode.seasonNumber, 2);
-    });
-  });
-
   group('imageUrl', () {
     test('passes TVDB full URLs through and ignores the size', () {
       final s = _source();

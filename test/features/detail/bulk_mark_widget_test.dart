@@ -65,12 +65,21 @@ void main() {
     tmdbId: 95396,
     episodeCountTotal: 4,
   );
-  const episodes = [
-    EpisodeInfo(seasonNumber: 0, episodeNumber: 1),
-    EpisodeInfo(seasonNumber: 1, episodeNumber: 1, runtimeMinutes: 57),
-    EpisodeInfo(seasonNumber: 1, episodeNumber: 2),
-    EpisodeInfo(seasonNumber: 2, episodeNumber: 1),
-    EpisodeInfo(seasonNumber: 2, episodeNumber: 2),
+  // Every episode carries an aired date: bulk-mark only marks what has aired,
+  // so an undated fixture would mark nothing and these tests would pass for the
+  // wrong reason (or, as here, fail).
+  final aired = DateTime(2026);
+  final episodes = [
+    EpisodeInfo(seasonNumber: 0, episodeNumber: 1, airDate: aired),
+    EpisodeInfo(
+      seasonNumber: 1,
+      episodeNumber: 1,
+      runtimeMinutes: 57,
+      airDate: aired,
+    ),
+    EpisodeInfo(seasonNumber: 1, episodeNumber: 2, airDate: aired),
+    EpisodeInfo(seasonNumber: 2, episodeNumber: 1, airDate: aired),
+    EpisodeInfo(seasonNumber: 2, episodeNumber: 2, airDate: aired),
   ];
 
   Future<int> insertShow() => db.libraryDao.insertItem(

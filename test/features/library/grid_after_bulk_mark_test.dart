@@ -70,11 +70,14 @@ void main() {
     tmdbId: 95396,
     episodeCountTotal: 4,
   );
-  const episodes = [
-    EpisodeInfo(seasonNumber: 1, episodeNumber: 1),
-    EpisodeInfo(seasonNumber: 1, episodeNumber: 2),
-    EpisodeInfo(seasonNumber: 2, episodeNumber: 1),
-    EpisodeInfo(seasonNumber: 2, episodeNumber: 2),
+  // Aired dates are load-bearing: bulk-mark only marks what has aired, so an
+  // undated fixture would mark nothing and the caption would never move.
+  final aired = DateTime(2026);
+  final episodes = [
+    EpisodeInfo(seasonNumber: 1, episodeNumber: 1, airDate: aired),
+    EpisodeInfo(seasonNumber: 1, episodeNumber: 2, airDate: aired),
+    EpisodeInfo(seasonNumber: 2, episodeNumber: 1, airDate: aired),
+    EpisodeInfo(seasonNumber: 2, episodeNumber: 2, airDate: aired),
   ];
 
   /// `episodeCountTotal` is the add-time snapshot (AD-3) the caption divides

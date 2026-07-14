@@ -17,7 +17,7 @@ import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 /// Adding a show must put it in the Up Next queue **immediately** — no manual
 /// refresh, no waiting for the once-a-day `TrackedShowSync`.
 ///
-/// The bug this pins: `watchQueue` builds the queue from `cachedShowDetails`,
+/// The bug this pins: `upNextBoard` builds the queue from `cachedShowDetails`,
 /// which is **cache-only** — it never hits the network. `addToLibrary` used to
 /// fetch its snapshot straight from the `MetadataSource`, bypassing the SWR
 /// cache entirely, so a freshly added show had *no* row in `CachedMedia` and
@@ -25,7 +25,7 @@ import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 /// happened to warm the cache (a detail view, an import, the daily sync) —
 /// which is exactly the "I added a show and it didn't show up" report.
 ///
-/// Adversarial framing: the assertion is on the **real `watchQueueProvider`**,
+/// Adversarial framing: the assertion is on the **real `upNextBoardProvider`**,
 /// the exact code the Up Next tab renders — not a local re-implementation of
 /// its rules — and `TrackedShowSync` never runs. A regression back to the raw
 /// source still writes a perfectly good `LibraryItems` row (the grid and stats
@@ -83,10 +83,11 @@ void main() {
         dao: db.mediaCacheDao,
       );
 
-  /// The queue the Up Next tab actually renders: the REAL `watchQueueProvider`,
-  /// over the real DAO and a real `CachingMetadataRepository`. Re-implementing
-  /// its rules here would only test the copy — a `watchQueue` that started
-  /// hitting the network, or dropped a filter, would still pass.
+  /// The queue the Up Next tab actually renders: the REAL
+  /// `upNextBoardProvider`, over the real DAO and a real
+  /// `CachingMetadataRepository`. Re-implementing its rules here would only
+  /// test the copy — a board that started hitting the network, or dropped a
+  /// filter, would still pass.
   Future<List<QueueEntry>> queue(CachingMetadataRepository repo) async {
     final container = ProviderContainer(
       overrides: [
@@ -96,11 +97,11 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
-    // Hold a listener while we read: without one the queue's underlying Drift
+    // Hold a listener while we read: without one the board's underlying Drift
     // stream is never subscribed, and `.future` hangs forever. (Same reason
     // `up_next_providers_test` does this.)
-    addTearDown(container.listen(watchQueueProvider, (_, _) {}).close);
-    return container.read(watchQueueProvider.future);
+    addTearDown(container.listen(upNextBoardProvider, (_, _) {}).close);
+    return (await container.read(upNextBoardProvider.future)).queue;
   }
 
   test(

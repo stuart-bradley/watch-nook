@@ -207,8 +207,14 @@ class CachedMedia extends Table {
   TextColumn get overview => text().nullable()();
   TextColumn get showStatus => text().nullable()();
 
-  /// Next episode's air date (promoted from `nextEpisode.airDate`) — drives the
-  /// "airing vs ended" TTL tier and upcoming lists without decoding [payload].
+  /// Next episode's air date (promoted from `nextEpisode.airDate`).
+  ///
+  /// Currently **written but never read**. It was promoted so the Upcoming
+  /// list could read it without decoding [payload], but a row there also needs
+  /// the season, episode and title — which are not promoted — so Upcoming
+  /// decodes the payload it already has in hand (see `upcomingFor`). Kept
+  /// because it costs nothing and a date-only query may still want it; do not
+  /// trust it as a source of truth without checking who reads it.
   DateTimeColumn get nextAirDate => dateTime().nullable()();
   IntColumn get runtimeMinutes => integer().nullable()();
   TextColumn get genresCsv => text().nullable()();

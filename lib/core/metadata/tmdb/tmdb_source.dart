@@ -181,32 +181,6 @@ class TmdbSource implements MetadataSource {
   }
 
   @override
-  Future<List<UpcomingEpisode>> upcomingForTracked(
-    List<int> showSourceIds,
-  ) async {
-    // TMDB exposes a single `next_episode_to_air` per show, so upcoming is just
-    // each tracked show's next dated episode.
-    // ponytail: sequential per-show detail calls; the SWR cache (#13) fronts
-    // this and tracked-show counts are small — batch only if it ever bites.
-    final upcoming = <UpcomingEpisode>[];
-    for (final id in showSourceIds) {
-      final details = await showDetails(id);
-      final next = details.nextEpisode;
-      final airDate = next?.airDate;
-      if (next == null || airDate == null) continue;
-      upcoming.add(
-        UpcomingEpisode(
-          episode: next,
-          airDate: airDate,
-          tmdbId: details.tmdbId,
-          imdbId: details.imdbId,
-        ),
-      );
-    }
-    return upcoming;
-  }
-
-  @override
   Future<MediaSearchResult?> resolveByExternalId(
     String id, {
     ExternalIdKind kind = ExternalIdKind.imdb,

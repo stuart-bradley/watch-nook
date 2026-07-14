@@ -414,11 +414,6 @@ class _FakeSource implements MetadataSource {
   );
 
   @override
-  Future<List<UpcomingEpisode>> upcomingForTracked(
-    List<int> showSourceIds,
-  ) async => [];
-
-  @override
   Future<MediaSearchResult?> resolveByExternalId(
     String id, {
     ExternalIdKind kind = ExternalIdKind.imdb,

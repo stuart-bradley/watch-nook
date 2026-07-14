@@ -13,18 +13,24 @@ import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/core/widgets/poster_placeholder.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 
-/// Up Next tab (#21) — the **watch queue**: the next unwatched aired episode
-/// every tracked show that has one, each with a poster and a tick to mark it
-/// watched without leaving the tab. Ticking advances the row live (the queue
-/// recomputes from the library stream). Renders its three states, never a blank
-/// crash when a show's (cache-first) fetch fails offline.
+/// Up Next tab (#21, R4) — two answers to "what now?", on one page:
+///
+/// - **Ready to watch** — the watch queue: the next unwatched *aired* episode
+///   for every tracked show that has one, each with a tick to mark it watched
+///   without leaving the tab. Ticking advances the row live (the board
+///   recomputes from the library stream).
+/// - **This week / Later** — every tracked show's next *scheduled* episode,
+///   soonest first. Nothing here is tickable: it hasn't aired.
+///
+/// Renders its three states, never a blank crash when a show's (cache-first)
+/// fetch fails offline.
 class UpNextScreen extends ConsumerWidget {
   const UpNextScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ref
-        .watch(watchQueueProvider)
+        .watch(upNextBoardProvider)
         .when(
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (error, _) => EmptyState(
@@ -33,14 +39,14 @@ class UpNextScreen extends ConsumerWidget {
             body: "You're offline, or the metadata service is unreachable.",
             actions: [
               TextButton(
-                onPressed: () => ref.invalidate(watchQueueProvider),
+                onPressed: () => ref.invalidate(upNextBoardProvider),
                 child: const Text('Retry'),
               ),
             ],
           ),
-          data: (entries) => entries.isEmpty
+          data: (board) => board.queue.isEmpty && board.upcoming.isEmpty
               ? const _NothingUpNext()
-              : _Queue(entries: entries),
+              : _Board(board: board),
         );
   }
 }
@@ -76,23 +82,157 @@ class _NothingUpNext extends ConsumerWidget {
     return const EmptyState(
       icon: Icons.check_circle_outline,
       headline: "You're all caught up",
-      body: 'Every tracked show is watched up to its latest aired episode.',
+      body:
+          'Every tracked show is watched up to its latest aired episode, and '
+          'nothing is scheduled.',
     );
   }
 }
 
-/// Flat, alphabetical list of "continue watching" cards.
-class _Queue extends StatelessWidget {
-  const _Queue({required this.entries});
+/// The page: what you can watch now, then what you're waiting for.
+///
+/// A section header appears only when its section has rows — except "Ready to
+/// watch", which keeps its header and says so inline when the queue is empty
+/// but episodes are scheduled. (Both empty is handled upstream by
+/// [_NothingUpNext], so at least one section always has content here.)
+class _Board extends StatelessWidget {
+  const _Board({required this.board});
 
-  final List<QueueEntry> entries;
+  final UpNextBoard board;
 
   @override
-  Widget build(BuildContext context) => ListView.builder(
-    padding: const EdgeInsets.symmetric(vertical: WatchnookSpacing.sm),
-    itemCount: entries.length,
-    itemBuilder: (context, i) => _QueueTile(entry: entries[i]),
-  );
+  Widget build(BuildContext context) {
+    // The board's own clock read, NOT a fresh `clock.now()`: grouping and
+    // labelling must agree with the filter that built `upcoming`. See
+    // [UpNextBoard].
+    final now = board.now;
+    final thisWeek = <UpcomingEntry>[];
+    final later = <UpcomingEntry>[];
+    for (final entry in board.upcoming) {
+      (isThisWeek(daysUntil(now, entry.airDate)) ? thisWeek : later).add(entry);
+    }
+
+    return CustomScrollView(
+      slivers: [
+        const _SectionHeader('Ready to watch'),
+        if (board.queue.isEmpty)
+          // The same message as the full-page empty state, but inline: the page
+          // is NOT empty (episodes are scheduled below), there is just nothing
+          // aired left to watch. The two never co-render — they are the arms of
+          // the ternary in [UpNextScreen].
+          const SliverToBoxAdapter(child: _Caption("You're all caught up."))
+        else
+          SliverList.builder(
+            itemCount: board.queue.length,
+            itemBuilder: (context, i) => _QueueTile(entry: board.queue[i]),
+          ),
+        ..._upcomingSection('This week', thisWeek, now),
+        ..._upcomingSection('Later', later, now),
+      ],
+    );
+  }
+
+  List<Widget> _upcomingSection(
+    String title,
+    List<UpcomingEntry> entries,
+    DateTime now,
+  ) => entries.isEmpty
+      ? const []
+      : [
+          _SectionHeader(title),
+          SliverList.builder(
+            itemCount: entries.length,
+            itemBuilder: (context, i) =>
+                _UpcomingTile(entry: entries[i], now: now),
+          ),
+        ];
+}
+
+/// Section heading, matching the one in Settings.
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          WatchnookSpacing.screen,
+          WatchnookSpacing.xl,
+          WatchnookSpacing.screen,
+          WatchnookSpacing.sm,
+        ),
+        child: Text(
+          title,
+          style: theme.textTheme.titleSmall?.copyWith(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A muted line of copy standing in for an empty section.
+class _Caption extends StatelessWidget {
+  const _Caption(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        WatchnookSpacing.screen,
+        0,
+        WatchnookSpacing.screen,
+        WatchnookSpacing.sm,
+      ),
+      child: Text(
+        text,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+/// A scheduled episode: same shape as a queue row, but the trailing tick is
+/// replaced by when it airs.
+///
+/// **It has no "mark watched" control, and must not grow one.** The episode has
+/// not aired; marking it would push `lastWatchedSeason`/`lastWatchedEpisode`
+/// past reality and silently drop the real next episode out of the queue.
+class _UpcomingTile extends StatelessWidget {
+  const _UpcomingTile({required this.entry, required this.now});
+
+  final UpcomingEntry entry;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      leading: _Poster(path: entry.posterPath),
+      title: Text(entry.showTitle),
+      subtitle: Text(
+        episodeLabel(entry.season, entry.episode, entry.episodeTitle),
+      ),
+      trailing: Text(
+        airLabel(entry.airDate, now),
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+      onTap: () => context.push('/title/${entry.itemId}'),
+    );
+  }
 }
 
 class _QueueTile extends ConsumerWidget {

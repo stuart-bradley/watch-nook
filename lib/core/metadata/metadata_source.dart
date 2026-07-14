@@ -8,9 +8,9 @@ import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 /// `RemoteConfigService.backend`, so flipping the backend swaps sources with
 /// no code change.
 ///
-/// All ids passed in ([movieDetails]/[showDetails]/[seasonEpisodes]/
-/// [upcomingForTracked]) are **this source's own** ids (TMDB id when TMDB is
-/// active, TVDB id when TVDB is active) — matching the row's `recordedSource`.
+/// All ids passed in ([movieDetails]/[showDetails]/[seasonEpisodes]) are **this
+/// source's own** ids (TMDB id when TMDB is active, TVDB id when TVDB is
+/// active) — matching the row's `recordedSource`.
 /// [resolveByExternalId] is the exception: it takes an external id (IMDb, or a
 /// TVDB id from a TV Time import) and maps it to this source (ADR-4).
 abstract interface class MetadataSource {
@@ -28,10 +28,6 @@ abstract interface class MetadataSource {
   /// Aired-order episodes for one season of a show (ADR-4 — never
   /// absolute/DVD numbering).
   Future<List<EpisodeInfo>> seasonEpisodes(int showSourceId, int seasonNumber);
-
-  /// Dated, not-yet-aired episodes for the given tracked show ids — the source
-  /// of the "upcoming" screen. Ids are this source's own show ids.
-  Future<List<UpcomingEpisode>> upcomingForTracked(List<int> showSourceIds);
 
   /// Relinks a title to this source by an external id. [kind] selects the id
   /// namespace: IMDb (the universal join key for a backend switch, ADR-4) or

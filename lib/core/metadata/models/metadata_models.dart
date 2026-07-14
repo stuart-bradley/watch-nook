@@ -292,47 +292,6 @@ class EpisodeInfo {
   };
 }
 
-/// A dated, not-yet-aired episode for a tracked show — the unit of the
-/// "upcoming" screen (M2). Carries the show's ids (to join back to the library
-/// row) plus the episode and its confirmed [airDate].
-@immutable
-class UpcomingEpisode {
-  const UpcomingEpisode({
-    required this.episode,
-    required this.airDate,
-    this.tmdbId,
-    this.tvdbId,
-    this.imdbId,
-  });
-
-  factory UpcomingEpisode.fromJson(Map<String, dynamic> json) =>
-      UpcomingEpisode(
-        episode: EpisodeInfo.fromJson(json['episode'] as Map<String, dynamic>),
-        airDate: DateTime.parse(json['airDate'] as String),
-        tmdbId: json['tmdbId'] as int?,
-        tvdbId: json['tvdbId'] as int?,
-        imdbId: json['imdbId'] as String?,
-      );
-
-  final EpisodeInfo episode;
-
-  /// The confirmed air date — required here (unlike [EpisodeInfo.airDate]), so
-  /// the upcoming list can always sort chronologically.
-  final DateTime airDate;
-
-  final int? tmdbId;
-  final int? tvdbId;
-  final String? imdbId;
-
-  Map<String, dynamic> toJson() => {
-    'episode': episode.toJson(),
-    'airDate': airDate.toIso8601String(),
-    'tmdbId': tmdbId,
-    'tvdbId': tvdbId,
-    'imdbId': imdbId,
-  };
-}
-
 /// Per-source attribution. **Mandatory display** on the detail screen: TMDB
 /// requires the logo + "not endorsed/certified by TMDB" notice; TheTVDB
 /// requires a linked credit. M2 renders this. See the attribution rule.
