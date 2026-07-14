@@ -31,7 +31,13 @@ void main() {
       libraryItemsProvider.overrideWith(
         (ref) => Stream.value(const <LibraryItem>[]),
       ),
-      watchQueueProvider.overrideWith((ref) async => const <QueueEntry>[]),
+      upNextBoardProvider.overrideWith(
+        (ref) async => (
+          queue: <QueueEntry>[],
+          upcoming: <UpcomingEntry>[],
+          now: DateTime(2026, 7, 14),
+        ),
+      ),
     ],
     child: const WatchnookApp(),
   );

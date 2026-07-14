@@ -65,12 +65,21 @@ void main() {
     tmdbId: 95396,
     episodeCountTotal: 4,
   );
-  const episodes = [
-    EpisodeInfo(seasonNumber: 0, episodeNumber: 1),
-    EpisodeInfo(seasonNumber: 1, episodeNumber: 1, runtimeMinutes: 57),
-    EpisodeInfo(seasonNumber: 1, episodeNumber: 2),
-    EpisodeInfo(seasonNumber: 2, episodeNumber: 1),
-    EpisodeInfo(seasonNumber: 2, episodeNumber: 2),
+  // Every episode carries an aired date: bulk-mark only marks what has aired,
+  // so an undated fixture would mark nothing and these tests would pass for the
+  // wrong reason (or, as here, fail).
+  final aired = DateTime(2026);
+  final episodes = [
+    EpisodeInfo(seasonNumber: 0, episodeNumber: 1, airDate: aired),
+    EpisodeInfo(
+      seasonNumber: 1,
+      episodeNumber: 1,
+      runtimeMinutes: 57,
+      airDate: aired,
+    ),
+    EpisodeInfo(seasonNumber: 1, episodeNumber: 2, airDate: aired),
+    EpisodeInfo(seasonNumber: 2, episodeNumber: 1, airDate: aired),
+    EpisodeInfo(seasonNumber: 2, episodeNumber: 2, airDate: aired),
   ];
 
   Future<int> insertShow() => db.libraryDao.insertItem(
@@ -89,13 +98,14 @@ void main() {
     WidgetTester tester,
     int itemId, {
     Set<(int, int)> alreadyWatched = const {},
+    List<EpisodeInfo>? serving,
   }) async {
     tester.view.physicalSize = const Size(1000, 4000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
     final item = (await db.libraryDao.getItem(itemId))!;
-    final source = _FakeSource(details, episodes);
+    final source = _FakeSource(details, serving ?? episodes);
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -158,6 +168,48 @@ void main() {
     await tester.pumpAndSettle();
     expect(await db.libraryDao.watchEventsFor(id), hasLength(4));
     expect(find.text('Already watched.'), findsOneWidget);
+  });
+
+  // "Nothing marked" has two causes and they must not share a message. A user
+  // tapping an unaired season is looking at a row that says "0/2 watched"; the
+  // old code answered "Already watched." — a flat contradiction, and it hid the
+  // very under-mark that `hasAired` deliberately chooses (whose whole
+  // justification is that the user can SEE it).
+  testWidgets('an unaired season is not reported as "Already watched."', (
+    tester,
+  ) async {
+    final id = await insertShow();
+    // Season 2 is announced but not yet broadcast — TMDB stubs the rows with
+    // future air dates, and the season bar still offers its bulk button.
+    await pumpDetail(
+      tester,
+      id,
+      serving: [
+        EpisodeInfo(seasonNumber: 1, episodeNumber: 1, airDate: aired),
+        EpisodeInfo(seasonNumber: 1, episodeNumber: 2, airDate: aired),
+        EpisodeInfo(
+          seasonNumber: 2,
+          episodeNumber: 1,
+          airDate: DateTime(2027, 3),
+        ),
+        EpisodeInfo(
+          seasonNumber: 2,
+          episodeNumber: 2,
+          airDate: DateTime(2027, 3, 8),
+        ),
+      ],
+    );
+
+    await tester.tap(seasonButton('Season 2'));
+    await tester.pumpAndSettle();
+
+    expect(await watched(id), isEmpty, reason: 'nothing has aired');
+    expect(find.text('Nothing has aired yet.'), findsOneWidget);
+    expect(
+      find.text('Already watched.'),
+      findsNothing,
+      reason: 'the season bar itself says 0/2 watched — this would be a lie',
+    );
   });
 
   testWidgets('"Mark show watched" sits above the seasons, not above all', (

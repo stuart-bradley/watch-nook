@@ -46,9 +46,6 @@ class _FakeTvdb implements MetadataSource {
   @override
   Future<MediaDetails> showDetails(int sourceId) => throw UnimplementedError();
   @override
-  Future<List<UpcomingEpisode>> upcomingForTracked(List<int> ids) =>
-      throw UnimplementedError();
-  @override
   String imageUrl(String path, ImageSize size) => throw UnimplementedError();
   @override
   Attribution attribution() => throw UnimplementedError();

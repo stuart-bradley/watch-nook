@@ -180,14 +180,6 @@ void main() {
         expect(r.title, 'Severance');
       });
 
-      test('upcomingForTracked → the next dated episode', () async {
-        final upcoming = await source.upcomingForTracked([c.showId]);
-
-        expect(upcoming, hasLength(1));
-        expect(upcoming.single.imdbId, 'tt11280740');
-        expect(upcoming.single.airDate, DateTime.parse('2027-01-15'));
-      });
-
       test('imageUrl(medium) → non-empty, provider-correct', () {
         final url = source.imageUrl(c.imagePath, ImageSize.medium);
 

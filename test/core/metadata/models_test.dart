@@ -107,20 +107,6 @@ void main() {
       expect(restored.toJson(), original.toJson());
     });
 
-    test('UpcomingEpisode', () {
-      final original = UpcomingEpisode(
-        episode: _episode,
-        airDate: DateTime.parse('2026-07-08T00:00:00.000'),
-        tmdbId: 95396,
-        tvdbId: 371980,
-        imdbId: 'tt11280740',
-      );
-      expect(
-        UpcomingEpisode.fromJson(original.toJson()).toJson(),
-        original.toJson(),
-      );
-    });
-
     test('Attribution', () {
       const original = Attribution(
         notice: 'Uses the TMDB API but not endorsed or certified by TMDB.',

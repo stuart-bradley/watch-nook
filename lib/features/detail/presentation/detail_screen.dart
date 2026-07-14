@@ -669,7 +669,7 @@ Future<void> _runBulk(
 }) async {
   final messenger = ScaffoldMessenger.of(context);
   try {
-    final marked = await bulkMarkWatched(
+    final result = await bulkMarkWatched(
       dao: ref.read(libraryDaoProvider),
       repo: ref.read(metadataRepositoryProvider),
       itemId: itemId,
@@ -680,10 +680,20 @@ Future<void> _runBulk(
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          switch (marked) {
-            0 => 'Already watched.',
-            1 => 'Marked 1 episode watched.',
-            _ => 'Marked $marked episodes watched.',
+          switch (result) {
+            // Nothing marked has TWO causes. Telling someone who just tapped an
+            // unaired season — whose own row reads "0/10 watched" — that it is
+            // "already watched" is a flat lie, and it hides the under-mark that
+            // `hasAired` deliberately chooses (see its doc: under-marking is
+            // only the safe failure because the user can SEE it). The test is
+            // whether anything had aired at all, NOT whether anything was
+            // skipped: a show you are caught up on with a season still to come
+            // skips plenty and is also genuinely already watched.
+            (marked: 0, airedCandidates: 0) => 'Nothing has aired yet.',
+            (marked: 0, airedCandidates: _) => 'Already watched.',
+            (marked: 1, airedCandidates: _) => 'Marked 1 episode watched.',
+            (marked: final n, airedCandidates: _) =>
+              'Marked $n episodes watched.',
           },
         ),
       ),

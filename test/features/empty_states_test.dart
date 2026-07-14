@@ -136,7 +136,13 @@ void main() {
       tester,
       const UpNextScreen(),
       [
-        watchQueueProvider.overrideWith((ref) async => const <QueueEntry>[]),
+        upNextBoardProvider.overrideWith(
+          (ref) async => (
+            queue: <QueueEntry>[],
+            upcoming: <UpcomingEntry>[],
+            now: DateTime(2026, 7, 14),
+          ),
+        ),
         libraryItemsProvider.overrideWith((ref) => Stream.value(items)),
         activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
       ],
@@ -170,7 +176,13 @@ void main() {
         tester,
         const UpNextScreen(),
         [
-          watchQueueProvider.overrideWith((ref) async => const <QueueEntry>[]),
+          upNextBoardProvider.overrideWith(
+            (ref) async => (
+              queue: <QueueEntry>[],
+              upcoming: <UpcomingEntry>[],
+              now: DateTime(2026, 7, 14),
+            ),
+          ),
           libraryItemsProvider.overrideWith(
             (ref) => const Stream<List<LibraryItem>>.empty(),
           ),

@@ -1,3 +1,4 @@
+import 'package:clock/clock.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,6 +23,8 @@ MediaDetails _show({
   required List<(int season, int episodes)> seasons,
   (int, int)? nextToAir,
   (int, int)? lastToAir,
+  DateTime? nextAirDate,
+  String? nextTitle,
 }) => MediaDetails(
   kind: MediaKind.tv,
   title: 'A Show',
@@ -31,7 +34,12 @@ MediaDetails _show({
   ],
   nextEpisode: nextToAir == null
       ? null
-      : EpisodeInfo(seasonNumber: nextToAir.$1, episodeNumber: nextToAir.$2),
+      : EpisodeInfo(
+          seasonNumber: nextToAir.$1,
+          episodeNumber: nextToAir.$2,
+          airDate: nextAirDate,
+          title: nextTitle,
+        ),
   lastEpisode: lastToAir == null
       ? null
       : EpisodeInfo(seasonNumber: lastToAir.$1, episodeNumber: lastToAir.$2),
@@ -274,11 +282,11 @@ void main() {
   });
 
   // The watch-queue rewrite is the highest-risk surface here, but every widget
-  // test overrides watchQueueProvider with a static list — so the orchestration
-  // (skip a cold show, sort) never actually runs. This drives it for real.
-  // (Live re-advance on a tick is verified on-device and guaranteed by
-  // `ref.watch(libraryItemsProvider)`; it's left to the widget layer.)
-  group('watchQueue (provider orchestration)', () {
+  // test overrides upNextBoardProvider with a static board — so the
+  // orchestration (skip a cold show, sort) never actually runs. This drives it
+  // for real. (Live re-advance on a tick is verified on-device and guaranteed
+  // by `ref.watch(libraryItemsProvider)`; it's left to the widget layer.)
+  group('upNextBoard (provider orchestration)', () {
     test('skips a show absent from cache and title-sorts the rest', () async {
       final db = AppDatabase.forTesting(NativeDatabase.memory());
       addTearDown(db.close);
@@ -298,17 +306,328 @@ void main() {
       });
       final container = _containerOver(db, repo);
       addTearDown(container.dispose);
-      // watchQueue is autoDispose: hold a listener so reading `.future` doesn't
+      // upNextBoard is autoDispose: hold a listener so reading `.future`
+      // doesn't
       // tear it (and its library-stream dependency) down mid-load.
-      addTearDown(container.listen(watchQueueProvider, (_, _) {}).close);
+      addTearDown(container.listen(upNextBoardProvider, (_, _) {}).close);
 
-      final queue = await container.read(watchQueueProvider.future);
+      final board = await container.read(upNextBoardProvider.future);
       expect(
-        queue.map((e) => e.showTitle),
+        board.queue.map((e) => e.showTitle),
         ['Alpha', 'Zeta'],
         reason: 'the cold show is skipped (not fatal); the rest are sorted',
       );
-      expect(queue.every((e) => e.season == 1 && e.episode == 2), isTrue);
+      expect(board.queue.every((e) => e.season == 1 && e.episode == 2), isTrue);
+    });
+
+    // Upcoming sorts by DATE, the queue by TITLE. A copy-paste of the queue's
+    // comparator would pass every single-show test and silently mis-order the
+    // one list whose whole purpose is chronology.
+    test('sorts upcoming by air date, not by title', () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      await _seed(db, title: 'Alpha', tmdbId: 1);
+      await _seed(db, title: 'Zeta', tmdbId: 2);
+      final repo = _FakeRepo({
+        // Alphabetically first, but airs LAST.
+        1: _show(
+          seasons: [(1, 10)],
+          nextToAir: (1, 1),
+          nextAirDate: DateTime(2026, 7, 20),
+        ),
+        2: _show(
+          seasons: [(1, 10)],
+          nextToAir: (1, 1),
+          nextAirDate: DateTime(2026, 7, 16),
+        ),
+      });
+      final container = _containerOver(db, repo);
+      addTearDown(container.dispose);
+      addTearDown(container.listen(upNextBoardProvider, (_, _) {}).close);
+
+      final board = await withClock(
+        Clock.fixed(DateTime(2026, 7, 14)),
+        () => container.read(upNextBoardProvider.future),
+      );
+      expect(board.upcoming.map((e) => e.showTitle), ['Zeta', 'Alpha']);
+    });
+
+    // The deliberate duplicate. You are behind on a show (S1E2 aired,
+    // unwatched) AND its next episode is scheduled. Both facts are true and
+    // both useful; "deduplicating" would hide "new episode Friday" for exactly
+    // the shows you watch most. If someone ever makes upcoming an `else` of the
+    // queue, this test is what stops them.
+    test('a show behind AND scheduled appears in BOTH lists', () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      await _seed(
+        db,
+        title: 'The Bear',
+        tmdbId: 1,
+        lastSeason: 1,
+        lastEpisode: 1,
+      );
+      final repo = _FakeRepo({
+        // Watched S1E1. S1E4 is next-to-air, so S1E2 and S1E3 have aired.
+        1: _show(
+          seasons: [(1, 10)],
+          nextToAir: (1, 4),
+          nextAirDate: DateTime(2026, 7, 17),
+        ),
+      });
+      final container = _containerOver(db, repo);
+      addTearDown(container.dispose);
+      addTearDown(container.listen(upNextBoardProvider, (_, _) {}).close);
+
+      final board = await withClock(
+        Clock.fixed(DateTime(2026, 7, 14)),
+        () => container.read(upNextBoardProvider.future),
+      );
+      expect(board.queue.single.showTitle, 'The Bear');
+      expect(board.queue.single.episode, 2, reason: 'the aired backlog');
+      expect(board.upcoming.single.showTitle, 'The Bear');
+      expect(board.upcoming.single.episode, 4, reason: 'the scheduled one');
+    });
+
+    // Both lists run through `showsForQueue`. A scheduled episode is tempting
+    // to show for ANY show with a date — but a dropped show is one you walked
+    // away from, and a watchlist show is one you never started. Neither is
+    // something you are waiting for. This pins that Upcoming did not quietly
+    // grow its own looser filter.
+    test('a dropped show is in neither list, however imminent', () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      await db.libraryDao.insertItem(
+        LibraryItemsCompanion.insert(
+          mediaType: MediaType.tv,
+          recordedSource: MetadataSourceKind.tmdb,
+          title: 'Abandoned',
+          trackStatus: TrackStatus.dropped,
+          addedAt: DateTime(2026),
+          updatedAt: DateTime(2026),
+          tmdbId: const Value(1),
+        ),
+      );
+      final repo = _FakeRepo({
+        1: _show(
+          seasons: [(1, 10)],
+          nextToAir: (1, 1),
+          nextAirDate: DateTime(2026, 7, 15),
+        ),
+      });
+      final container = _containerOver(db, repo);
+      addTearDown(container.dispose);
+      addTearDown(container.listen(upNextBoardProvider, (_, _) {}).close);
+
+      final board = await withClock(
+        Clock.fixed(DateTime(2026, 7, 14)),
+        () => container.read(upNextBoardProvider.future),
+      );
+      expect(board.queue, isEmpty);
+      expect(board.upcoming, isEmpty);
+    });
+  });
+
+  // A KNOWN GAP, pinned so it is a decision and not a surprise. The two lists
+  // reject a just-aired episode by different rules: Upcoming by DATE, the queue
+  // by COORDINATE against the same (stale) nextEpisode. So between an episode
+  // airing and the cache refreshing (≤12h airing TTL), a caught-up show sits in
+  // NEITHER section — it briefly vanishes from the page on the very day its
+  // episode airs. If you fix this, delete the test; do not let it fail quietly.
+  test(
+    'a stale-aired show falls into NEITHER list until the cache refreshes',
+    () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      // Caught up through S1E4. The cache still calls S1E5 the next-to-air,
+      // but its air date was yesterday — it aired; the cache has not caught up.
+      await _seed(
+        db,
+        title: 'Severance',
+        tmdbId: 1,
+        lastSeason: 1,
+        lastEpisode: 4,
+      );
+      final repo = _FakeRepo({
+        1: _show(
+          seasons: [(1, 10)],
+          nextToAir: (1, 5),
+          nextAirDate: DateTime(2026, 7, 13), // yesterday
+          lastToAir: (1, 4),
+        ),
+      });
+      final container = _containerOver(db, repo);
+      addTearDown(container.dispose);
+      addTearDown(container.listen(upNextBoardProvider, (_, _) {}).close);
+
+      final board = await withClock(
+        Clock.fixed(DateTime(2026, 7, 14)),
+        () => container.read(upNextBoardProvider.future),
+      );
+
+      expect(
+        board.queue,
+        isEmpty,
+        reason: 'the queue rejects S1E5 by coordinate — it IS the next-to-air',
+      );
+      expect(
+        board.upcoming,
+        isEmpty,
+        reason: 'Upcoming rejects S1E5 by date — it already aired',
+      );
+    },
+  );
+
+  group('upcomingFor', () {
+    final now = DateTime(2026, 7, 14);
+    final item = _item();
+
+    UpcomingEntry? upcoming(MediaDetails details) =>
+        upcomingFor(item, details, now);
+
+    MediaDetails scheduled(DateTime? airDate, {String? title}) => _show(
+      seasons: [(1, 10)],
+      nextToAir: (2, 1),
+      nextAirDate: airDate,
+      nextTitle: title,
+    );
+
+    test('a dated, future next episode becomes a row', () {
+      final entry = upcoming(
+        scheduled(DateTime(2026, 7, 17), title: 'Cold Harbor'),
+      );
+      expect(entry, isNotNull);
+      expect(entry!.season, 2);
+      expect(entry.episode, 1);
+      expect(entry.episodeTitle, 'Cold Harbor');
+      expect(entry.airDate, DateTime(2026, 7, 17));
+      expect(entry.itemId, item.id);
+    });
+
+    // The most urgent row on the page. An off-by-one in the lower bound (`> 0`
+    // instead of `>= 0`) drops today's episode — the one the user most wants.
+    test('an episode airing TODAY is included', () {
+      expect(upcoming(scheduled(now)), isNotNull);
+    });
+
+    // The sync is daily, so a cached `nextEpisode` can have aired since. An
+    // aired episode must never sit in Upcoming — it belongs in the queue, and
+    // the next sync moves it there.
+    test('a stale cache whose episode already aired is excluded', () {
+      expect(upcoming(scheduled(DateTime(2026, 7, 13))), isNull);
+      expect(upcoming(scheduled(DateTime(2026, 6))), isNull);
+    });
+
+    test('an ended show (no next episode) is excluded', () {
+      expect(upcoming(_show(seasons: [(1, 10)])), isNull);
+    });
+
+    test('a scheduled but UNDATED (TBA) episode is excluded', () {
+      expect(
+        upcoming(scheduled(null)),
+        isNull,
+        reason: 'an undated row cannot be sorted or labelled',
+      );
+    });
+
+    group('the 6-month horizon', () {
+      test('inside the horizon is kept, beyond it is dropped', () {
+        expect(upcoming(scheduled(DateTime(2026, 12, 14))), isNotNull);
+        expect(upcoming(scheduled(DateTime(2027, 1, 14))), isNotNull);
+        expect(
+          upcoming(scheduled(DateTime(2027, 2, 14))),
+          isNull,
+          reason: '7 months out is noise',
+        );
+      });
+
+      // `month + 6` from October is month 16. If that were clamped or wrapped
+      // by hand rather than left to DateTime's own normalisation, the horizon
+      // would land in the wrong year and admit (or drop) a whole season.
+      test('crosses a year boundary correctly', () {
+        final october = DateTime(2026, 10, 14);
+        expect(
+          upcomingFor(item, scheduled(DateTime(2027, 3, 14)), october),
+          isNotNull,
+          reason: 'Oct + 6 months = April NEXT year, so March is inside',
+        );
+        expect(
+          upcomingFor(item, scheduled(DateTime(2027, 5, 14)), october),
+          isNull,
+        );
+      });
+    });
+  });
+
+  group('daysUntil', () {
+    test('counts whole calendar days, ignoring the time of day', () {
+      // 23:00 today → 01:00 tomorrow is 2 hours, but it is still ONE day.
+      expect(
+        daysUntil(DateTime(2026, 7, 14, 23), DateTime(2026, 7, 15, 1)),
+        1,
+      );
+      expect(daysUntil(DateTime(2026, 7, 14), DateTime(2026, 7, 14)), 0);
+      expect(daysUntil(DateTime(2026, 7, 14), DateTime(2026, 7, 13)), -1);
+    });
+
+    // The bug `_streakDays` (stats_snapshot.dart) documents: normalise to
+    // LOCAL midnights and diff, and a spring-forward "day" is only 23 hours,
+    // so `.inDays` floors it away. `daysUntil` uses UTC midnights instead.
+    //
+    // THIS TEST ONLY BITES IN A DST-OBSERVING TIMEZONE. Under UTC the broken
+    // and correct implementations are IDENTICAL (no DST to get wrong), and
+    // GitHub runners default to UTC — so `just test` pins TZ=Europe/London.
+    // Without that pin these assertions are decoration.
+    //
+    // Both cases below were verified against the buggy implementation. The
+    // obvious-looking ones (28->29 Mar, 24->25 Oct) are deliberately NOT here:
+    // they pass either way. The UK shift is at 01:00, so those midnights are
+    // still a clean 24h apart, and a 25-hour autumn day still floors to 1.
+    test('is exact across a DST transition (needs a DST timezone)', () {
+      // 29 Mar 2026 01:00: clocks jump to 02:00. Local midnight on the 29th
+      // (GMT) to midnight on the 30th (BST) is 23 hours → buggy returns 0.
+      expect(
+        daysUntil(DateTime(2026, 3, 29), DateTime(2026, 3, 30)),
+        1,
+        reason: 'a 23-hour day is still one day (buggy impl returns 0)',
+      );
+      // A week straddling the same transition is 167 hours → buggy returns 6.
+      expect(
+        daysUntil(DateTime(2026, 3, 25), DateTime(2026, 4)),
+        7,
+        reason: 'seven calendar days, not 167/24 (buggy impl returns 6)',
+      );
+    });
+  });
+
+  group('isThisWeek', () {
+    test('today through day 6, and no further', () {
+      expect(isThisWeek(0), isTrue);
+      expect(isThisWeek(6), isTrue);
+      expect(isThisWeek(7), isFalse, reason: 'day 7 belongs to Later');
+      expect(isThisWeek(-1), isFalse);
+    });
+  });
+
+  group('airLabel', () {
+    // 14 Jul 2026 is a Tuesday.
+    final now = DateTime(2026, 7, 14);
+
+    test('names the near days', () {
+      expect(airLabel(DateTime(2026, 7, 14), now), 'Today');
+      expect(airLabel(DateTime(2026, 7, 15), now), 'Tomorrow');
+      expect(airLabel(DateTime(2026, 7, 17), now), 'Friday');
+      expect(airLabel(DateTime(2026, 7, 20), now), 'Monday');
+    });
+
+    test('falls back to a date past the week', () {
+      expect(airLabel(DateTime(2026, 7, 21), now), '21 Jul');
+      expect(airLabel(DateTime(2026, 12, 3), now), '3 Dec');
+    });
+
+    test('adds the year only when it differs', () {
+      expect(airLabel(DateTime(2027, 3, 12), now), '12 Mar 2027');
+      expect(airLabel(DateTime(2026, 9), now), '1 Sep');
     });
   });
 }
