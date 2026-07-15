@@ -65,6 +65,9 @@ class DetailScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: Text(item.value?.title ?? '')),
       body: item.when(
+        // Marking an episode watched re-emits this row; keep the loaded body
+        // during the reload instead of flashing the full-screen spinner.
+        skipLoadingOnReload: true,
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, _) => const _Notice("Couldn't open this title."),
         data: (row) => row == null

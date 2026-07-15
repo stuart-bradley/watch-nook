@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:clock/clock.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
@@ -88,6 +90,25 @@ void main() {
     ),
   );
 
+  // A controllable variant of [pumpWith]: `libraryItemsProvider` is backed by a
+  // caller-owned StreamController, so a test can drive a *reload* (the tick's
+  // library re-emit) — a fixed `Stream.value` can't. The board override watches
+  // `libraryItemsProvider` and derives the queue from the live items.
+  Future<void> pumpLive(
+    WidgetTester tester, {
+    required StreamController<List<LibraryItem>> items,
+    required Future<UpNextBoard> Function(Ref) board,
+  }) => tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        libraryItemsProvider.overrideWith((ref) => items.stream),
+        upNextBoardProvider.overrideWith(board),
+        activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
+      ],
+      child: const MaterialApp(home: Scaffold(body: UpNextScreen())),
+    ),
+  );
+
   testWidgets('renders a queue card per show with its next episode', (
     tester,
   ) async {
@@ -149,6 +170,174 @@ void main() {
       isTrue,
       reason: 'the tick marked exactly the queued coordinate',
     );
+  });
+
+  // R1/US-1 — THE flicker guard. Ticking re-emits `libraryItemsProvider`, which
+  // *reloads* `upNextBoardProvider`; the default `skipLoadingOnReload: false`
+  // flashes the full-screen spinner over the queue during that reload — the
+  // "flicker". This drives a REAL reload (a fixed-Future override can't reload,
+  // so the guard would be un-provable) and holds it open on a gate so the
+  // mid-reload frame is deterministic. It goes red if the fix is removed.
+  testWidgets('a reload keeps the queue on screen instead of a spinner', (
+    tester,
+  ) async {
+    final items = StreamController<List<LibraryItem>>();
+    addTearDown(items.close);
+    // First load resolves at once; the reload is held on a fresh gate so the
+    // board sits in AsyncLoading(reloading) while we inspect the frame.
+    var gate = Completer<void>()..complete();
+
+    await pumpLive(
+      tester,
+      items: items,
+      board: (ref) async {
+        final libItems = await ref.watch(libraryItemsProvider.future);
+        await gate.future;
+        return (
+          queue: [
+            for (final it in libItems)
+              entry(itemId: it.id, show: it.title, season: 1, episode: 1),
+          ],
+          upcoming: <UpcomingEntry>[],
+          now: _now,
+        );
+      },
+    );
+
+    items.add([_libItem(), _libItem(id: 2)]);
+    await tester.pumpAndSettle();
+    expect(find.text('Item 1'), findsOneWidget);
+    expect(find.text('Item 2'), findsOneWidget);
+
+    // Trigger a reload (Item 1 caught up → it will drop) and hold it open.
+    gate = Completer<void>();
+    items.add([_libItem(id: 2)]);
+    await tester.pump(); // deliver the re-emit; the board is now mid-reload
+    await tester.pump(); // settle the rebuild into the reloading state
+
+    expect(
+      find.byType(CircularProgressIndicator),
+      findsNothing,
+      reason: 'skipLoadingOnReload keeps the loaded queue — no spinner flash',
+    );
+    expect(
+      find.text('Item 1'),
+      findsOneWidget,
+      reason: 'the previous queue stays on screen during the reload',
+    );
+
+    // Let the reload finish → the new queue swaps in seamlessly (proves the
+    // reload really happened: without it, Item 1 would never leave).
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Item 1'), findsNothing);
+    expect(find.text('Item 2'), findsOneWidget);
+  });
+
+  // R2/US-3 — an advancing show keeps its row; only the episode label changes
+  // (it cross-fades). Driven through a real reload, as the tick is at runtime.
+  testWidgets('advancing a show keeps its row and updates the label', (
+    tester,
+  ) async {
+    final items = StreamController<List<LibraryItem>>();
+    addTearDown(items.close);
+    // The board reads each show's next episode from this mutable map, so a
+    // re-emit after we "advance" a show yields the next coordinate. The gate
+    // holds the advance reload open so we can inspect a deterministic
+    // mid-animation frame (see below).
+    var eps = <int, (int, int)>{1: (1, 14), 2: (2, 5)};
+    var gate = Completer<void>()..complete();
+
+    await pumpLive(
+      tester,
+      items: items,
+      board: (ref) async {
+        final libItems = await ref.watch(libraryItemsProvider.future);
+        await gate.future;
+        return (
+          queue: [
+            for (final it in libItems)
+              entry(
+                itemId: it.id,
+                show: it.title,
+                season: eps[it.id]!.$1,
+                episode: eps[it.id]!.$2,
+              ),
+          ],
+          upcoming: <UpcomingEntry>[],
+          now: _now,
+        );
+      },
+    );
+
+    items.add([_libItem(), _libItem(id: 2)]);
+    await tester.pumpAndSettle();
+    expect(find.text('Next: S1E14'), findsOneWidget);
+
+    // Advance show 1, holding the reload so the diff+animation start on a frame
+    // we control.
+    eps = {1: (1, 15), 2: (2, 5)};
+    gate = Completer<void>();
+    items.add([_libItem(), _libItem(id: 2)]);
+    await tester.pump(); // board reloads, now awaiting the gate
+    gate.complete();
+    await tester.pump(); // gate resolves → the diff runs, animations begin
+    await tester.pump(const Duration(milliseconds: 120)); // mid-animation
+
+    // The behaviour under test: an advance updates the row IN PLACE — it never
+    // inserts or removes — so there is exactly ONE 'Item 1' row throughout. A
+    // regression that turned an advance into a remove+re-insert (the row
+    // blinking out and back — the flicker this list exists to avoid) would
+    // render TWO mid-animation: the exiting ghost and the entering row. The
+    // settled text is identical either way, so this mid-animation count is what
+    // actually guards "keeps its row"; a settle-only assertion can't.
+    expect(
+      find.text('Item 1'),
+      findsOneWidget,
+      reason: 'advance keeps a single row — no remove+re-insert blink',
+    );
+
+    await tester.pumpAndSettle();
+    expect(find.text('Item 1'), findsOneWidget); // the row is still there
+    expect(find.text('Next: S1E15'), findsOneWidget); // label advanced
+    expect(find.text('Next: S1E14'), findsNothing);
+  });
+
+  // R2/US-4 — a caught-up show leaves the queue (slides/collapses out) while the
+  // survivor remains. pumpAndSettle covers the exit animation.
+  testWidgets('a caught-up show drops out and the survivor remains', (
+    tester,
+  ) async {
+    final items = StreamController<List<LibraryItem>>();
+    addTearDown(items.close);
+
+    await pumpLive(
+      tester,
+      items: items,
+      board: (ref) async {
+        final libItems = await ref.watch(libraryItemsProvider.future);
+        return (
+          queue: [
+            for (final it in libItems)
+              entry(itemId: it.id, show: it.title, season: 1, episode: 1),
+          ],
+          upcoming: <UpcomingEntry>[],
+          now: _now,
+        );
+      },
+    );
+
+    items.add([_libItem(), _libItem(id: 2)]);
+    await tester.pumpAndSettle();
+    expect(find.text('Item 1'), findsOneWidget);
+    expect(find.text('Item 2'), findsOneWidget);
+
+    // Show 1 is now caught up → it drops from the queue.
+    items.add([_libItem(id: 2)]);
+    await tester.pumpAndSettle(); // includes the collapse/fade-out animation
+
+    expect(find.text('Item 1'), findsNothing);
+    expect(find.text('Item 2'), findsOneWidget);
   });
 
   testWidgets(

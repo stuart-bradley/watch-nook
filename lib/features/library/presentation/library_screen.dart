@@ -136,6 +136,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         ),
         Expanded(
           child: items.when(
+            // A watch/status write re-emits the grid; keep the current grid on
+            // screen during the reload rather than flashing the full-screen
+            // spinner. (A filter-chip change swaps to a different family key —
+            // a genuine new query — and still shows the spinner, as intended.)
+            skipLoadingOnReload: true,
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (e, _) => const EmptyState(
               icon: Icons.error_outline,
