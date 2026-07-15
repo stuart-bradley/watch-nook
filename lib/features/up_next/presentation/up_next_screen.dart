@@ -32,6 +32,13 @@ class UpNextScreen extends ConsumerWidget {
     return ref
         .watch(upNextBoardProvider)
         .when(
+          // Ticking an episode writes to the library, which re-emits
+          // [libraryItemsProvider] and *reloads* this board. Keep the current
+          // queue on screen during that reload instead of flashing the
+          // full-screen spinner (the default `skipLoadingOnReload: false`) —
+          // that flash is the "flicker" the tab used to show. First load (no
+          // previous value) still shows the spinner.
+          skipLoadingOnReload: true,
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (error, _) => EmptyState(
             icon: Icons.cloud_off,
@@ -124,10 +131,7 @@ class _Board extends StatelessWidget {
           // the ternary in [UpNextScreen].
           const SliverToBoxAdapter(child: _Caption("You're all caught up."))
         else
-          SliverList.builder(
-            itemCount: board.queue.length,
-            itemBuilder: (context, i) => _QueueTile(entry: board.queue[i]),
-          ),
+          _QueueList(entries: board.queue),
         ..._upcomingSection('This week', thisWeek, now),
         ..._upcomingSection('Later', later, now),
       ],
@@ -148,6 +152,110 @@ class _Board extends StatelessWidget {
                 _UpcomingTile(entry: entries[i], now: now),
           ),
         ];
+}
+
+/// The watch queue as an **animated** list. Ticking a row either *advances* it
+/// (same show, next aired episode) or *drops* it (caught up). Each library
+/// write hands us a whole new immutable [UpNextBoard], so we diff the incoming
+/// queue against the rows on screen and drive a [SliverAnimatedList]: an
+/// advancing row stays put and its episode label cross-fades (inside
+/// [_QueueTile]); a dropped row slides/collapses out and the rows below glide
+/// up to fill the gap.
+///
+/// Not applied to Upcoming — those rows don't mutate on a tick (unaired), so
+/// there is nothing to animate there.
+///
+/// One case isn't animated out: when a tick empties the queue *and* nothing is
+/// upcoming, [_Board] swaps this list for the caught-up caption (a different
+/// widget), so the final row hard-cuts to the empty state. Animating
+/// list→empty-state is fiddly and low value; the 2+-row case is fully animated.
+class _QueueList extends StatefulWidget {
+  const _QueueList({required this.entries});
+
+  final List<QueueEntry> entries;
+
+  @override
+  State<_QueueList> createState() => _QueueListState();
+}
+
+class _QueueListState extends State<_QueueList> {
+  final _listKey = GlobalKey<SliverAnimatedListState>();
+
+  /// Mirrors exactly what [SliverAnimatedList] is showing — kept in lockstep
+  /// with its `insert`/`removeItem` so indices always line up. Seeded from the
+  /// first board; thereafter mutated in place only through [_sync].
+  late final List<QueueEntry> _rows = List.of(widget.entries);
+
+  static const _tileDuration = Duration(milliseconds: 300);
+
+  /// Honour the OS "reduce motion" setting: fall back to an instant update.
+  Duration get _duration =>
+      (MediaQuery.maybeOf(context)?.disableAnimations ?? false)
+      ? Duration.zero
+      : _tileDuration;
+
+  @override
+  void didUpdateWidget(_QueueList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _sync(widget.entries);
+  }
+
+  /// Diff [_rows] → [next] and drive the animated list. The queue is sorted by
+  /// title (`up_next_providers.dart`) and a tick never changes a title, so
+  /// survivors never reorder: a tick is an in-place *advance* (same `itemId`,
+  /// value differs) or a *removal* (`itemId` gone); a cache warm-up is an
+  /// *insertion* at the show's slot. A remove-missing-then-insert-new pass over
+  /// the two title-sorted lists is exact for these cases.
+  //
+  // ponytail: assumes stable relative order (a title-sorted queue). A genuine
+  // reorder would surface as a remove + re-insert, not a move — acceptable
+  // given titles don't change on a tick; revisit only if the sort key does.
+  void _sync(List<QueueEntry> next) {
+    final nextIds = {for (final e in next) e.itemId};
+
+    // Pass 1 — removals, high index → low so the indices stay valid as we go.
+    for (var i = _rows.length - 1; i >= 0; i--) {
+      if (!nextIds.contains(_rows[i].itemId)) {
+        final removed = _rows.removeAt(i);
+        _listKey.currentState?.removeItem(
+          i,
+          (context, animation) => _tile(removed, animation),
+          duration: _duration,
+        );
+      }
+    }
+
+    // Pass 2 — advances (same slot, new episode → rebuild + label cross-fade)
+    // and insertions.
+    for (var i = 0; i < next.length; i++) {
+      if (i < _rows.length && _rows[i].itemId == next[i].itemId) {
+        if (_rows[i] != next[i]) _rows[i] = next[i];
+      } else {
+        _rows.insert(i, next[i]);
+        _listKey.currentState?.insertItem(i, duration: _duration);
+      }
+    }
+  }
+
+  /// The enter/exit motion: collapse + fade, shared by inserts, removals, and
+  /// settled rows (whose animation is already complete, so they show fully).
+  Widget _tile(QueueEntry entry, Animation<double> animation) {
+    final curved = CurvedAnimation(parent: animation, curve: Curves.easeOut);
+    return SizeTransition(
+      sizeFactor: curved,
+      child: FadeTransition(
+        opacity: curved,
+        child: _QueueTile(entry: entry),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => SliverAnimatedList(
+    key: _listKey,
+    initialItemCount: _rows.length,
+    itemBuilder: (context, index, animation) => _tile(_rows[index], animation),
+  );
 }
 
 /// Section heading. Same anatomy as Settings' `_SectionHeader` (titleSmall, in
@@ -247,28 +355,39 @@ class _QueueTile extends ConsumerWidget {
   final QueueEntry entry;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => ListTile(
-    leading: _Poster(path: entry.posterPath),
-    title: Text(entry.showTitle),
-    subtitle: Text('Next: ${episodeLabel(entry.season, entry.episode)}'),
-    // Mark this exact episode watched from the queue; the library stream
-    // re-emits and the queue advances this row to the next episode (or drops
-    // it when caught up) — no reload needed.
-    trailing: IconButton(
-      icon: const Icon(Icons.check_circle_outline),
-      tooltip: 'Mark watched',
-      onPressed: () => ref
-          .read(libraryDaoProvider)
-          .markWatched(
-            entry.itemId,
-            season: entry.season,
-            episode: entry.episode,
-            watchedAt: clock.now(),
-          ),
-    ),
-    // Detail is a pushed route keyed by the library row id (AD-5).
-    onTap: () => context.push('/title/${entry.itemId}'),
-  );
+  Widget build(BuildContext context, WidgetRef ref) {
+    final label = 'Next: ${episodeLabel(entry.season, entry.episode)}';
+    return ListTile(
+      leading: _Poster(path: entry.posterPath),
+      title: Text(entry.showTitle),
+      // When the show advances to its next episode the row stays put and only
+      // this coordinate changes — cross-fade it. Keyed by the label so an
+      // unrelated rebuild (same episode) doesn't animate.
+      subtitle: AnimatedSwitcher(
+        duration: (MediaQuery.maybeOf(context)?.disableAnimations ?? false)
+            ? Duration.zero
+            : const Duration(milliseconds: 160),
+        child: Text(label, key: ValueKey(label)),
+      ),
+      // Mark this exact episode watched from the queue; the library stream
+      // re-emits and the queue advances this row to the next episode (or drops
+      // it when caught up) — no reload needed.
+      trailing: IconButton(
+        icon: const Icon(Icons.check_circle_outline),
+        tooltip: 'Mark watched',
+        onPressed: () => ref
+            .read(libraryDaoProvider)
+            .markWatched(
+              entry.itemId,
+              season: entry.season,
+              episode: entry.episode,
+              watchedAt: clock.now(),
+            ),
+      ),
+      // Detail is a pushed route keyed by the library row id (AD-5).
+      onTap: () => context.push('/title/${entry.itemId}'),
+    );
+  }
 }
 
 /// Show thumbnail — the same offline-safe poster the search + import rows use.

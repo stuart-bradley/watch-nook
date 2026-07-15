@@ -20,6 +20,9 @@ class StatsScreen extends ConsumerWidget {
     return ref
         .watch(statsProvider)
         .when(
+          // A watch write recomputes stats; keep the current figures on screen
+          // during the reload rather than flashing the full-screen spinner.
+          skipLoadingOnReload: true,
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (error, _) => const EmptyState(
             icon: Icons.error_outline,
