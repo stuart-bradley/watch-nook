@@ -367,6 +367,13 @@ class _QueueTile extends ConsumerWidget {
         duration: (MediaQuery.maybeOf(context)?.disableAnimations ?? false)
             ? Duration.zero
             : const Duration(milliseconds: 160),
+        // The default layoutBuilder stacks children with Alignment.center,
+        // which centres the subtitle under the title. Align to start to match
+        // _UpcomingTile's plain-Text subtitle (RTL-correct via directional).
+        layoutBuilder: (current, previous) => Stack(
+          alignment: AlignmentDirectional.centerStart,
+          children: [...previous, ?current],
+        ),
         child: Text(label, key: ValueKey(label)),
       ),
       // Mark this exact episode watched from the queue; the library stream

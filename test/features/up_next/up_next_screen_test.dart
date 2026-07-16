@@ -134,6 +134,29 @@ void main() {
     expect(find.byTooltip('Mark watched'), findsNWidgets(2));
   });
 
+  // The subtitle cross-fades via an AnimatedSwitcher (R2/US-3), whose default
+  // layoutBuilder centres its child — which centred "Next: SxEy" under the
+  // title, a regression shipped in the animation release. Assert the rendered
+  // subtitle shares the title's left edge (start-aligned), whatever the impl.
+  testWidgets('queue subtitle stays start-aligned under the title', (
+    tester,
+  ) async {
+    await pumpWith(
+      tester,
+      (ref) async => (
+        queue: [entry(show: 'One Piece', season: 1, episode: 14)],
+        upcoming: <UpcomingEntry>[],
+        now: _now,
+      ),
+      items: [_libItem()],
+    );
+    await tester.pumpAndSettle();
+
+    final titleLeft = tester.getTopLeft(find.text('One Piece')).dx;
+    final subtitleLeft = tester.getTopLeft(find.text('Next: S1E14')).dx;
+    expect(subtitleLeft, moreOrLessEquals(titleLeft, epsilon: 1));
+  });
+
   testWidgets('the tick marks exactly that coordinate watched', (tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
