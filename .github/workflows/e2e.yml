@@ -29,7 +29,7 @@ jobs:
     outputs:
       run: ${{ steps.detect.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: detect
         run: |
           if compgen -G 'integration_test/**/*_test.dart' >/dev/null 2>&1; then
