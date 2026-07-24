@@ -1,0 +1,41 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 30
+    groups:
+      all:
+        patterns:
+          - "*"
+    # ci-shared is private and Dependabot can't read it (the "grant access to
+    # private repositories" setting is org-only; this is a user account), so it
+    # errors the whole github-actions job. Nothing is lost by ignoring it: the
+    # reusable workflows are pinned to the floating @v1 tag, and ci-shared runs
+    # its own Dependabot to keep the actions inside them current.
+    ignore:
+      - dependency-name: stuart-bradley/ci-shared/*
+
+  - package-ecosystem: pub
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 30
+    groups:
+      all:
+        patterns:
+          - "*"
+
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 30
+    groups:
+      all:
+        patterns:
+          - "*"
