@@ -51,9 +51,29 @@ build-debug:
     [ -f secrets.json ] && args+=(--dart-define-from-file=secrets.json)
     flutter "${args[@]}"
 
+# Warm the Gradle build for `just e2e`, BEFORE the emulator boots. REQUIRED:
+# ci-shared's flutter-e2e.yml calls `just e2e-build` as its own step, so this
+# recipe MUST exist or every E2E run dies with "Justfile does not contain
+# recipe 'e2e-build'".
+#
+# Why the workflow does this: the app build is the bulk of the E2E job, and
+# running it next to an already-booted emulator starves QEMU on a 4-vCPU runner
+# ("detected a hanging thread 'QEMU2 main loop'") or overruns the job clock.
+# Building first is not extra work — `patrol test` runs the same Gradle task and
+# then finds it up to date.
+#
+# NOT `build-debug`: patrol also needs the androidTest instrumentation APK,
+# which `flutter build apk` never produces. Deliberately no
+# --dart-define-from-file here even though build-debug has one: `just e2e` runs
+# a keyless `patrol test`, and the two halves must pass identical inputs or
+# Gradle rebuilds instead of reusing.
+
+# Pre-build the app + androidTest APKs so `just e2e` finds Gradle up to date
+e2e-build:
+    patrol build android
+
 # E2E tests (Patrol). Assumes a running emulator/device + a patrol_cli matching
 # the patrol dep on PATH. patrol test auto-discovers integration_test/.
-# (integration_test/ + patrol land in M3 — this recipe is inert until then.)
 e2e:
     patrol test
 
