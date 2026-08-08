@@ -1,4 +1,4 @@
-# VENDORED from stuart-bradley/ci-shared @2ed8a4d — DO NOT EDIT CASUALLY.
+# VENDORED from stuart-bradley/ci-shared @21a80c7 — DO NOT EDIT CASUALLY.
 #
 # watch-nook is a PUBLIC repo and ci-shared is PRIVATE with access_level "user",
 # which GitHub documents as sharing "across user owned private repositories
@@ -106,12 +106,18 @@ on:
         # not the ~19m mean, or the occasional slow run gets clipped.
         #
         # LOAD-BEARING INVARIANT: this ceiling + ~5 min of setup/teardown must
-        # stay UNDER the caller's `timeout-minutes`, so the STEP timeout always
-        # fires first. Only a step timeout fails the step and keeps the log; a
-        # job killed by `timeout-minutes` reports conclusion=cancelled and
-        # retains NOTHING. Measured worst case at 35: 3m51s pre-steps + 35m +
-        # 1m11s post (a 4G AVD save is not free) = 40m18s against a 45m job
-        # ceiling. Raising one requires raising the other, in every patrol caller.
+        # stay UNDER the caller's `timeout-minutes`. A job killed by
+        # `timeout-minutes` reports conclusion=cancelled and retains NOTHING,
+        # so the job ceiling must never be what fires. Measured worst case at
+        # 35: 3m51s pre-steps + 35m + 1m11s post (a 4G AVD save is not free) =
+        # 40m18s against a 45m job ceiling. Raising one requires raising the
+        # other, in every patrol caller.
+        #
+        # DO NOT rely on this step ceiling alone. It does NOT reliably fire on
+        # the emulator-runner step: on well-quill 31250470722 the step carried
+        # 35 and ran ~51 minutes without completing, and the JOB ceiling killed
+        # it -- losing the log. That is why the script itself is wrapped in
+        # `timeout` (see the emulator step). Belt and braces, deliberately.
         description: "Ceiling for the emulator step (patrol apps build inside it — pass 35)"
         type: number
         default: 12
@@ -272,9 +278,65 @@ jobs:
           # tests pass. No pipe either (pipefail/PIPESTATUS aren't portable; a
           # mis-read exit could mask a real failure).
           #
-          # Output STREAMS now rather than being redirected to a file and dumped
-          # at the end — the file existed for the deleted classify step, and with
-          # the build hoisted out there is no longer a ~11-minute silent window
-          # to buffer. logcat goes to stdout too (tail-capped), so a failure
-          # needs no artifact download.
-          script: just e2e || { rc=$?; echo '--- logcat (last 2000 lines) ---'; adb logcat -d -t 2000; exit "$rc"; }
+          # Output is captured to a FILE, not streamed to the Actions log.
+          #
+          # HONEST STATUS: this does NOT fix the patrol QEMU runner deaths, and
+          # an earlier version of this comment claimed it did. Run 31252986313
+          # ran with this redirect AND the timeout bound below and still died
+          # (`hanging thread 'QEMU2 ...'` -> `runner has received a shutdown
+          # signal`, ~10 min into the build). The single passing control
+          # (31247153733) was the whole pre-reorder workflow, and one green run
+          # is not evidence for a ~4%-base-rate failure. The cause of the patrol
+          # deaths is UNRESOLVED -- see #22.
+          #
+          # The redirect is kept anyway, on narrower grounds: it matches the
+          # long-standing pre-#16 arrangement, it costs nothing, and buffering
+          # is the cheaper thing to do next to a live QEMU. Do not re-derive a
+          # causal claim from it.
+          #
+          # It CAPTURES ONLY -- it deliberately does not `cat` the file itself.
+          # An unbounded in-script `cat` is a real hazard, proven by run
+          # 31248007283: the tests finished at 08:43:20 and the dump then
+          # streamed for 38 minutes and tripped the 45m JOB ceiling, which
+          # retains no log at all. The bounded dump step below replaces it.
+          #
+          # logcat goes to a file here rather than stdout because the emulator is
+          # torn down with this step; a later step cannot call adb.
+          #
+          # `timeout` IS LOAD-BEARING -- do not drop it on the grounds that the
+          # step already has `timeout-minutes`. THE STEP CEILING DOES NOT
+          # RELIABLY FIRE ON THIS ACTION. Measured on well-quill 31250470722:
+          # `Run E2E tests` carried timeout-minutes 35, ran ~51 minutes without
+          # ever completing, and the JOB ceiling (45m) killed it -- retaining NO
+          # log, exactly what the step ceiling exists to prevent. Bounding the
+          # command guarantees it returns, so the logcat capture and the dump
+          # step both run whatever GitHub's step timeout does.
+          #
+          # 3 minutes under the step ceiling so this fires first, leaving room
+          # for the emulator-runner's own teardown.
+          script: timeout $(( ${{ inputs.emulator-timeout-minutes }} - 3 ))m just e2e > e2e-output.txt 2>&1; rc=$?; [ "$rc" -eq 0 ] || adb logcat -d -t 2000 > e2e-logcat.txt 2>&1; exit "$rc"
+
+      # THE OTHER HALF OF THE REDIRECT. Restoring the redirect without this is a
+      # regression, not a fix: `just e2e` writes to a file and prints nothing, so
+      # if nothing dumps the file the step log is EMPTY.
+      #
+      # It must be a separate `if: always()` step rather than a trailing command
+      # in the script above. When `timeout-minutes` fires, the runner SIGKILLs
+      # the emulator step's process group, so anything appended to that one-liner
+      # never executes -- but `always()` steps still run. A hang is the failure
+      # mode this job is built around (10 timed-out jobs in 98 runs), and #19
+      # added the step ceilings specifically so "a hang keeps its log"; without
+      # this step that guarantee is silently void, and worst for the patrol apps,
+      # whose entire 35-minute build+test window would go dark.
+      #
+      # The redirect writes incrementally, so the file holds everything up to the
+      # hang. Dumping here cannot re-create the streaming contention the redirect
+      # exists to avoid, because the emulator is already gone by this point.
+      - name: Dump E2E diagnostics
+        if: always()
+        run: |
+          tail -c 2000000 e2e-output.txt || true
+          if [ -s e2e-logcat.txt ]; then
+            echo '--- logcat (last 2000 lines) ---'
+            cat e2e-logcat.txt
+          fi
