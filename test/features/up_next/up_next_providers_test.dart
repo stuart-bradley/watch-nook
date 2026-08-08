@@ -100,6 +100,29 @@ ProviderContainer _containerOver(AppDatabase db, _FakeRepo repo) =>
       ],
     );
 
+/// Reads [upNextBoardProvider] with the clock pinned to [now].
+///
+/// The `listen` MUST happen INSIDE the zone. It is what starts the provider
+/// build, and `upNextBoard` calls `clock.now()`, which reads the *ambient
+/// Zone*. Listening first (as these tests used to) built the board against
+/// REAL time and the fixed clock silently did nothing.
+///
+/// That made the clock tests a time bomb: they passed only while real `now` was
+/// still before the fixtures' hardcoded July-2026 air dates, then began failing
+/// on 2026-07-16 when it wasn't. Worse, the two that assert `isEmpty` kept
+/// passing for the wrong reason — under real time everything looks already
+/// aired, so they would pass against arbitrarily broken code.
+///
+/// Prove any change here still bites: move the `listen` back outside the zone
+/// and the two non-empty expectations must go red.
+Future<UpNextBoard> _boardAt(ProviderContainer container, DateTime now) =>
+    withClock(Clock.fixed(now), () {
+      // upNextBoard is autoDispose: hold a listener so reading `.future`
+      // doesn't tear it (and its library-stream dependency) down mid-load.
+      addTearDown(container.listen(upNextBoardProvider, (_, _) {}).close);
+      return container.read(upNextBoardProvider.future);
+    });
+
 Future<int> _seed(
   AppDatabase db, {
   required String title,
@@ -343,12 +366,8 @@ void main() {
       });
       final container = _containerOver(db, repo);
       addTearDown(container.dispose);
-      addTearDown(container.listen(upNextBoardProvider, (_, _) {}).close);
 
-      final board = await withClock(
-        Clock.fixed(DateTime(2026, 7, 14)),
-        () => container.read(upNextBoardProvider.future),
-      );
+      final board = await _boardAt(container, DateTime(2026, 7, 14));
       expect(board.upcoming.map((e) => e.showTitle), ['Zeta', 'Alpha']);
     });
 
@@ -377,12 +396,8 @@ void main() {
       });
       final container = _containerOver(db, repo);
       addTearDown(container.dispose);
-      addTearDown(container.listen(upNextBoardProvider, (_, _) {}).close);
 
-      final board = await withClock(
-        Clock.fixed(DateTime(2026, 7, 14)),
-        () => container.read(upNextBoardProvider.future),
-      );
+      final board = await _boardAt(container, DateTime(2026, 7, 14));
       expect(board.queue.single.showTitle, 'The Bear');
       expect(board.queue.single.episode, 2, reason: 'the aired backlog');
       expect(board.upcoming.single.showTitle, 'The Bear');
@@ -417,12 +432,8 @@ void main() {
       });
       final container = _containerOver(db, repo);
       addTearDown(container.dispose);
-      addTearDown(container.listen(upNextBoardProvider, (_, _) {}).close);
 
-      final board = await withClock(
-        Clock.fixed(DateTime(2026, 7, 14)),
-        () => container.read(upNextBoardProvider.future),
-      );
+      final board = await _boardAt(container, DateTime(2026, 7, 14));
       expect(board.queue, isEmpty);
       expect(board.upcoming, isEmpty);
     });
@@ -458,12 +469,8 @@ void main() {
       });
       final container = _containerOver(db, repo);
       addTearDown(container.dispose);
-      addTearDown(container.listen(upNextBoardProvider, (_, _) {}).close);
 
-      final board = await withClock(
-        Clock.fixed(DateTime(2026, 7, 14)),
-        () => container.read(upNextBoardProvider.future),
-      );
+      final board = await _boardAt(container, DateTime(2026, 7, 14));
 
       expect(
         board.queue,

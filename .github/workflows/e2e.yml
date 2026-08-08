@@ -30,9 +30,18 @@ jobs:
       run: ${{ steps.detect.outputs.run }}
     steps:
       - uses: actions/checkout@v4
+      # `find`, NOT `compgen -G 'integration_test/**/*_test.dart'`. Bash's
+      # globstar is OFF by default, so `**` collapses to a single `*` and that
+      # pattern only matches a test in a SUBDIRECTORY. This repo's test is
+      # integration_test/import_flow_test.dart — top level — so the gate
+      # silently resolved run=false and E2E was SKIPPED on every run from the
+      # day the tests landed. It looked like a deliberate skip, not a bug.
+      #
+      # This gate has now served its purpose (the tests exist); it can be
+      # deleted whenever someone wants one less job per run.
       - id: detect
         run: |
-          if compgen -G 'integration_test/**/*_test.dart' >/dev/null 2>&1; then
+          if [ -n "$(find integration_test -name '*_test.dart' -print -quit 2>/dev/null)" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
