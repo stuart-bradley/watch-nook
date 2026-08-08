@@ -1,0 +1,88 @@
+# VENDORED from stuart-bradley/ci-shared @2ed8a4d — DO NOT EDIT CASUALLY.
+#
+# watch-nook is a PUBLIC repo and ci-shared is PRIVATE with access_level "user",
+# which GitHub documents as sharing "across user owned private repositories
+# only". A public caller therefore cannot resolve those reusable workflows: every
+# run since 2026-08-07 07:55 was a startup_failure with 0 jobs and no log (#75).
+# Vendoring removes the cross-repo reference entirely.
+#
+# This is a genuine FORK — the other three apps still consume the shared copy.
+# Re-sync by hand when ci-shared changes, and expect Dependabot to bump the
+# pinned SHAs here and there independently, so diff ignoring those lines.
+name: Flutter Release APK
+
+# Reusable: build a signed **universal APK** (with the app's baked API key) and
+# attach it to the GitHub Release for the pushed tag. `just check` runs BEFORE
+# the signing / API secrets are in scope. Callers keep their own tag trigger,
+# pass `secrets: inherit`, and grant `contents: write` on the calling job.
+#
+# The consuming app must expose `just release-apk-ci`: build the signed release
+# APK from env — KEYSTORE_BASE64 + STORE_PASSWORD + KEY_ALIAS + KEY_PASSWORD for
+# signing, TMDB_API_KEY + TMDB_READ_TOKEN for the baked key, BUILD_NAME +
+# BUILD_NUMBER for versionName/versionCode — leaving it at
+# build/app/outputs/flutter-apk/app-release.apk.
+on:
+  workflow_call:
+    inputs:
+      flutter-version:
+        description: "Exact Flutter version, overriding the shared pin in setup-flutter (empty = use the pin)"
+        type: string
+        default: ""
+    secrets:
+      KEYSTORE_BASE64:
+        required: true
+      STORE_PASSWORD:
+        required: true
+      KEY_ALIAS:
+        required: true
+      KEY_PASSWORD:
+        required: true
+      TMDB_API_KEY:
+        required: true
+      TMDB_READ_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release-apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      # Reclaim runner disk first — a full signed release APK build is
+      # disk-hungry and the runner image's free space shrinks between image
+      # versions.
+      - uses: ./.github/actions/free-disk-space
+
+      - uses: ./.github/actions/setup-flutter
+        with:
+          flutter-version: ${{ inputs.flutter-version }}
+
+      # Verification runs WITHOUT the signing / API secrets in scope.
+      - name: Verify
+        run: just check
+
+      - name: Build signed APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          TMDB_READ_TOKEN: ${{ secrets.TMDB_READ_TOKEN }}
+          BUILD_NAME: ${{ github.ref_name }}      # tag -> versionName
+          BUILD_NUMBER: ${{ github.run_number }}  # monotonic -> versionCode
+        run: just release-apk-ci
+
+      # Create the Release for this tag (or upload to it if it already exists),
+      # using the preinstalled gh CLI — no third-party action to pin.
+      - name: Publish APK to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          gh release create "$GITHUB_REF_NAME" "$apk" \
+            --title "$GITHUB_REF_NAME" --generate-notes \
+            || gh release upload "$GITHUB_REF_NAME" "$apk" --clobber

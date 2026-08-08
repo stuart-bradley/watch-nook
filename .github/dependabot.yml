@@ -10,11 +10,16 @@ updates:
       all:
         patterns:
           - "*"
-    # ci-shared is private and Dependabot can't read it (the "grant access to
-    # private repositories" setting is org-only; this is a user account), so it
-    # errors the whole github-actions job. Nothing is lost by ignoring it: the
-    # reusable workflows are pinned to the floating @v1 tag, and ci-shared runs
-    # its own Dependabot to keep the actions inside them current.
+    # Kept but now INERT: this repo no longer references ci-shared at all (its
+    # workflows are vendored in-tree — see the header on .github/workflows/
+    # flutter-*.yml and #75). The rule costs nothing and guards against a
+    # re-introduced reference erroring the whole github-actions job, since
+    # Dependabot cannot read a private repo from a user account.
+    #
+    # Dependabot now bumps the pinned action SHAs inside the vendored workflows
+    # directly. That is deliberate — it keeps the pins current at the cost of
+    # drifting from ci-shared, which is the right trade for a fork we intend to
+    # keep. When re-syncing, diff ignoring the pinned-SHA lines.
     ignore:
       - dependency-name: stuart-bradley/ci-shared/*
 

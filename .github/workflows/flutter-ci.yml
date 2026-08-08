@@ -1,0 +1,59 @@
+# VENDORED from stuart-bradley/ci-shared @2ed8a4d — DO NOT EDIT CASUALLY.
+#
+# watch-nook is a PUBLIC repo and ci-shared is PRIVATE with access_level "user",
+# which GitHub documents as sharing "across user owned private repositories
+# only". A public caller therefore cannot resolve those reusable workflows: every
+# run since 2026-08-07 07:55 was a startup_failure with 0 jobs and no log (#75).
+# Vendoring removes the cross-repo reference entirely.
+#
+# This is a genuine FORK — the other three apps still consume the shared copy.
+# Re-sync by hand when ci-shared changes, and expect Dependabot to bump the
+# pinned SHAs here and there independently, so diff ignoring those lines.
+name: Flutter CI
+
+# Reusable CI for the Flutter apps: lint shell scripts, run `just check`
+# (codegen + analyze + format-check + unit/widget tests), and optionally a
+# debug-APK smoke build. Callers keep their own push/pull_request triggers and
+# concurrency.
+on:
+  workflow_call:
+    inputs:
+      smoke-build:
+        description: "Run `just build-debug` after check (Android compile smoke test)"
+        type: boolean
+        default: false
+      flutter-version:
+        description: "Exact Flutter version, overriding the shared pin in setup-flutter (empty = use the pin)"
+        type: string
+        default: ""
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      # Reclaim runner disk BEFORE anything downloads/builds. The runner image's
+      # baseline free disk periodically shrinks under a runner-image rollout,
+      # and `just check` (codegen + tests) then exhausts it and the runner dies
+      # with "No space left on device" long before the smoke build — so this
+      # must run first, unconditionally, not gated to the smoke build.
+      - uses: ./.github/actions/free-disk-space
+
+      - uses: ./.github/actions/setup-flutter
+        with:
+          flutter-version: ${{ inputs.flutter-version }}
+
+      - name: Lint scripts
+        run: just lint-scripts
+
+      # Static, no build: the one release-only failure `just check` structurally
+      # cannot see (R8 strips Dart-only resources; debug builds aren't shrunk).
+      - uses: ./.github/actions/verify-dart-resources
+
+      - name: Check
+        run: just check
+
+      - name: Smoke build (debug APK)
+        if: inputs.smoke-build
+        run: just build-debug

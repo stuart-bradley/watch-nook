@@ -1,0 +1,13 @@
+name: Verify Dart-referenced Android resources
+description: >-
+  Fail if an Android resource that only Dart names in a string is missing from
+  res/raw/keep.xml. R8 resource shrinking runs on Flutter release builds and
+  never on debug, so it strips such resources and the app breaks in production
+  while every local check stays green. Static — no build, runs in seconds.
+
+runs:
+  using: composite
+  steps:
+    - name: Verify Dart-referenced Android resources survive R8
+      shell: bash
+      run: ${{ github.action_path }}/verify-dart-resources.sh
