@@ -1,0 +1,98 @@
+name: Setup Flutter
+description: Install Flutter, Just, cache Gradle, and pub get
+
+# Note: codegen (build_runner) is intentionally NOT run here. `just check`
+# (CI + release) already runs it, so running it here too would double-run
+# build_runner. Workflows that build without `just check` (e2e) run
+# `just codegen` explicitly.
+inputs:
+  flutter-version:
+    description: >-
+      Exact Flutter version, overriding the shared pin below for this caller
+      only. Empty (the default, and what every reusable workflow passes when
+      its own input is unset) means "use the shared pin".
+    required: false
+    default: ""
+  save-gradle-cache:
+    description: >-
+      Whether this job may SAVE the Gradle cache (it always restores). Set
+      "false" from pull_request-only jobs — see the two cache steps below.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      with:
+        channel: stable
+        # THE SHARED FLUTTER PIN — one constant, every app, every workflow.
+        #
+        # The SDK was the last floating dependency: actions are SHA-pinned and
+        # pubspec.lock is committed, but an unpinned stable auto-updates on the
+        # runner, so a build changes underfoot with no commit to blame. Twice
+        # now — the "compileFlutterBuildDebug not found" Gradle regression, then
+        # 3.44.8's built-in Kotlin, which stops home_widget 0.9.1 compiling and
+        # took out tasks-on-time's e2e and its next release.
+        #
+        # 3.44.6 is the last version all three apps were green on. It lives here
+        # rather than in each workflow's input default because the workflows
+        # pass their (empty) input straight through, and an explicit "" would
+        # override an input default — so the fallback has to be at the point of
+        # use. Moving it is deliberate: bump here, watch ci + e2e go green on
+        # EVERY app, then move `v1`.
+        flutter-version: ${{ inputs.flutter-version || '3.44.6' }}
+        cache: true
+
+    - name: Install Just
+      uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+
+    # Gradle deps. Two steps, not one with a conditional `uses:` — a step's
+    # `uses:` cannot be an expression, and actions/cache vs actions/cache/restore
+    # are different actions.
+    #
+    # WHY A JOB WOULD DECLINE TO SAVE: a cache written by a `pull_request` run is
+    # scoped to refs/pull/N/merge and is unreadable by every other PR. A PR-only
+    # job therefore writes 2.5–3 GB that nothing can ever restore, and the repo's
+    # 10 GB budget then evicts the caches that DO work. Measured 2026-08-06:
+    # tasks-on-time held 5.4 GB of its 8.1 GB in two such Gradle entries
+    # (refs/pull/219 + refs/pull/204) and had no main-scoped one at all, so its
+    # E2E logged `Cache not found for input keys: gradle-Linux-…, gradle-Linux-`
+    # while cog-scroll — which has a main-scoped copy — restored fine. What the
+    # save buys is small: assembleDebug was 693 s on that miss vs 663 s on a hit.
+    # Restoring is always worth it; saving is only worth it from a ref others can
+    # read, i.e. a push to main.
+    #
+    # Which is why so few main-scoped Gradle caches exist: flutter-ci runs on
+    # main but `just check` never invokes Gradle, so its save is a silent no-op
+    # ("Path Validation Error: Path(s) specified in the action for caching
+    # do(es) not exist"), and the release workflows run on TAGS, not main. E2E
+    # was therefore the only job actually writing a Gradle cache, and it wrote
+    # every one of them to a ref nothing else could read. cog-scroll's usable
+    # copy came from a release-tag run; tasks-on-time simply has none. Stopping
+    # the E2E save loses nothing that ever worked.
+    - name: Cache Gradle dependencies
+      if: inputs.save-gradle-cache == 'true'
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          gradle-${{ runner.os }}-
+
+    - name: Restore Gradle dependencies (restore-only)
+      if: inputs.save-gradle-cache != 'true'
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          gradle-${{ runner.os }}-
+
+    - name: Install dependencies
+      shell: bash
+      run: flutter pub get

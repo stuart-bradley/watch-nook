@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   check:
-    uses: stuart-bradley/ci-shared/.github/workflows/flutter-ci.yml@v1
+    uses: ./.github/workflows/flutter-ci.yml
     with:
       # smoke-build compiles the debug Android build in CI, so #1's signing /
       # desugar / namespace / applicationId config is validated by a hard gate

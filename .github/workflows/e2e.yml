@@ -30,9 +30,18 @@ jobs:
       run: ${{ steps.detect.outputs.run }}
     steps:
       - uses: actions/checkout@v4
+      # `find`, NOT `compgen -G 'integration_test/**/*_test.dart'`. Bash's
+      # globstar is OFF by default, so `**` collapses to a single `*` and that
+      # pattern only matches a test in a SUBDIRECTORY. This repo's test is
+      # integration_test/import_flow_test.dart — top level — so the gate
+      # silently resolved run=false and E2E was SKIPPED on every run from the
+      # day the tests landed. It looked like a deliberate skip, not a bug.
+      #
+      # This gate has now served its purpose (the tests exist); it can be
+      # deleted whenever someone wants one less job per run.
       - id: detect
         run: |
-          if compgen -G 'integration_test/**/*_test.dart' >/dev/null 2>&1; then
+          if [ -n "$(find integration_test -name '*_test.dart' -print -quit 2>/dev/null)" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -42,13 +51,27 @@ jobs:
     if: ${{ needs.gate.outputs.run == 'true' }}
     # API 33 (Android 13) for the POST_NOTIFICATIONS runtime dialog; 4G for
     # patrol's heavier instrumented build; install-patrol activates patrol_cli
-    # (matches patrol). 45-min timeout leaves room for the shared workflow's one
-    # retry-on-infra-crash without tripping the job timeout.
-    uses: stuart-bradley/ci-shared/.github/workflows/flutter-e2e.yml@v1
+    # (matches patrol).
+    #
+    # timeout-minutes 45 is NOT retry headroom -- that machinery was deleted
+    # (it fired 0 times in 98 runs and could never help a runner death). It is
+    # now load-bearing against emulator-timeout-minutes below: the STEP ceiling
+    # must fire before the JOB ceiling, because only a step timeout fails the
+    # step and keeps the log. A job killed by timeout-minutes reports
+    # conclusion=cancelled and retains nothing.
+    uses: ./.github/workflows/flutter-e2e.yml
     with:
       api-level: 33
       disk-size: "4G"
+      # MUST stay a literal boolean. As an expression it would arrive as the
+      # string "false", which is truthy, so the workflow's
+      # `if: !inputs.install-patrol` would stop skipping the warm build.
       install-patrol: true
+      # 35, not the default 12: install-patrol skips the warm build, so the
+      # ENTIRE build runs inside the emulator step. Copied from well-quill and
+      # UNVALIDATED here -- watch-nook's e2e job has been `skipped` on every run
+      # it has ever had, so patrol E2E has never actually executed in this repo.
+      emulator-timeout-minutes: 35
       timeout-minutes: 45
       # Pin Flutter: an unpinned stable auto-updated on the runner and its Gradle
       # plugin broke the patrol Android build ("compileFlutterBuildDebug not
