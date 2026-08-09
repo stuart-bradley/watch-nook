@@ -1,4 +1,4 @@
-# VENDORED from stuart-bradley/ci-shared @21a80c7 — DO NOT EDIT CASUALLY.
+# VENDORED from stuart-bradley/ci-shared @872e921 — DO NOT EDIT CASUALLY.
 #
 # watch-nook is a PUBLIC repo and ci-shared is PRIVATE with access_level "user",
 # which GitHub documents as sharing "across user owned private repositories
@@ -116,8 +116,13 @@ on:
         # DO NOT rely on this step ceiling alone. It does NOT reliably fire on
         # the emulator-runner step: on well-quill 31250470722 the step carried
         # 35 and ran ~51 minutes without completing, and the JOB ceiling killed
-        # it -- losing the log. That is why the script itself is wrapped in
-        # `timeout` (see the emulator step). Belt and braces, deliberately.
+        # it -- losing the log. That is why the script itself is bounded (see
+        # the emulator step). Belt and braces, deliberately.
+        #
+        # This value feeds BOTH ceilings, but they are measured from different
+        # instants -- the step's from step start, the script's from a deadline
+        # stamped just before it. Do not reintroduce a script-side bound derived
+        # as a duration from this number; that is the bug the stamp step fixes.
         description: "Ceiling for the emulator step (patrol apps build inside it — pass 35)"
         type: number
         default: 12
@@ -233,6 +238,47 @@ jobs:
         run: |
           mkdir -p ~/.gradle
           echo "org.gradle.workers.max=3" >> ~/.gradle/gradle.properties
+          # MEMORY, not just workers -- this is what actually killed the runners
+          # (#22). workers.max caps CPU parallelism and constrains memory NOT AT
+          # ALL. The apps ship `org.gradle.jvmargs=-Xmx8G -XX:MaxMetaspaceSize=4G`
+          # in android/gradle.properties, and -Xmx does not RESERVE, it PERMITS:
+          # a JVM told it may have 8G defers collection and grows instead of
+          # GCing. Measured on well-quill 31255537176, sampling /proc/meminfo
+          # every 10s from inside the emulator step:
+          #
+          #   11:58:12  MemAvailable 4.37G  SwapFree 3.15G  Committed_AS  7.2G  load  4.5
+          #   12:06:56  MemAvailable  428M  SwapFree  932K  Committed_AS 16.8G  load  6.2
+          #   12:08:18  MemAvailable  114M  SwapFree   44K  Committed_AS 16.9G  load 38.02
+          #   12:09:19  ERROR | hanging thread 'QEMU2 main loop'. No response for 18658 ms
+          #   12:10:22  ##[error]The runner has received a shutdown signal
+          #
+          # Swap fully consumed, Committed_AS past the 16G of physical RAM, and
+          # load 38 on FOUR vCPUs -- that is ~35 processes in D-state on swap
+          # I/O, not CPU work. Top RSS at the cliff: Gradle daemon 4.19G, QEMU
+          # 2.07G, second JVM 845M.
+          #
+          # Headroom is ~4.4G, NOT 16G: QEMU and the runner have already taken
+          # their share before Gradle starts. Size the JVMs against that.
+          #
+          # Same run with these caps (31256765896): MemAvailable low 617M (was
+          # 114M), swap never exhausted (1.54G low, was 24K), load peak 7.84
+          # (was 38.76), Gradle daemon peak 2.99G (was 4.19G), ZERO hanging
+          # threads, and the build finished in 214.4s having previously not
+          # finished at all. well-quill's suite then ran end to end for the
+          # first time (7/8, one real product failure -- well-quill#122).
+          #
+          # GRADLE_USER_HOME/gradle.properties outranks the app's
+          # android/gradle.properties, so these win without touching any app --
+          # whose 8G is correct for a build that owns the whole machine. This is
+          # deliberately scoped to the emulator window only.
+          echo "org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1g" >> ~/.gradle/gradle.properties
+          # The Kotlin compile daemon is a SEPARATE JVM and does NOT inherit the
+          # line above; uncapped it is the 845M process in that sample, and it
+          # grows. Cap it too or the ceiling above is only half a ceiling.
+          echo "kotlin.daemon.jvmargs=-Xmx1g -XX:MaxMetaspaceSize=512m" >> ~/.gradle/gradle.properties
+          # Echo what Gradle was actually handed -- cheap, and it turns "did the
+          # caps apply?" into a fact rather than an inference on the next hang.
+          cat ~/.gradle/gradle.properties
 
       - name: Cache AVD
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -242,6 +288,34 @@ jobs:
             ~/.android/avd/*
             ~/.android/adb*
           key: avd-api${{ inputs.api-level }}-x86_64-${{ inputs.disk-size }}-emu11237101-${{ runner.os }}
+
+      # THE TWO CEILINGS HAVE DIFFERENT CLOCK ORIGINS, AND THAT WAS A BUG.
+      #
+      # `timeout-minutes` on the next step starts when the STEP starts. The
+      # in-script `timeout` starts when the SCRIPT starts -- which is after
+      # android-emulator-runner has created the AVD and booted it. That gap is
+      # not small: measured 3m38s-4m00s on well-quill (`Boot completed in
+      # 102618 ms` on 31254161278, 91828 ms on 31252986313; AVD creation on a
+      # cache miss adds ~110s on top). watch-nook boots in 45821 ms.
+      #
+      # So the previous `timeout $(( ceiling - 3 ))m` could not fire first for a
+      # patrol app: with a 35m ceiling the script deadline landed at 11:55:46
+      # against a step ceiling of 11:54:46. The belt-and-braces the comment
+      # claimed was inert, and 31254161278 kept its log only because the step
+      # ceiling happened to fire that time. Subtracting a bigger constant is not
+      # the fix either -- it would leave the plain-Flutter default of 12 with
+      # only ~4 minutes for a job measured at 4.5-8.0m.
+      #
+      # Fix: give both ceilings the SAME origin. Stamp the wall clock here, as
+      # late as possible (after the AVD restore, immediately before the step),
+      # and have the script derive its remaining budget from that absolute
+      # deadline instead of from a duration on a different clock.
+      #
+      # 90s of headroom: enough for the logcat capture plus the action's
+      # emulator teardown, so the script always returns before the step ceiling.
+      # The AVD *save* is a separate post-job step and is not in this budget.
+      - name: Stamp the E2E deadline
+        run: echo "E2E_DEADLINE_EPOCH=$(( $(date +%s) + ${{ inputs.emulator-timeout-minutes }} * 60 - 90 ))" >> "$GITHUB_ENV"
 
       # Single emulator boot. Cold boot (-no-snapshot-load -no-snapshot-save): no
       # RAM snapshot is saved/cached, so a run can't hit "cannot load snapshot:
@@ -280,19 +354,26 @@ jobs:
           #
           # Output is captured to a FILE, not streamed to the Actions log.
           #
-          # HONEST STATUS: this does NOT fix the patrol QEMU runner deaths, and
-          # an earlier version of this comment claimed it did. Run 31252986313
+          # The redirect is NOT what fixed the patrol QEMU runner deaths -- that
+          # was the memory cap in the throttle step above (#22). Run 31252986313
           # ran with this redirect AND the timeout bound below and still died
           # (`hanging thread 'QEMU2 ...'` -> `runner has received a shutdown
           # signal`, ~10 min into the build). The single passing control
           # (31247153733) was the whole pre-reorder workflow, and one green run
-          # is not evidence for a ~4%-base-rate failure. The cause of the patrol
-          # deaths is UNRESOLVED -- see #22.
+          # is not evidence for a ~4%-base-rate failure.
           #
-          # The redirect is kept anyway, on narrower grounds: it matches the
+          # The redirect is kept on narrower grounds: it matches the
           # long-standing pre-#16 arrangement, it costs nothing, and buffering
           # is the cheaper thing to do next to a live QEMU. Do not re-derive a
           # causal claim from it.
+          #
+          # NOTHING backgrounded may be added to this one-liner without being
+          # killed before `exit`. A backgrounded helper INHERITS this script's
+          # stdout, so the pipe never reaches EOF and android-emulator-runner
+          # waits forever for a command that already finished -- turning a
+          # completed run into a step-ceiling timeout. Proven on 31256765896: a
+          # `( ... & )` sampler kept the step alive at load 0.00 for 20 minutes
+          # after `just e2e` had exited and the emulator was already torn down.
           #
           # It CAPTURES ONLY -- it deliberately does not `cat` the file itself.
           # An unbounded in-script `cat` is a real hazard, proven by run
@@ -312,9 +393,13 @@ jobs:
           # command guarantees it returns, so the logcat capture and the dump
           # step both run whatever GitHub's step timeout does.
           #
-          # 3 minutes under the step ceiling so this fires first, leaving room
-          # for the emulator-runner's own teardown.
-          script: timeout $(( ${{ inputs.emulator-timeout-minutes }} - 3 ))m just e2e > e2e-output.txt 2>&1; rc=$?; [ "$rc" -eq 0 ] || adb logcat -d -t 2000 > e2e-logcat.txt 2>&1; exit "$rc"
+          # The budget is DERIVED FROM THE STAMPED DEADLINE, not from
+          # `emulator-timeout-minutes` directly -- see the `Stamp the E2E
+          # deadline` step for why a duration on this clock cannot work. The
+          # `:-0` fallback plus the 60s floor mean a missing/garbled stamp
+          # degrades to a short bound rather than a negative one, which `timeout`
+          # would reject and which would fail every E2E run in every repo.
+          script: R=$(( ${E2E_DEADLINE_EPOCH:-0} - $(date +%s) )); if [ "$R" -lt 60 ]; then R=60; fi; echo "E2E budget ${R}s"; timeout ${R}s just e2e > e2e-output.txt 2>&1; rc=$?; [ "$rc" -eq 0 ] || adb logcat -d -t 2000 > e2e-logcat.txt 2>&1; exit "$rc"
 
       # THE OTHER HALF OF THE REDIRECT. Restoring the redirect without this is a
       # regression, not a fix: `just e2e` writes to a file and prints nothing, so
