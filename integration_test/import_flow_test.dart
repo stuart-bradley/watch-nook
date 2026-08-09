@@ -91,9 +91,13 @@ void main() {
       // plus one rewatch. Andor is followed but unwatched.
       expect(await _watchEvents(db), 5);
 
-      await $(BackButton).tap();
-      expect($('Severance').exists, isTrue);
-      expect($('Andor').exists, isTrue);
+      // Importing lands on Up Next, where Andor (archived → completed) never
+      // appears. The grid is on the Library tab. `waitUntilVisible`, not
+      // `.exists`: the shell is an IndexedStack, so every branch stays mounted
+      // and `.exists` would pass from the wrong tab.
+      await $('Library').tap();
+      await $('Severance').waitUntilVisible();
+      await $('Andor').waitUntilVisible();
 
       // ---- leg 2: bulk-mark ------------------------------------------
       await $('Severance').tap();
@@ -102,7 +106,13 @@ void main() {
       await $('Mark show watched').scrollTo().tap();
       // 9 episodes in the season, 3 already watched by the import. Bulk mark is
       // idempotent, so it adds the other 6 and re-marks nothing.
-      expect($('Marked 6 episodes watched.').exists, isTrue);
+      //
+      // `waitUntilVisible`, NOT `.exists`: the tap fires `_runBulk`
+      // **unawaited**, so the snack bar only appears after a cache read, a
+      // season fetch and a DB transaction. `.exists` is an instant check and
+      // ran ~1.5s too early, failing on a bulk mark that then succeeded.
+      // Waiting for it also orders the row count below *after* the write.
+      await $('Marked 6 episodes watched.').waitUntilVisible();
       expect(await _watchEvents(db), 11);
 
       await $(BackButton).tap();
@@ -117,9 +127,9 @@ void main() {
       expect(await _rewatches(db), 1);
 
       // ---- leg 4: export → restore into an empty DB → identical -------
-      // Back to the library, then drive the real Settings → Export JSON button.
-      // The sharer override captured the JSON the app generated.
-      await $(BackButton).tap();
+      // `_import` already returned to the shell, so drive the real Settings →
+      // Export JSON button straight away. The sharer override captured the JSON
+      // the app generated.
       await $(Icons.settings_outlined).tap();
       await $('Export JSON').scrollTo().tap();
       await $.pumpAndSettle();
@@ -169,11 +179,24 @@ class _AppUnderTest extends ConsumerWidget {
   );
 }
 
-/// App bar → Import → pick (stubbed) → wait for the summary.
+/// Settings → Import… → pick (stubbed) → the summary → Continue.
+///
+/// There is **no app-bar import action** (#79). Import lives in Settings, and
+/// the Library empty-state button disappears the moment the library is
+/// non-empty — so this is the only route that works for *both* import legs.
 Future<void> _import(PatrolIntegrationTester $) async {
-  await $(Icons.file_upload_outlined).tap();
+  await $(Icons.settings_outlined).tap();
+  await $('Import…').tap();
   await $('Choose file').tap();
-  await $('Import complete').waitUntilVisible();
+  // A whole pipeline (parse → resolve → apply → tracked-show sync), not one
+  // frame: patrol's 10s default is thin for the first import on a cold
+  // emulator.
+  await $(
+    'Import complete',
+  ).waitUntilVisible(timeout: const Duration(seconds: 30));
+  // `context.go('/up-next')` — replaces the stack, so the pushed /settings and
+  // /import are gone and this lands back in the shell.
+  await $('Continue').tap();
 }
 
 Future<Set<String>> _titles(AppDatabase db) async => {
@@ -364,17 +387,70 @@ const _severanceDetails = MediaDetails(
   episodeCountTotal: 9,
 );
 
-/// Severance season 1, aired order.
-const _severanceEpisodes = [
-  EpisodeInfo(seasonNumber: 1, episodeNumber: 1, runtimeMinutes: 57),
-  EpisodeInfo(seasonNumber: 1, episodeNumber: 2, runtimeMinutes: 45),
-  EpisodeInfo(seasonNumber: 1, episodeNumber: 3, runtimeMinutes: 46),
-  EpisodeInfo(seasonNumber: 1, episodeNumber: 4, runtimeMinutes: 40),
-  EpisodeInfo(seasonNumber: 1, episodeNumber: 5, runtimeMinutes: 47),
-  EpisodeInfo(seasonNumber: 1, episodeNumber: 6, runtimeMinutes: 51),
-  EpisodeInfo(seasonNumber: 1, episodeNumber: 7, runtimeMinutes: 40),
-  EpisodeInfo(seasonNumber: 1, episodeNumber: 8, runtimeMinutes: 49),
-  EpisodeInfo(seasonNumber: 1, episodeNumber: 9, runtimeMinutes: 40),
+/// Severance season 1, aired order — with its real 2022 air dates.
+///
+/// **The dates are load-bearing, not decoration.** `hasAired` treats an
+/// **undated episode as unaired** (`bulk_mark.dart`), and `_severanceDetails`
+/// carries no `nextEpisode`/`lastEpisode` markers, so the date rule is the only
+/// signal here. Undated, "Mark show watched" marks *nothing* and the app
+/// correctly says "Nothing has aired yet." — which is exactly how this leg
+/// failed before (#79).
+// `final`, not `const`: `DateTime.parse` isn't a const constructor.
+final _severanceEpisodes = [
+  EpisodeInfo(
+    seasonNumber: 1,
+    episodeNumber: 1,
+    airDate: DateTime.parse('2022-02-18T00:00:00Z'),
+    runtimeMinutes: 57,
+  ),
+  EpisodeInfo(
+    seasonNumber: 1,
+    episodeNumber: 2,
+    airDate: DateTime.parse('2022-02-18T00:00:00Z'),
+    runtimeMinutes: 45,
+  ),
+  EpisodeInfo(
+    seasonNumber: 1,
+    episodeNumber: 3,
+    airDate: DateTime.parse('2022-02-25T00:00:00Z'),
+    runtimeMinutes: 46,
+  ),
+  EpisodeInfo(
+    seasonNumber: 1,
+    episodeNumber: 4,
+    airDate: DateTime.parse('2022-03-04T00:00:00Z'),
+    runtimeMinutes: 40,
+  ),
+  EpisodeInfo(
+    seasonNumber: 1,
+    episodeNumber: 5,
+    airDate: DateTime.parse('2022-03-11T00:00:00Z'),
+    runtimeMinutes: 47,
+  ),
+  EpisodeInfo(
+    seasonNumber: 1,
+    episodeNumber: 6,
+    airDate: DateTime.parse('2022-03-18T00:00:00Z'),
+    runtimeMinutes: 51,
+  ),
+  EpisodeInfo(
+    seasonNumber: 1,
+    episodeNumber: 7,
+    airDate: DateTime.parse('2022-03-25T00:00:00Z'),
+    runtimeMinutes: 40,
+  ),
+  EpisodeInfo(
+    seasonNumber: 1,
+    episodeNumber: 8,
+    airDate: DateTime.parse('2022-04-01T00:00:00Z'),
+    runtimeMinutes: 49,
+  ),
+  EpisodeInfo(
+    seasonNumber: 1,
+    episodeNumber: 9,
+    airDate: DateTime.parse('2022-04-08T00:00:00Z'),
+    runtimeMinutes: 40,
+  ),
 ];
 
 class _FakeSource implements MetadataSource {
