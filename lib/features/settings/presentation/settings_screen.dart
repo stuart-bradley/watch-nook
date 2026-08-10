@@ -203,7 +203,7 @@ Future<void> _export(
       mimeType: mimeType,
     );
   } on Object catch (e, s) {
-    debugPrint('export failed: $e\n$s');
+    debugPrint('wn-error: export failed: $e\n$s');
     if (!context.mounted) return;
     messenger.showSnackBar(
       const SnackBar(content: Text("Couldn't export your data.")),
@@ -257,7 +257,7 @@ Future<void> _deleteAll(BuildContext context, WidgetRef ref) async {
       const SnackBar(content: Text('All data deleted.')),
     );
   } on Object catch (e, s) {
-    debugPrint('delete-all failed: $e\n$s');
+    debugPrint('wn-error: delete-all failed: $e\n$s');
     messenger.showSnackBar(
       const SnackBar(content: Text("Couldn't delete your data.")),
     );
@@ -279,7 +279,7 @@ Future<void> _refreshLibrary(BuildContext context, WidgetRef ref) async {
       const SnackBar(content: Text('Library refreshed.')),
     );
   } on Object catch (e, s) {
-    debugPrint('library refresh failed: $e\n$s');
+    debugPrint('wn-error: library refresh failed: $e\n$s');
     if (!context.mounted) return;
     messenger.showSnackBar(
       const SnackBar(content: Text("Couldn't refresh — you may be offline.")),
@@ -299,7 +299,7 @@ Future<void> _backUpNow(BuildContext context, WidgetRef ref) async {
       const SnackBar(content: Text('Backup updated.')),
     );
   } on Object catch (e, s) {
-    debugPrint('manual backup failed: $e\n$s');
+    debugPrint('wn-error: manual backup failed: $e\n$s');
     if (!context.mounted) return;
     messenger.showSnackBar(
       const SnackBar(content: Text("Couldn't back up your data.")),

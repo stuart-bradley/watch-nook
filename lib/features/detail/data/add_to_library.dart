@@ -1,5 +1,6 @@
 import 'package:clock/clock.dart';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
@@ -58,10 +59,17 @@ Future<({LibraryItem item, bool created})> addToLibrary({
       await for (final fetched in stream) {
         details = fetched;
       }
-    } on Object {
+    } on Object catch (e, s) {
       // Offline / hard failure with nothing cached: fall back to the search-hit
       // fields; the stats fields backfill on the next detail view (plan §7) and
       // the queue picks the show up once the cache warms.
+      //
+      // Degrading silently is right for the user, but it must not be silent to
+      // US: this swallow absorbs the whole metadata fetch, so a malformed
+      // payload lands here and `_addTitle`'s own catch never sees it. Logging
+      // is the only reason a #79-class parse failure on the add path is
+      // findable at all.
+      debugPrint('wn-error: add-to-library details fetch failed: $e\n$s');
     }
   }
 
