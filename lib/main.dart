@@ -40,7 +40,7 @@ Future<void> main() async {
       await prefs.setBool(onboardingSeenKey, true);
     }
   } on Object catch (e, s) {
-    debugPrint('backup restore skipped: $e\n$s');
+    debugPrint('wn-error: backup restore skipped: $e\n$s');
   }
 
   // ADR-2 / "remote config never blocks boot": first paint uses the synchronous
@@ -81,7 +81,7 @@ Future<void> _dailyLibrarySync(
       DateTime.now().millisecondsSinceEpoch,
     );
   } on Object catch (e, s) {
-    debugPrint('daily library sync skipped: $e\n$s');
+    debugPrint('wn-error: daily library sync skipped: $e\n$s');
   }
 }
 
@@ -117,7 +117,7 @@ class _WatchnookAppState extends ConsumerState<WatchnookApp> {
       final backup = await ref.read(autoBackupServiceProvider.future);
       await backup.snapshot();
     } on Object catch (e, s) {
-      debugPrint('backup snapshot failed: $e\n$s');
+      debugPrint('wn-error: backup snapshot failed: $e\n$s');
     }
   }
 

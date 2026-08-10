@@ -64,7 +64,9 @@ class RemoteConfigService {
       final config = RemoteConfig.fromJson(json);
       await _prefs.setString(_prefsKey, jsonEncode(config.toJson()));
     } on Object catch (e) {
-      debugPrint('RemoteConfigService.refresh failed (using cached/baked): $e');
+      debugPrint(
+        'wn-error: RemoteConfigService.refresh failed (using cached/baked): $e',
+      );
     }
   }
 }

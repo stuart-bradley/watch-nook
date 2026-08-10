@@ -106,21 +106,35 @@ e2e timeout="20m" *args:
     timeout -k 30s "{{timeout}}" patrol test {{args}}
     rc=$?
     [ "$rc" -eq 0 ] && exit 0
-    [ "$rc" -eq 124 ] && echo "e2e: no result within {{timeout}} — a failing test hangs patrol's teardown (#81)"
+    hint=""
+    [ "$rc" -eq 124 ] && hint="e2e: no result within {{timeout}} — a failing test hangs patrol's teardown (#81)"
+    [ -z "$hint" ] || echo "$hint"
+    # TWO anchors, and the second one is load-bearing. `-A` keeps only the
+    # lines AFTER a match, and the app logs a swallowed error at the moment it
+    # is caught — BEFORE the framework exception the failing expect raises
+    # later. Anchoring on the framework header alone therefore discards exactly
+    # the line that explains the failure (the #79 FormatException that read as
+    # "you're offline"). `wn-error:` is the stable prefix every app-side error
+    # log carries; keep them in step.
+    #
     # No `-s`: adb honours $ANDROID_SERIAL, which is how a second attached
     # emulator gets targeted. The fallback covers an ambiguous-device error.
     dump=$(adb logcat -d 2>/dev/null \
-      | grep -A 30 "EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK" \
+      | grep -E -A 30 "EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK|wn-error:" \
       | tail -150)
-    [ -n "$dump" ] || dump="e2e: no Flutter exception found in the logcat buffer"
+    [ -n "$dump" ] || dump="e2e: no Flutter exception or wn-error: line in the logcat buffer"
     echo "--- Dart failure (from logcat) ---"
     echo "$dump"
     # Same text into the job summary, so a failed run is diagnosable from the
-    # PR page without opening the step log. Written from here, NOT from the
-    # workflow: flutter-e2e.yml is a ci-shared fork and a local edit there is
-    # dropped by the next re-sync.
+    # PR page without opening the step log. The hint goes in too: without it a
+    # hang renders as a bare exit code plus "nothing found", which reads like a
+    # missing log rather than the timeout it is. Written from here, NOT from
+    # the workflow: flutter-e2e.yml is a ci-shared fork and a local edit there
+    # is dropped by the next re-sync.
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-      { echo "### E2E failed (exit $rc)"; echo '```'; echo "$dump"; echo '```'; } \
+      { echo "### E2E failed (exit $rc)"
+        [ -z "$hint" ] || echo "$hint"
+        echo '```'; echo "$dump"; echo '```'; } \
         >> "$GITHUB_STEP_SUMMARY"
     fi
     exit "$rc"
