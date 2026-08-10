@@ -465,7 +465,8 @@ Future<void> _addTitle(
         ),
       ),
     );
-  } on Object {
+  } on Object catch (e, s) {
+    debugPrint('add title failed: $e\n$s');
     messenger.showSnackBar(
       const SnackBar(content: Text("Couldn't add this title.")),
     );
@@ -701,7 +702,13 @@ Future<void> _runBulk(
         ),
       ),
     );
-  } on Object {
+  } on Object catch (e, s) {
+    // The snack bar below is a DIAGNOSIS, and it is the wrong one whenever the
+    // throw came from anywhere but the network. A malformed fixture reads as
+    // "you're offline" — which is exactly how a `FormatException` in the E2E's
+    // episode dates cost hours in #79. Log the real error so the E2E's logcat
+    // dump can name it; the user-facing copy stays the common case.
+    debugPrint('bulk mark failed: $e\n$s');
     messenger.showSnackBar(
       const SnackBar(content: Text("Couldn't load episodes. You're offline.")),
     );
