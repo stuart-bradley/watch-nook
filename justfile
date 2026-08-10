@@ -80,8 +80,41 @@ e2e-build:
 
 # E2E tests (Patrol). Assumes a running emulator/device + a patrol_cli matching
 # the patrol dep on PATH. patrol test auto-discovers integration_test/.
-e2e:
-    patrol test
+#
+# BOUNDED, and the bound is load-bearing (#81). A *failing* patrol test never
+# exits: the Dart side reports its TestFailure in ~9s and honours its own
+# 3-minute Timeout on schedule, then the Gradle instrumentation hangs — 37m and
+# 2h0m measured. CI's outer `timeout` caught that at ~33m; locally nothing did.
+#
+# The dump matters as much as the bound. patrol's stdout carries only "Gradle
+# test execution failed with code 1" — the real TestFailure (expected, actual,
+# file:line) is ONLY in logcat, and a post-hoc `logcat -d` can miss it once the
+# ring buffer has rolled past a long hang. Dumping here, immediately, is what
+# makes a failure diagnosable; the workflow's `Dump E2E diagnostics` step then
+# carries it to the step log with no change to the vendored flutter-e2e.yml.
+#
+# Override the bound for a fast local loop: `just e2e 5m`. Extra args go through
+# to patrol — and WITH MORE THAN ONE DEVICE ATTACHED you need
+# `just e2e 20m --device emulator-5556`: patrol_cli prompts "Please select an
+# option (1-2)" and, on non-TTY stdin, loops on that prompt forever. It ignores
+# $ANDROID_SERIAL (which only steers the adb dump below). Unbounded that is
+# another silent hang; bounded it still burns the whole timeout.
+e2e timeout="20m" *args:
+    #!/usr/bin/env bash
+    # NOT `set -e`: `rc=$?` has to survive a non-zero exit.
+    set -uo pipefail
+    timeout -k 30s "{{timeout}}" patrol test {{args}}
+    rc=$?
+    [ "$rc" -eq 0 ] && exit 0
+    [ "$rc" -eq 124 ] && echo "e2e: no result within {{timeout}} — a failing test hangs patrol's teardown (#81)"
+    echo "--- Dart failure (from logcat) ---"
+    # No `-s`: adb honours $ANDROID_SERIAL, which is how a second attached
+    # emulator gets targeted. The fallback covers an ambiguous-device error.
+    adb logcat -d 2>/dev/null \
+      | grep -A 30 "EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK" \
+      | tail -150 \
+      || echo "e2e: no Flutter exception found in the logcat buffer"
+    exit "$rc"
 
 # Lint shell scripts. Required: ci-shared's flutter-ci.yml runs `just
 # lint-scripts` before `just check`, so the recipe MUST exist. No-op until
