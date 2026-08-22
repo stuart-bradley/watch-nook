@@ -84,7 +84,9 @@ e2e-build:
 # BOUNDED, and the bound is load-bearing (#81). A *failing* patrol test never
 # exits: the Dart side reports its TestFailure in ~9s and honours its own
 # 3-minute Timeout on schedule, then the Gradle instrumentation hangs — 37m and
-# 2h0m measured. CI's outer `timeout` caught that at ~33m; locally nothing did.
+# 2h0m measured LOCALLY, where nothing bounded this recipe. In CI the real
+# pre-fix failures came in at 8-12m per job (runs 31254425694 / 31254515618 /
+# 31279139093), not the ~33m the in-script ceiling would allow.
 #
 # The dump matters as much as the bound. patrol's stdout carries only "Gradle
 # test execution failed with code 1" — the real TestFailure (expected, actual,
