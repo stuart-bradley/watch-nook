@@ -92,15 +92,25 @@ e2e-build:
 # 31367051052 / 31368830363 / 31769504440 / 32446321904). A failing E2E costs
 # what a passing one costs — the "~1 min healthy run" this was once compared
 # against was the job being SKIPPED by the #79 gate bug, not a fast pass. So
-# the bound below is about the LOCAL dev loop, not about CI spend.
+# the MOTIVATION for the bound is the local dev loop, not CI spend.
 #
-# EVERY RUN ID ABOVE IS PATROL 3.20.0 / patrol_cli 3.11.0 — all of them predate
-# the 4.9.0 / 4.7.0 bump. The first 4.x run (32698849477) came in at 13m07s at
-# the JOB level, ~1 min above the 3.x spread, so 20m still clears the E2E step
-# itself. well-quill needed 30m on 4.x, but its steps genuinely measured 15-22m;
-# this repo's do not. If a run here comes back 124, RAISE THIS DEFAULT before
-# concluding the teardown still hangs — a slower build and a hang are
-# indistinguishable from the exit code alone.
+# THE BOUND ITSELF IS LIVE IN CI, and reading that sentence as "this only
+# applies locally" is the trap. `flutter-e2e.yml`'s `Run E2E tests` step runs
+# `timeout ${R}s just e2e` with NO timeout argument, so the 20m default below
+# is a real inner bound nested inside that outer one. Whichever fires first
+# wins, and only this one prints the logcat dump. The "e2e: no result within
+# 20m" line in run 32700776715 came from HERE, not from ${R}.
+#
+# 20m is sized against the E2E STEP, not the job: 9m44s on run 32698849477
+# (job 13m07s), and a job-level 8m24s on its re-run. ~2x headroom. Raising it
+# only makes a genuine #81 hang burn longer, which is why it is not 25m like
+# well-quill — that repo's steps genuinely measured 15-22m; this one's do not.
+#
+# EVERY 3.x RUN ID ABOVE PREDATES the 4.9.0 / 4.7.0 bump. If a run comes back
+# 124, check the measured step time before concluding the teardown hung — a
+# slow build and a hang are indistinguishable from the exit code alone. The
+# tell is the log, not the code: a hang goes SILENT (13m18s of nothing,
+# measured on 4.9.0), a slow run keeps emitting patrol step lines.
 #
 # The dump matters as much as the bound. patrol's stdout carries only "Gradle
 # test execution failed with code 1" — the real TestFailure (expected, actual,
