@@ -23,6 +23,36 @@ inputs:
 runs:
   using: composite
   steps:
+    # THE SHARED JDK PIN. The Flutter comment below says the SDK "was the last
+    # floating dependency" — it wasn't. Nothing here set up Java, so every
+    # Gradle build ran on whatever JDK the runner image happened to default to,
+    # changing underfoot with no commit to blame. Exactly the failure the
+    # Flutter pin exists to prevent.
+    #
+    # It bit on 2026-08-23: tasks-on-time v1.4.0 failed in `bundleRelease` with
+    # `:in_app_purchase_android:lintVitalAnalyzeRelease` crashing —
+    # `NoSuchMethodError: JavaDocParser.parseDataItem`, inside lint's own
+    # CommentDetector, on a THIRD-PARTY plugin's javadoc. AGP 9.3.1's lint is
+    # not binary-compatible with the runner's default JDK 17 there. The very
+    # same task, same commit, same AGP 9.3.1 / Kotlin 2.4.10 / Gradle 9.6.1,
+    # PASSES on JDK 21 — verified locally before this pin was added.
+    #
+    # It went unseen for 18 days (since the AGP 9.2.1 -> 9.3.1 + Kotlin
+    # 2.3.21 -> 2.4.10 bump) because lintVital runs on RELEASE builds only:
+    # `just check`, `flutter build apk --debug` and the E2E suite are all blind
+    # to it, and no release was cut in between.
+    #
+    # 21 is deliberate, not just "newer": it is the JDK the apps are developed
+    # on. Note this is the JDK Gradle RUNS on — the apps still target
+    # sourceCompatibility/jvmTarget 17, which is independent and unchanged.
+    # Bump here, watch ci + e2e + a real release go green on EVERY app, then
+    # move `v1`.
+    - name: Setup Java
+      uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      with:
+        distribution: temurin
+        java-version: "21"
+
     - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
       with:
         channel: stable

@@ -9,12 +9,6 @@
 # This is a genuine FORK — the other three apps still consume the shared copy.
 # Re-sync by hand when ci-shared changes, and expect Dependabot to bump the
 # pinned SHAs here and there independently, so diff ignoring those lines.
-#
-# ONE DELIBERATE DIVERGENCE: the `Use JDK 21` step before the signed build.
-# AGP 9.3.1's lint needs Java 21 and the runner default is older — see that
-# step's own comment for the evidence. Do NOT drop it during a re-sync; it is
-# what makes a release build at all. It belongs upstream in ci-shared's
-# setup-flutter, and this copy can go once it lands there.
 name: Flutter Release APK
 
 # Reusable: build a signed **universal APK** (with the app's baked API key) and
@@ -69,34 +63,6 @@ jobs:
       # Verification runs WITHOUT the signing / API secrets in scope.
       - name: Verify
         run: just check
-
-      # JDK 21, and it is load-bearing for LINT, not for the compiler.
-      #
-      # AGP 9.3.1's bundled lint is compiled against Java 21: it calls
-      # `java.util.List.removeLast()`, a sequenced-collections method that only
-      # exists from 21. On the runner's default JDK the release build dies with
-      #
-      #   Execution failed for task ':file_selector_android:lintVitalAnalyzeRelease'
-      #   Unexpected failure during lint analysis of FileUtils.java
-      #   NoSuchMethodError: 'java.lang.Object java.util.List.removeLast()'
-      #
-      # which reads like a broken plugin but is purely a JDK-level mismatch —
-      # lint crashing, not lint reporting. It bit v0.5.2 (runs 32708371070):
-      # deterministic across three attempts, and NOT a stale Gradle cache (a
-      # verified-cold run failed identically).
-      #
-      # RELEASE-ONLY on purpose. `lintVitalAnalyzeRelease` runs only on release
-      # variants, so `check` and `e2e` never hit this and keep the runner
-      # default they have always passed on — this is not the change to widen
-      # while shipping a release. The general fix belongs in ci-shared's
-      # setup-flutter.
-      - name: Use JDK 21 (AGP 9.3.1 lint needs it)
-        shell: bash
-        run: |
-          : "${JAVA_HOME_21_X64:?ubuntu-24.04 image did not provide a JDK 21}"
-          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
-          "$JAVA_HOME_21_X64/bin/java" -version
 
       - name: Build signed APK
         env:
