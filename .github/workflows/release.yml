@@ -21,7 +21,7 @@ jobs:
     # The reusable workflow creates/updates the GitHub Release + uploads the APK.
     permissions:
       contents: write
-    uses: ./.github/workflows/flutter-release-apk.yml
+    uses: stuart-bradley/ci-shared/.github/workflows/flutter-release-apk.yml@v1
     with:
       # Pin Flutter: an unpinned stable auto-updated on the runner and its Gradle
       # plugin broke the Android release build. 3.44.0 is the last known-good;
