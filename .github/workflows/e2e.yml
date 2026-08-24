@@ -25,11 +25,11 @@ jobs:
   # server-side, so GitHub rejects the whole file as a 0s startup_failure. Detect the tests in a cheap
   # gate job and gate the expensive reusable-workflow job on its output instead.
   gate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       run: ${{ steps.detect.outputs.run }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # `find`, NOT `compgen -G 'integration_test/**/*_test.dart'`. Bash's
       # globstar is OFF by default, so `**` collapses to a single `*` and that
       # pattern only matches a test in a SUBDIRECTORY. This repo's test is
@@ -59,7 +59,7 @@ jobs:
     # must fire before the JOB ceiling, because only a step timeout fails the
     # step and keeps the log. A job killed by timeout-minutes reports
     # conclusion=cancelled and retains nothing.
-    uses: ./.github/workflows/flutter-e2e.yml
+    uses: stuart-bradley/ci-shared/.github/workflows/flutter-e2e.yml@v1
     with:
       api-level: 33
       disk-size: "4G"
@@ -69,9 +69,9 @@ jobs:
       install-patrol: true
       # Must match the `patrol` package pin in pubspec.yaml. patrol's
       # compatibility table pairs patrol_cli 4.7.0+ with patrol 4.9.0+ (min
-      # Flutter 3.32.0); bump the two together. Set HERE, in watch-nook's own
-      # caller, rather than in the vendored flutter-e2e.yml — this file is
-      # never re-synced from ci-shared, so the version cannot be clobbered.
+      # Flutter 3.32.0); bump the two together. It is a ci-shared INPUT (not a
+      # constant there) precisely so each patrol repo can move on its own
+      # schedule rather than in lockstep with the moving @v1 tag.
       patrol-cli-version: "4.7.0"
       # 35, not the default 12: install-patrol skips the warm build, so the
       # ENTIRE build runs inside the emulator step.
