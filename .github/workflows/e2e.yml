@@ -83,9 +83,10 @@ jobs:
       # 8m09s-12m24s (31364735296 / 31367051052 / 31368830363 / 31769504440 /
       # 32446321904), comfortably inside 35.
       #
-      # All five predate the patrol 3.20.0 -> 4.9.0 bump, so they do NOT bound
-      # the current toolchain. Append a 4.x run ID here once one is green, and
-      # raise the ceiling if 4.x builds land materially slower.
+      # All five predate the patrol 3.20.0 -> 4.9.0 bump. The first 4.x run is
+      # 32698849477 at 13m07s — ~1 min above the 3.x spread, still less than
+      # half of 35, so the ceiling holds. Add later 4.x runs here; raise it only
+      # if they trend toward 35.
       emulator-timeout-minutes: 35
       timeout-minutes: 45
       # Pin Flutter: an unpinned stable auto-updated on the runner and its Gradle

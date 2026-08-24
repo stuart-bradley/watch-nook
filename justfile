@@ -95,11 +95,12 @@ e2e-build:
 # the bound below is about the LOCAL dev loop, not about CI spend.
 #
 # EVERY RUN ID ABOVE IS PATROL 3.20.0 / patrol_cli 3.11.0 — all of them predate
-# the 4.9.0 / 4.7.0 bump, so they size the 20m default against a toolchain this
-# repo no longer runs. well-quill needed 30m on 4.x (its steps measured
-# 15-22m). If a run here comes back 124, RAISE THIS DEFAULT before concluding
-# the teardown still hangs — a slower build and a hang look identical from the
-# exit code alone.
+# the 4.9.0 / 4.7.0 bump. The first 4.x run (32698849477) came in at 13m07s at
+# the JOB level, ~1 min above the 3.x spread, so 20m still clears the E2E step
+# itself. well-quill needed 30m on 4.x, but its steps genuinely measured 15-22m;
+# this repo's do not. If a run here comes back 124, RAISE THIS DEFAULT before
+# concluding the teardown still hangs — a slower build and a hang are
+# indistinguishable from the exit code alone.
 #
 # The dump matters as much as the bound. patrol's stdout carries only "Gradle
 # test execution failed with code 1" — the real TestFailure (expected, actual,
