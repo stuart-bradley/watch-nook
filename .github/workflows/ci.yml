@@ -27,6 +27,17 @@ jobs:
       # without needing an emulator (closes the "just check doesn't compile
       # Android" gap).
       smoke-build: true
+      # The release variant is where AGP/Gradle/Kotlin bumps actually break, and
+      # nothing else here builds it: `just check` doesn't build Android at all,
+      # smoke-build above is DEBUG, and e2e is debug too. So the first thing that
+      # exercised it was `git tag` -- which is how the AGP 9.0.1 -> 9.3.1 bump
+      # reached a release before failing (#91, ci-shared#28).
+      #
+      # Unsigned, no secrets: build.gradle.kts falls back to signingConfigs.debug
+      # when key.properties is absent. ci-shared gates the step on
+      # `github.event_name == 'push'`, so this costs NOTHING on PRs -- it runs
+      # only on the merge to main, minutes after merge rather than at the tag.
+      release-smoke: true
       # Pin Flutter: an unpinned stable auto-updated on the runner and its Gradle
       # plugin broke the Android build ("compileFlutterBuildDebug not found"),
       # red on e2e/release. 3.44.0 is the last known-good; unpin when stable
