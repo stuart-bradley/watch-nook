@@ -29,7 +29,7 @@ jobs:
     outputs:
       run: ${{ steps.detect.outputs.run }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # `find`, NOT `compgen -G 'integration_test/**/*_test.dart'`. Bash's
       # globstar is OFF by default, so `**` collapses to a single `*` and that
       # pattern only matches a test in a SUBDIRECTORY. This repo's test is
@@ -67,10 +67,26 @@ jobs:
       # string "false", which is truthy, so the workflow's
       # `if: !inputs.install-patrol` would stop skipping the warm build.
       install-patrol: true
+      # Must match the `patrol` package pin in pubspec.yaml. patrol's
+      # compatibility table pairs patrol_cli 4.7.0+ with patrol 4.9.0+ (min
+      # Flutter 3.32.0); bump the two together. Set HERE, in watch-nook's own
+      # caller, rather than in the vendored flutter-e2e.yml — this file is
+      # never re-synced from ci-shared, so the version cannot be clobbered.
+      patrol-cli-version: "4.7.0"
       # 35, not the default 12: install-patrol skips the warm build, so the
-      # ENTIRE build runs inside the emulator step. Copied from well-quill and
-      # UNVALIDATED here -- watch-nook's e2e job has been `skipped` on every run
-      # it has ever had, so patrol E2E has never actually executed in this repo.
+      # ENTIRE build runs inside the emulator step.
+      #
+      # VALIDATED UNDER PATROL 3.x, and that qualifier is the point. This was
+      # "copied from well-quill and UNVALIDATED, the job has been skipped on
+      # every run it ever had" — true until the #79 gate glob bug was fixed in
+      # #80. Since then the job actually runs, and 5 measured passes span
+      # 8m09s-12m24s (31364735296 / 31367051052 / 31368830363 / 31769504440 /
+      # 32446321904), comfortably inside 35.
+      #
+      # All five predate the patrol 3.20.0 -> 4.9.0 bump. The first 4.x run is
+      # 32698849477 at 13m07s — ~1 min above the 3.x spread, still less than
+      # half of 35, so the ceiling holds. Add later 4.x runs here; raise it only
+      # if they trend toward 35.
       emulator-timeout-minutes: 35
       timeout-minutes: 45
       # Pin Flutter: an unpinned stable auto-updated on the runner and its Gradle
