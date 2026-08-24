@@ -14,7 +14,7 @@ import 'package:watch_nook/features/settings/data/theme_mode_provider.dart';
 /// ponytail: one string beats a `package_info_plus` dependency and a platform
 /// channel. A guard test (`version_test.dart`) keeps it in lockstep with
 /// `pubspec.yaml`'s `version:` so it can't silently drift.
-const appVersion = '0.5.1';
+const appVersion = '0.5.2';
 
 /// Settings (#35, US-14): appearance, the data you own, and the **mandatory**
 /// metadata attribution. Pushed route `/settings` off the shell app bar.
