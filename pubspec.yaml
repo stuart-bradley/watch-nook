@@ -46,10 +46,17 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   # Pinned, not caret-ranged: `patrol test` is driven by patrol_cli, and the two
-  # must match. CI (`ci-shared/flutter-e2e.yml`) activates patrol_cli **3.11.0**,
-  # so this is patrol 3.20.0 — its same-day release. Bump both together or the
-  # generated test bundle stops compiling.
-  patrol: 3.20.0
+  # must match. The CLI version is set by THIS repo's own workflow caller —
+  # `.github/workflows/e2e.yml` passes `patrol-cli-version` — not by ci-shared,
+  # which this repo vendors rather than consumes (see the header of
+  # `.github/workflows/flutter-e2e.yml`).
+  #
+  # patrol 4.9.0 pairs with patrol_cli 4.7.0; keep the two in step against
+  # patrol's compatibility table. Since patrol_cli 4.0.0 a mismatch is caught
+  # early — the CLI reads the resolved version from `pubspec.lock` and fails
+  # fast, rather than the old failure mode of the generated bundle silently
+  # ceasing to compile.
+  patrol: 4.9.0
   riverpod_generator: ^4.0.0+1
   riverpod_lint: ^3.1.0
   very_good_analysis: ^10.2.0
@@ -71,6 +78,12 @@ flutter:
 # app has no iOS target.
 patrol:
   app_name: Watchnook
+  # LOAD-BEARING. patrol_cli 4.0.0 changed the DEFAULT test directory from
+  # `integration_test` to `patrol_test`; without this key the CLI looks in a
+  # directory that does not exist here and discovers zero tests — a silent
+  # no-op, not an error. Keeping the old directory avoids churning
+  # `.gitignore`, `analysis_options.yaml` and e2e.yml's paths filter + gate.
+  test_directory: integration_test
   android:
     package_name: com.stuartbradley.watchnook
 

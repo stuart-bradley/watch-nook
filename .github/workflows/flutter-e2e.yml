@@ -9,6 +9,17 @@
 # This is a genuine FORK — the other three apps still consume the shared copy.
 # Re-sync by hand when ci-shared changes, and expect Dependabot to bump the
 # pinned SHAs here and there independently, so diff ignoring those lines.
+#
+# The `patrol-cli-version` input below is NOT a divergence any more. It began as
+# a forward-port of ci-shared#25 — which has since LANDED — and this file now
+# carries ci-shared's own wording for the input block, its comment and the
+# quoted `dart pub global activate` expansion, verbatim. So that part of a
+# re-sync is a no-op. If the two ever differ again, take ci-shared's version.
+#
+# The version this repo actually uses is NOT set here: the default stays
+# ci-shared's 3.11.0, and watch-nook's own caller (`e2e.yml`) passes 4.7.0. That
+# is deliberate — a re-sync overwrites this file, and a value set here would be
+# silently clobbered. A value in the caller cannot be.
 name: Flutter E2E
 
 # Reusable Android-emulator E2E job. Callers keep their own trigger + paths +
@@ -94,9 +105,22 @@ on:
         # expression: a `${{ … }}` result arrives as the STRING "false", which is
         # truthy, so `!inputs.install-patrol` would be false and the warm build
         # would silently come back for a patrol app.
-        description: "Patrol app: activate patrol_cli 3.11.0 and skip the warm build"
+        description: "Patrol app: activate patrol_cli and skip the warm build"
         type: boolean
         default: false
+      patrol-cli-version:
+        # patrol_cli DRIVES `patrol test`, and the CLI and the caller's `patrol`
+        # package version must match -- the CLI refuses a package it doesn't
+        # support (patrol_cli 4.7.0's own compatibility table maps `4.7.0+` to
+        # `patrol 4.9.0+`).
+        #
+        # Default 3.11.0 = the previously hardcoded value, so a caller that does
+        # not pass this is completely unaffected. That is deliberate: it lets
+        # each patrol repo move on its own schedule instead of forcing every
+        # consumer of the moving @v1 tag to migrate in lockstep.
+        description: "patrol_cli version (must match the caller's `patrol` dep)"
+        type: string
+        default: "3.11.0"
       emulator-timeout-minutes:
         # Ceiling for the emulator step alone. 12 suits the plain-Flutter apps,
         # where only a small residual Gradle run happens inside the emulator
@@ -170,7 +194,7 @@ jobs:
       - name: Install patrol_cli
         if: inputs.install-patrol
         run: |
-          dart pub global activate patrol_cli 3.11.0
+          dart pub global activate patrol_cli '${{ inputs.patrol-cli-version }}'
           echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
 
       # setup-flutter does not run codegen; E2E has no `just check`, so the

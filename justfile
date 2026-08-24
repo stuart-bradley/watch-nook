@@ -84,9 +84,22 @@ e2e-build:
 # BOUNDED, and the bound is load-bearing (#81). A *failing* patrol test never
 # exits: the Dart side reports its TestFailure in ~9s and honours its own
 # 3-minute Timeout on schedule, then the Gradle instrumentation hangs — 37m and
-# 2h0m measured LOCALLY, where nothing bounded this recipe. In CI the real
-# pre-fix failures came in at 8-12m per job (runs 31254425694 / 31254515618 /
-# 31279139093), not the ~33m the in-script ceiling would allow.
+# 2h0m measured LOCALLY, where nothing bounded this recipe.
+#
+# IN CI THE HANG COSTS NOTHING EXTRA, and the earlier framing of this comment
+# obscured that. Pre-fix failures: 8-12m per job (runs 31254425694 /
+# 31254515618 / 31279139093). Healthy runs: 8m09s-12m24s (31364735296 /
+# 31367051052 / 31368830363 / 31769504440 / 32446321904). A failing E2E costs
+# what a passing one costs — the "~1 min healthy run" this was once compared
+# against was the job being SKIPPED by the #79 gate bug, not a fast pass. So
+# the bound below is about the LOCAL dev loop, not about CI spend.
+#
+# EVERY RUN ID ABOVE IS PATROL 3.20.0 / patrol_cli 3.11.0 — all of them predate
+# the 4.9.0 / 4.7.0 bump, so they size the 20m default against a toolchain this
+# repo no longer runs. well-quill needed 30m on 4.x (its steps measured
+# 15-22m). If a run here comes back 124, RAISE THIS DEFAULT before concluding
+# the teardown still hangs — a slower build and a hang look identical from the
+# exit code alone.
 #
 # The dump matters as much as the bound. patrol's stdout carries only "Gradle
 # test execution failed with code 1" — the real TestFailure (expected, actual,
