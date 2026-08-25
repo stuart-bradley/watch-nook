@@ -117,7 +117,7 @@ e2e-build:
 # file:line) is ONLY in logcat, and a post-hoc `logcat -d` can miss it once the
 # ring buffer has rolled past a long hang. Dumping here, immediately, is what
 # makes a failure diagnosable; the workflow's `Dump E2E diagnostics` step then
-# carries it to the step log with no change to the vendored flutter-e2e.yml.
+# carries it to the step log with no change to ci-shared's flutter-e2e.yml.
 #
 # Override the bound for a fast local loop: `just e2e 5m`. Extra args go through
 # to patrol — and WITH MORE THAN ONE DEVICE ATTACHED you need
@@ -155,8 +155,8 @@ e2e timeout="20m" *args:
     # PR page without opening the step log. The hint goes in too: without it a
     # hang renders as a bare exit code plus "nothing found", which reads like a
     # missing log rather than the timeout it is. Written from here, NOT from
-    # the workflow: flutter-e2e.yml is a ci-shared fork and a local edit there
-    # is dropped by the next re-sync.
+    # the workflow: ci-shared's flutter-e2e.yml is shared by four apps behind a
+    # moving @v1 tag, so app-specific diagnostics belong in this repo.
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
       { echo "### E2E failed (exit $rc)"
         [ -z "$hint" ] || echo "$hint"

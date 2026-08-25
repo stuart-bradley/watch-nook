@@ -47,9 +47,9 @@ dev_dependencies:
     sdk: flutter
   # Pinned, not caret-ranged: `patrol test` is driven by patrol_cli, and the two
   # must match. The CLI version is set by THIS repo's own workflow caller —
-  # `.github/workflows/e2e.yml` passes `patrol-cli-version` — not by ci-shared,
-  # which this repo vendors rather than consumes (see the header of
-  # `.github/workflows/flutter-e2e.yml`).
+  # `.github/workflows/e2e.yml` passes `patrol-cli-version`. ci-shared exposes it
+  # as an INPUT rather than hardcoding it precisely so each patrol app can move on
+  # its own schedule instead of in lockstep with the moving @v1 tag.
   #
   # patrol 4.9.0 pairs with patrol_cli 4.7.0; keep the two in step against
   # patrol's compatibility table. Since patrol_cli 4.0.0 a mismatch is caught

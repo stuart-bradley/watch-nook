@@ -10,16 +10,17 @@ updates:
       all:
         patterns:
           - "*"
-    # Kept but now INERT: this repo no longer references ci-shared at all (its
-    # workflows are vendored in-tree — see the header on .github/workflows/
-    # flutter-*.yml and #75). The rule costs nothing and guards against a
-    # re-introduced reference erroring the whole github-actions job, since
-    # Dependabot cannot read a private repo from a user account.
+    # This repo consumes ci-shared again (#94 deleted the vendored fork), so the
+    # rule is LIVE, not inert — ci.yml, e2e.yml and release.yml all reference
+    # stuart-bradley/ci-shared/...@v1.
     #
-    # Dependabot now bumps the pinned action SHAs inside the vendored workflows
-    # directly. That is deliberate — it keeps the pins current at the cost of
-    # drifting from ci-shared, which is the right trade for a fork we intend to
-    # keep. When re-syncing, diff ignoring the pinned-SHA lines.
+    # Keep ignoring it. `@v1` is a MOVING tag that ci-shared force-pushes: a
+    # Dependabot PR pinning it to a SHA would silently opt this repo out of every
+    # future shared fix, which is the entire point of consuming the tag. The
+    # action SHAs *inside* those workflows are ci-shared's own Dependabot's job.
+    #
+    # (The old reason — "ci-shared is private and Dependabot can't read it" —
+    # no longer applies; it is public now. The rule stays for the reason above.)
     ignore:
       - dependency-name: stuart-bradley/ci-shared/*
 
