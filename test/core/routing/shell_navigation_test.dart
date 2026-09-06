@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
@@ -75,6 +77,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(_StubSource()),
           libraryGridProvider.overrideWith(
             (ref, filter) => Stream.value([item]),

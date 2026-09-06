@@ -9,6 +9,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
@@ -126,6 +128,7 @@ void main() {
     required MetadataSource repoSource,
   }) => ProviderScope(
     overrides: [
+      activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
       activeMetadataSourceProvider.overrideWithValue(active),
       metadataRepositoryProvider.overrideWithValue(
         CachingMetadataRepository(

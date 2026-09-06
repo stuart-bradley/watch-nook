@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
@@ -123,6 +125,7 @@ void main() {
           sharedPreferencesProvider.overrideWithValue(prefs),
           importExportServiceProvider.overrideWithValue(service),
           autoBackupServiceProvider.overrideWith((ref) async => backup),
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(_StubSource()),
           exportSharerProvider.overrideWithValue(
             ({
@@ -317,6 +320,7 @@ void main() {
           sharedPreferencesProvider.overrideWithValue(prefs),
           appDatabaseProvider.overrideWithValue(db),
           autoBackupServiceProvider.overrideWith((ref) async => backup),
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(_StubSource()),
         ],
         child: const MaterialApp(home: SettingsScreen()),
@@ -352,6 +356,7 @@ void main() {
         overrides: [
           sharedPreferencesProvider.overrideWithValue(prefs),
           appDatabaseProvider.overrideWithValue(db),
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(_StubSource()),
         ],
         child: const MaterialApp(home: SettingsScreen()),

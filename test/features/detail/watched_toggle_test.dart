@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
@@ -120,6 +122,7 @@ void main() {
       ProviderScope(
         overrides: [
           appDatabaseProvider.overrideWithValue(db),
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(source),
           // Overridden directly: the real one watches remote config for the
           // backend, which a widget test has no business booting.
@@ -311,6 +314,7 @@ void main() {
       ProviderScope(
         overrides: [
           appDatabaseProvider.overrideWithValue(db), // so updateStatus persists
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(source),
           metadataRepositoryProvider.overrideWithValue(
             CachingMetadataRepository(

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
@@ -53,6 +55,7 @@ void main() {
   // `_status`/`_type` → family-key → filtered-render path end to end.
   Widget harness(List<LibraryItem> items) => ProviderScope(
     overrides: [
+      activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
       activeMetadataSourceProvider.overrideWithValue(_ThrowingSource()),
       libraryGridProvider.overrideWith((ref, filter) {
         // Mirror the real provider's status mapping (incl. the derived

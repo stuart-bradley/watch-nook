@@ -98,12 +98,12 @@ class _Body extends ConsumerWidget {
     // `recordedSource` id; for a preview it's the active backend's id off the
     // hit — the same choice `addToLibrary` makes, so what you preview is what
     // gets added.
+    final activeKind = metadataSourceKindOf(
+      ref.watch(activeMetadataBackendProvider),
+    );
     final sourceId = entry != null
-        ? detailSourceId(entry)
-        : addSourceId(
-            result!,
-            metadataSourceKindOf(ref.watch(activeMetadataBackendProvider)),
-          );
+        ? detailSourceId(entry, activeKind)
+        : addSourceId(result!, activeKind);
 
     // ponytail: conditional watch — a row with no id for its own backend has no
     // details to fetch, so it renders from the stored columns alone.
