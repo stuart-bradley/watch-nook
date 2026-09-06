@@ -5,6 +5,8 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
 import 'package:watch_nook/core/database/tables.dart';
 
+import '../../support/library_fixtures.dart' as seed;
+
 void main() {
   late AppDatabase db;
 
@@ -47,25 +49,37 @@ void main() {
     tmdbId: Value(tmdbId),
   );
 
+  /// Membership goes through the production write, so a DAO test cannot seed a
+  /// row the app itself could not add.
+  Future<int> add(LibraryItemsCompanion entry) async =>
+      (await db.libraryDao.addOrGetItem(entry)).item.id;
+
+  /// Raw insert, bypassing the dedupe cascade. Only for tests whose SUBJECT is
+  /// that bypass — the unique-index constraint below — or which must fabricate
+  /// damaged rows for the repair to fix.
+  Future<int> addRaw(LibraryItemsCompanion entry) =>
+      seed.seedRawItem(db, entry);
+
+  /// Writes a watch row raw, skipping the idempotent marker semantics and the
+  /// recompute that follows them. That is the point: the group below exists to
+  /// point `recomputeDenormalized` at rows the marker path would never leave
+  /// behind, and you cannot test a repair without damage.
   Future<void> insertWatch(
     int itemId, {
     int? season,
     int? episode,
     bool rewatch = false,
-  }) => db
-      .into(db.watchEvents)
-      .insert(
-        WatchEventsCompanion.insert(
-          libraryItemId: itemId,
-          seasonNumber: Value(season),
-          episodeNumber: Value(episode),
-          isRewatch: Value(rewatch),
-        ),
-      );
+  }) => seed.seedRawWatch(
+    db,
+    itemId,
+    season: season,
+    episode: episode,
+    isRewatch: rewatch,
+  );
 
   group('LibraryDao round-trip', () {
     test('insert → getAll reads the row back with defaults applied', () async {
-      final id = await db.libraryDao.insertItem(aShow());
+      final id = await add(aShow());
 
       final all = await db.libraryDao.getAll();
       expect(all, hasLength(1));
@@ -81,13 +95,13 @@ void main() {
     });
 
     test('watchAll emits the current library', () async {
-      await db.libraryDao.insertItem(aShow());
+      await add(aShow());
       final items = await db.libraryDao.watchAll().first;
       expect(items.map((i) => i.title), ['Severance']);
     });
 
     test('getItem returns the row, or null for an unknown id', () async {
-      final id = await db.libraryDao.insertItem(aShow());
+      final id = await add(aShow());
       expect((await db.libraryDao.getItem(id))?.title, 'Severance');
       expect(await db.libraryDao.getItem(999999), isNull);
     });
@@ -98,7 +112,7 @@ void main() {
       'watchedCount counts non-rewatch rows only; a rewatch never inflates it '
       'nor moves lastWatched forward',
       () async {
-        final id = await db.libraryDao.insertItem(aShow());
+        final id = await add(aShow());
         await insertWatch(id, season: 1, episode: 1);
         await insertWatch(id, season: 1, episode: 2);
         // A rewatch of a LATER episode: must not raise the count nor advance
@@ -117,7 +131,7 @@ void main() {
     test(
       'lastWatched* is the max AIRED coord — season beats episode',
       () async {
-        final id = await db.libraryDao.insertItem(aShow());
+        final id = await add(aShow());
         await insertWatch(id, season: 1, episode: 10);
         await insertWatch(id, season: 2, episode: 1);
 
@@ -132,7 +146,7 @@ void main() {
     );
 
     test('a partial unwatch moves lastWatched* back to the new max', () async {
-      final id = await db.libraryDao.insertItem(aShow());
+      final id = await add(aShow());
       await insertWatch(id, season: 1, episode: 1);
       await insertWatch(id, season: 1, episode: 2);
       await insertWatch(id, season: 1, episode: 3);
@@ -152,7 +166,7 @@ void main() {
     });
 
     test('a movie watch counts once and leaves lastWatched* null', () async {
-      final id = await db.libraryDao.insertItem(aMovie());
+      final id = await add(aMovie());
       await insertWatch(id); // null season/episode
 
       await db.libraryDao.recomputeDenormalized(id);
@@ -164,7 +178,7 @@ void main() {
     });
 
     test('an empty history resets progress to zero/null', () async {
-      final id = await db.libraryDao.insertItem(aShow());
+      final id = await add(aShow());
       await insertWatch(id, season: 1, episode: 1);
       await db.libraryDao.recomputeDenormalized(id);
       expect((await db.libraryDao.getItem(id))!.watchedCount, 1);
@@ -188,7 +202,7 @@ void main() {
     test(
       'markWatched is idempotent — a double-tap adds no second row',
       () async {
-        final id = await db.libraryDao.insertItem(aShow());
+        final id = await add(aShow());
         await db.libraryDao.markWatched(id, season: 1, episode: 1);
         await db.libraryDao.markWatched(id, season: 1, episode: 1);
 
@@ -203,7 +217,7 @@ void main() {
     test(
       'markWatched snapshots watchedAt + runtimeMinutes onto the row',
       () async {
-        final id = await db.libraryDao.insertItem(aShow());
+        final id = await add(aShow());
         final at = DateTime(2026, 7, 9, 21, 30);
         await db.libraryDao.markWatched(
           id,
@@ -224,7 +238,7 @@ void main() {
     test(
       'logRewatch appends without raising watchedCount or advancing progress',
       () async {
-        final id = await db.libraryDao.insertItem(aShow());
+        final id = await add(aShow());
         await db.libraryDao.markWatched(id, season: 1, episode: 1);
         // A rewatch of a LATER episode: a naive "any row advances progress"
         // implementation would jump lastWatched* to S1E9 and count 2.
@@ -241,7 +255,7 @@ void main() {
     test(
       'logRewatch keeps the first watch date — it never rewrites it',
       () async {
-        final id = await db.libraryDao.insertItem(aShow());
+        final id = await add(aShow());
         final first = DateTime(2020);
         await db.libraryDao.markWatched(
           id,
@@ -265,7 +279,7 @@ void main() {
     test(
       'unwatch removes the rewatch rows too, not just the first watch',
       () async {
-        final id = await db.libraryDao.insertItem(aShow());
+        final id = await add(aShow());
         await db.libraryDao.markWatched(id, season: 1, episode: 1);
         await db.libraryDao.logRewatch(id, season: 1, episode: 1);
         await db.libraryDao.logRewatch(id, season: 1, episode: 1);
@@ -283,7 +297,7 @@ void main() {
     );
 
     test('unwatch touches only its own episode; progress falls back', () async {
-      final id = await db.libraryDao.insertItem(aShow());
+      final id = await add(aShow());
       await db.libraryDao.markWatched(id, season: 1, episode: 1);
       await db.libraryDao.markWatched(id, season: 1, episode: 2);
       await db.libraryDao.markWatched(id, season: 2, episode: 1);
@@ -298,7 +312,7 @@ void main() {
     });
 
     test('an episode number is scoped to its season — S1E1 ≠ S2E1', () async {
-      final id = await db.libraryDao.insertItem(aShow());
+      final id = await add(aShow());
       await db.libraryDao.markWatched(id, season: 1, episode: 1);
       // Same episode number, different season: a second, distinct marker.
       await db.libraryDao.markWatched(id, season: 2, episode: 1);
@@ -312,7 +326,7 @@ void main() {
     test(
       'a movie marks/unwatches on null coordinates (IS NULL, not = NULL)',
       () async {
-        final id = await db.libraryDao.insertItem(aMovie());
+        final id = await add(aMovie());
         await db.libraryDao.markWatched(id, runtimeMinutes: 155);
         // `= NULL` matches nothing in SQLite, so a broken predicate inserts
         // a second row here instead of no-opping.
@@ -333,8 +347,8 @@ void main() {
     test(
       'writes are scoped to their item — a sibling show is untouched',
       () async {
-        final a = await db.libraryDao.insertItem(aShow());
-        final b = await db.libraryDao.insertItem(
+        final a = await add(aShow());
+        final b = await add(
           aShow(title: 'Other', tmdbId: 777),
         );
         await db.libraryDao.markWatched(a, season: 1, episode: 1);
@@ -355,7 +369,7 @@ void main() {
     test(
       'watchWatchedEpisodes emits watched coords, excluding rewatches',
       () async {
-        final id = await db.libraryDao.insertItem(aShow());
+        final id = await add(aShow());
         await db.libraryDao.markWatched(id, season: 1, episode: 1);
         await db.libraryDao.logRewatch(id, season: 1, episode: 1);
         // A rewatch of an episode never marked watched must not appear watched.
@@ -366,7 +380,7 @@ void main() {
     );
 
     test('watchWatchedEpisodes omits a movie null coordinate', () async {
-      final id = await db.libraryDao.insertItem(aMovie());
+      final id = await add(aMovie());
       await db.libraryDao.markWatched(id);
       expect(await db.libraryDao.watchWatchedEpisodes(id).first, isEmpty);
     });
@@ -374,15 +388,15 @@ void main() {
 
   group('watchLibrary (filtered grid stream)', () {
     test('narrows to the requested status and type', () async {
-      await db.libraryDao.insertItem(aShow(title: 'Watching TV'));
-      await db.libraryDao.insertItem(
+      await add(aShow(title: 'Watching TV'));
+      await add(
         aShow(
           title: 'On watchlist',
           tmdbId: 111,
           status: TrackStatus.watchlist,
         ),
       );
-      await db.libraryDao.insertItem(aMovie(title: 'Completed Movie'));
+      await add(aMovie(title: 'Completed Movie'));
 
       expect(
         (await db.libraryDao.watchLibrary(status: TrackStatus.watching).first)
@@ -404,7 +418,7 @@ void main() {
       final emissions = <int>[];
       final sub = stream.listen((rows) => emissions.add(rows.length));
 
-      await db.libraryDao.insertItem(aShow());
+      await add(aShow());
       await pumpEventQueue();
 
       expect(emissions.last, 1);
@@ -433,7 +447,7 @@ void main() {
     });
 
     test('findByIdentity matches by imdbId even when tmdbId differs', () async {
-      await db.libraryDao.insertItem(
+      await add(
         aShow(tmdbId: 1, imdbId: 'tt1234'),
       );
       final hit = await db.libraryDao.findByIdentity(
@@ -445,7 +459,7 @@ void main() {
     });
 
     test('same source id under a different mediaType is NOT a match', () async {
-      await db.libraryDao.insertItem(aShow(tmdbId: 500));
+      await add(aShow(tmdbId: 500));
       final hit = await db.libraryDao.findByIdentity(
         mediaType: MediaType.movie, // different type, same id
         tmdbId: 500,
@@ -454,7 +468,7 @@ void main() {
     });
 
     test('falls back to (mediaType, title, year) when no ids match', () async {
-      await db.libraryDao.insertItem(
+      await add(
         aShow(title: 'Idless', tmdbId: null, year: 2020),
       );
       final hit = await db.libraryDao.findByIdentity(
@@ -477,7 +491,7 @@ void main() {
 
   group('status/rating/delete writes', () {
     test('updateStatus changes the status and stamps updatedAt', () async {
-      final id = await db.libraryDao.insertItem(aShow());
+      final id = await add(aShow());
       final later = DateTime(2026, 7, 8);
       await db.libraryDao.updateStatus(id, TrackStatus.completed, now: later);
 
@@ -487,7 +501,7 @@ void main() {
     });
 
     test('updateRating sets then clears rating + ratedAt', () async {
-      final id = await db.libraryDao.insertItem(aShow());
+      final id = await add(aShow());
       final rated = DateTime(2026, 7, 8);
       await db.libraryDao.updateRating(id, 8, now: rated);
 
@@ -502,7 +516,7 @@ void main() {
     });
 
     test('deleteItem removes the row and cascades its WatchEvents', () async {
-      final id = await db.libraryDao.insertItem(aShow());
+      final id = await add(aShow());
       await insertWatch(id, season: 1, episode: 1);
 
       await db.libraryDao.deleteItem(id);
@@ -561,7 +575,7 @@ void main() {
     );
 
     test('deleting a LibraryItem cascades to its WatchEvents', () async {
-      final id = await db.libraryDao.insertItem(aShow());
+      final id = await add(aShow());
       await db
           .into(db.watchEvents)
           .insert(
@@ -579,14 +593,16 @@ void main() {
     });
 
     test('the (mediaType, tmdbId) unique index rejects a duplicate', () async {
-      await db.libraryDao.insertItem(aShow());
+      // Raw on purpose: addOrGetItem would dedupe rather than let the index
+      // fire, and the index is the subject here.
+      await addRaw(aShow());
       expect(
-        () => db.libraryDao.insertItem(aShow(title: 'Severance (dupe)')),
+        () => addRaw(aShow(title: 'Severance (dupe)')),
         throwsA(isA<SqliteException>()),
       );
       // But two rows with a NULL tmdbId are allowed (NULLs are distinct).
-      await db.libraryDao.insertItem(aShow(title: 'Manual A', tmdbId: null));
-      await db.libraryDao.insertItem(aShow(title: 'Manual B', tmdbId: null));
+      await addRaw(aShow(title: 'Manual A', tmdbId: null));
+      await addRaw(aShow(title: 'Manual B', tmdbId: null));
       expect(await db.libraryDao.getAll(), hasLength(3));
     });
   });
@@ -601,7 +617,7 @@ void main() {
     test(
       're-running a bulk mark inserts nothing — no inflated count',
       () async {
-        final id = await db.libraryDao.insertItem(aShow());
+        final id = await add(aShow());
         final marks = [ep(1, 1), ep(1, 2), ep(1, 3)];
 
         expect(await db.libraryDao.markManyWatched(id, marks), 3);
@@ -618,7 +634,7 @@ void main() {
     test(
       'a duplicate coordinate within one call collapses to one row',
       () async {
-        final id = await db.libraryDao.insertItem(aShow());
+        final id = await add(aShow());
         expect(
           await db.libraryDao.markManyWatched(id, [ep(1, 1), ep(1, 1)]),
           1,
@@ -629,7 +645,7 @@ void main() {
     );
 
     test('bulk over a partly-watched season fills only the gaps', () async {
-      final id = await db.libraryDao.insertItem(aShow());
+      final id = await add(aShow());
       await db.libraryDao.markWatched(
         id,
         season: 1,
@@ -655,7 +671,7 @@ void main() {
     });
 
     test('a rewatch marker does not stand in for a watched marker', () async {
-      final id = await db.libraryDao.insertItem(aShow());
+      final id = await add(aShow());
       // A rewatch of an episode with no first-watch row: bulk must still insert
       // the real marker, or `watchedCount` stays 0 forever.
       await db.libraryDao.logRewatch(id, season: 1, episode: 1);
@@ -667,7 +683,7 @@ void main() {
     test(
       'runtime is snapshotted per episode, and an empty bulk no-ops',
       () async {
-        final id = await db.libraryDao.insertItem(aShow());
+        final id = await add(aShow());
         expect(await db.libraryDao.markManyWatched(id, const []), 0);
         expect(await events(id), isEmpty);
 
@@ -687,8 +703,8 @@ void main() {
     test(
       'writes are scoped to their item — a sibling show is untouched',
       () async {
-        final a = await db.libraryDao.insertItem(aShow());
-        final b = await db.libraryDao.insertItem(
+        final a = await add(aShow());
+        final b = await add(
           aShow(title: 'Other', tmdbId: 777),
         );
         await db.libraryDao.markWatched(b, season: 1, episode: 1);
