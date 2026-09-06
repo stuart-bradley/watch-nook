@@ -1,16 +1,12 @@
 import 'dart:async';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:watch_nook/core/import_export/import/merge_applier.dart';
 import 'package:watch_nook/core/import_export/import/resolver.dart';
-import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
-import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
-import 'package:watch_nook/core/theme/watchnook_tokens.dart';
-import 'package:watch_nook/core/widgets/poster_placeholder.dart';
+import 'package:watch_nook/core/widgets/remote_image.dart';
 import 'package:watch_nook/features/import/data/import_providers.dart';
 import 'package:watch_nook/features/import/domain/import_state.dart';
 
@@ -266,7 +262,7 @@ class _CandidateTile extends ConsumerWidget {
     final country = candidate.originCountry.join('/');
     return ListTile(
       selected: selected,
-      leading: _Poster(path: candidate.posterPath),
+      leading: RemoteImage.thumbnail(path: candidate.posterPath),
       title: Text(
         candidate.title,
         maxLines: 1,
@@ -378,39 +374,3 @@ class _Centered extends StatelessWidget {
 }
 
 /// Candidate thumbnail — the same offline-safe poster the search results use.
-class _Poster extends ConsumerWidget {
-  const _Poster({required this.path});
-
-  final String? path;
-
-  // Matches the search row: the subtitle already carries the type.
-  static const _placeholder = PosterPlaceholder(
-    width: _posterWidth,
-    height: _posterHeight,
-    radius: WatchnookRadii.thumb,
-  );
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final path = this.path;
-    if (path == null) return _placeholder;
-    final url = ref
-        .read(activeMetadataSourceProvider)
-        .imageUrl(path, ImageSize.small);
-    return ClipRRect(
-      borderRadius: WatchnookRadii.thumb,
-      child: CachedNetworkImage(
-        imageUrl: url,
-        cacheManager: PosterCacheManager.instance,
-        width: _posterWidth,
-        height: _posterHeight,
-        fit: BoxFit.cover,
-        placeholder: (_, _) => _placeholder,
-        errorWidget: (_, _, _) => _placeholder,
-      ),
-    );
-  }
-}
-
-const double _posterWidth = 40;
-const double _posterHeight = _posterWidth / WatchnookTokens.posterAspect;

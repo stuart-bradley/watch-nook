@@ -1,16 +1,12 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
-import 'package:watch_nook/core/metadata/metadata_providers.dart';
-import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
-import 'package:watch_nook/core/widgets/poster_placeholder.dart';
+import 'package:watch_nook/core/widgets/remote_image.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 
 /// Up Next tab (#21, R4) — two answers to "what now?", on one page:
@@ -333,7 +329,7 @@ class _UpcomingTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return ListTile(
-      leading: _Poster(path: entry.posterPath),
+      leading: RemoteImage.thumbnail(path: entry.posterPath),
       title: Text(entry.showTitle),
       subtitle: Text(
         episodeLabel(entry.season, entry.episode, entry.episodeTitle),
@@ -358,7 +354,7 @@ class _QueueTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final label = 'Next: ${episodeLabel(entry.season, entry.episode)}';
     return ListTile(
-      leading: _Poster(path: entry.posterPath),
+      leading: RemoteImage.thumbnail(path: entry.posterPath),
       title: Text(entry.showTitle),
       // When the show advances to its next episode the row stays put and only
       // this coordinate changes — cross-fade it. Keyed by the label so an
@@ -398,38 +394,3 @@ class _QueueTile extends ConsumerWidget {
 }
 
 /// Show thumbnail — the same offline-safe poster the search + import rows use.
-class _Poster extends ConsumerWidget {
-  const _Poster({required this.path});
-
-  final String? path;
-
-  static const _placeholder = PosterPlaceholder(
-    width: _posterWidth,
-    height: _posterHeight,
-    radius: WatchnookRadii.thumb,
-  );
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final path = this.path;
-    if (path == null) return _placeholder;
-    final url = ref
-        .read(activeMetadataSourceProvider)
-        .imageUrl(path, ImageSize.small);
-    return ClipRRect(
-      borderRadius: WatchnookRadii.thumb,
-      child: CachedNetworkImage(
-        imageUrl: url,
-        cacheManager: PosterCacheManager.instance,
-        width: _posterWidth,
-        height: _posterHeight,
-        fit: BoxFit.cover,
-        placeholder: (_, _) => _placeholder,
-        errorWidget: (_, _, _) => _placeholder,
-      ),
-    );
-  }
-}
-
-const double _posterWidth = 40;
-const double _posterHeight = _posterWidth / WatchnookTokens.posterAspect;

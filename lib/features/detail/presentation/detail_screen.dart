@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,10 +9,10 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
+import 'package:watch_nook/core/widgets/remote_image.dart';
 import 'package:watch_nook/core/widgets/track_status_ui.dart';
 import 'package:watch_nook/features/detail/data/add_to_library.dart';
 import 'package:watch_nook/features/detail/data/bulk_mark.dart';
@@ -136,7 +135,7 @@ class _Body extends ConsumerWidget {
 
     return ListView(
       children: [
-        _Backdrop(path: details?.backdropPath),
+        RemoteImage.backdrop(path: details?.backdropPath),
         if (coldCache && async.isLoading) const LinearProgressIndicator(),
         Padding(
           padding: const EdgeInsets.all(WatchnookSpacing.screen),
@@ -236,46 +235,6 @@ class _Body extends ConsumerWidget {
 
 /// 16:9 backdrop. Offline-safe: a null path (or an uncached image) shows a
 /// placeholder and never blocks the screen.
-class _Backdrop extends ConsumerWidget {
-  const _Backdrop({required this.path});
-
-  final String? path;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final path = this.path;
-    return AspectRatio(
-      aspectRatio: 16 / 9,
-      child: path == null
-          ? const _BackdropPlaceholder()
-          : CachedNetworkImage(
-              imageUrl: ref
-                  .read(activeMetadataSourceProvider)
-                  .imageUrl(path, ImageSize.large),
-              cacheManager: PosterCacheManager.instance,
-              fit: BoxFit.cover,
-              placeholder: (_, _) => const _BackdropPlaceholder(),
-              errorWidget: (_, _, _) => const _BackdropPlaceholder(),
-            ),
-    );
-  }
-}
-
-class _BackdropPlaceholder extends StatelessWidget {
-  const _BackdropPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(color: scheme.surfaceContainerHighest),
-      child: Center(
-        child: Icon(Icons.movie_outlined, color: scheme.onSurfaceVariant),
-      ),
-    );
-  }
-}
-
 /// Title + a "2022 · TV · Returning Series" caption. Falls back to the stored
 /// row (or the search hit) when details haven't loaded, so it renders offline.
 ///
