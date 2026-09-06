@@ -1,4 +1,3 @@
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +9,8 @@ import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/features/library/presentation/library_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// #17 acceptance at the widget layer: the grid filters by status/type and
 /// renders progress **offline**. Adversarial: the source provider is a source
@@ -30,32 +31,17 @@ void main() {
 
   final now = DateTime(2026);
 
-  Future<void> seedShow() => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.tv,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: 'Severance',
-      trackStatus: TrackStatus.watching,
-      addedAt: now,
-      updatedAt: now,
-      watchedCount: const Value(7),
-      lastWatchedSeason: const Value(2),
-      lastWatchedEpisode: const Value(4),
-      episodeCountTotal: const Value(10),
-    ),
+  // 7 watched ending at S2E4 — the same progress the grid used to be handed
+  // directly, but now derived by `recomputeDenormalized` from real markWatched
+  // writes, so the fixture can't drift from what the app would actually store.
+  Future<void> seedShow() => seed.seedShow(
+    db,
+    now: now,
+    episodeCountTotal: 10,
+    watched: const [(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 3), (2, 4)],
   );
 
-  Future<void> seedMovie() => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.movie,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: 'Dune',
-      trackStatus: TrackStatus.completed,
-      addedAt: now,
-      updatedAt: now,
-      watchedCount: const Value(1),
-    ),
-  );
+  Future<void> seedMovie() => seed.seedMovie(db, now: now, watched: true);
 
   // The grid is fed a **synchronous snapshot** of real `LibraryItem` rows, not
   // the live DAO stream. That keeps the widget test deterministic and leaves no
@@ -155,18 +141,27 @@ void main() {
     Future<void> seedCaughtUp({
       required String title,
       TrackStatus status = TrackStatus.watching,
-    }) => db.libraryDao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: title,
-        trackStatus: status,
-        addedAt: now,
-        updatedAt: now,
-        watchedCount: const Value(10),
-        episodeCountTotal: const Value(10),
-        showStatus: const Value('Returning Series'),
-      ),
+    }) => seed.seedShow(
+      db,
+      title: title,
+      // Distinct id per title, so addOrGetItem's dedupe won't merge them.
+      tmdbId: title.hashCode,
+      status: status,
+      now: now,
+      episodeCountTotal: 10,
+      showStatus: 'Returning Series',
+      watched: const [
+        (1, 1),
+        (1, 2),
+        (1, 3),
+        (1, 4),
+        (1, 5),
+        (1, 6),
+        (1, 7),
+        (1, 8),
+        (1, 9),
+        (1, 10),
+      ],
     );
 
     Future<List<LibraryItem>> grid(

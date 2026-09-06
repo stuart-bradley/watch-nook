@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +14,8 @@ import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// #19 acceptance, from the UI in: tapping an episode toggle (or the movie
 /// button) must produce exactly the `WatchEvents` rows the watched invariant
@@ -91,30 +92,10 @@ void main() {
     EpisodeInfo(seasonNumber: 1, episodeNumber: 2, title: 'Half Loop'),
   ];
 
-  Future<int> insertShow() => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.tv,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: 'Severance',
-      trackStatus: TrackStatus.watching,
-      addedAt: now,
-      updatedAt: now,
-      tmdbId: const Value(95396),
-    ),
-  );
+  Future<int> insertShow() async => (await seed.seedShow(db, now: now)).id;
 
-  Future<int> insertMovie() => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.movie,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: 'Dune',
-      trackStatus: TrackStatus.completed,
-      addedAt: now,
-      updatedAt: now,
-      tmdbId: const Value(438631),
-      runtimeMinutes: const Value(155),
-    ),
-  );
+  Future<int> insertMovie() async =>
+      (await seed.seedMovie(db, now: now, runtimeMinutes: 155)).id;
 
   /// Mounts the detail screen over the real in-memory DB.
   ///

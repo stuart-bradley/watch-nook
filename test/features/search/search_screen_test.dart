@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +16,8 @@ import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/search/presentation/search_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// #16 acceptance — the search→**detail** flow at the widget layer, via a
 /// `ProviderScope` with a fake source + in-memory DB (never the real net/DB).
@@ -167,17 +168,7 @@ void main() {
     // Six films called "Severance" come back from a search; without this you
     // have to open each one to find out which is the one you already track.
     final now = DateTime(2026, 7, 13);
-    await db.libraryDao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Severance',
-        trackStatus: TrackStatus.onHold,
-        addedAt: now,
-        updatedAt: now,
-        tmdbId: const Value(95396),
-      ),
-    );
+    await seed.seedShow(db, now: now, status: TrackStatus.onHold);
 
     await tester.pumpWidget(harness());
     await tester.pumpAndSettle();
@@ -206,17 +197,7 @@ void main() {
     // So drive the writes the badge is supposed to follow, and assert it moves.
     // Nothing here calls the add path, and nothing invalidates anything.
     final now = DateTime(2026, 7, 13);
-    final id = await db.libraryDao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Severance',
-        trackStatus: TrackStatus.watching,
-        addedAt: now,
-        updatedAt: now,
-        tmdbId: const Value(95396),
-      ),
-    );
+    final id = (await seed.seedShow(db, now: now)).id;
 
     await tester.pumpWidget(harness());
     await tester.pumpAndSettle();
@@ -248,17 +229,7 @@ void main() {
       // so a regression there (e.g. matching a tmdbId across mediaTypes) lands
       // here too.
       final now = DateTime(2026, 7, 12);
-      final id = await db.libraryDao.insertItem(
-        LibraryItemsCompanion.insert(
-          mediaType: MediaType.tv,
-          recordedSource: MetadataSourceKind.tmdb,
-          title: 'Severance',
-          trackStatus: TrackStatus.watching,
-          addedAt: now,
-          updatedAt: now,
-          tmdbId: const Value(95396),
-        ),
-      );
+      final id = (await seed.seedShow(db, now: now)).id;
 
       await tester.pumpWidget(harness());
       await tester.pumpAndSettle();

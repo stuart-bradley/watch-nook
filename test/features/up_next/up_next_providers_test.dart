@@ -1,5 +1,4 @@
 import 'package:clock/clock.dart';
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +11,8 @@ import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart'
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// #21 — the Up Next **watch queue**. The core is [nextUnwatchedAired]: given a
 /// progress pointer and a show's shape, what is the next episode to watch, and
@@ -129,19 +130,16 @@ Future<int> _seed(
   required int tmdbId,
   int? lastSeason,
   int? lastEpisode,
-}) => db.libraryDao.insertItem(
-  LibraryItemsCompanion.insert(
-    mediaType: MediaType.tv,
-    recordedSource: MetadataSourceKind.tmdb,
-    title: title,
-    trackStatus: TrackStatus.watching,
-    addedAt: DateTime(2026),
-    updatedAt: DateTime(2026),
-    tmdbId: Value(tmdbId),
-    lastWatchedSeason: Value(lastSeason),
-    lastWatchedEpisode: Value(lastEpisode),
-  ),
-);
+}) async => (await seed.seedShow(
+  db,
+  title: title,
+  tmdbId: tmdbId,
+  // The progress pointer is set by marking that coordinate watched, so the
+  // fixture exercises the same recompute the app runs on every tick.
+  watched: lastSeason == null || lastEpisode == null
+      ? const []
+      : [(lastSeason, lastEpisode)],
+)).id;
 
 void main() {
   group('nextUnwatchedAired', () {
@@ -412,16 +410,11 @@ void main() {
     test('a dropped show is in neither list, however imminent', () async {
       final db = AppDatabase.forTesting(NativeDatabase.memory());
       addTearDown(db.close);
-      await db.libraryDao.insertItem(
-        LibraryItemsCompanion.insert(
-          mediaType: MediaType.tv,
-          recordedSource: MetadataSourceKind.tmdb,
-          title: 'Abandoned',
-          trackStatus: TrackStatus.dropped,
-          addedAt: DateTime(2026),
-          updatedAt: DateTime(2026),
-          tmdbId: const Value(1),
-        ),
+      await seed.seedShow(
+        db,
+        title: 'Abandoned',
+        tmdbId: 1,
+        status: TrackStatus.dropped,
       );
       final repo = _FakeRepo({
         1: _show(
