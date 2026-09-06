@@ -11,6 +11,8 @@ import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/library/data/tracked_show_sync.dart';
 
+import '../../support/library_fixtures.dart' as seed;
+
 /// The tracked-show sync backfills the per-show metadata an import can't fetch
 /// (episode count, show status, poster) onto the library rows — the data the
 /// derived "Up to date" category and the progress labels depend on. It must be
@@ -75,17 +77,21 @@ void main() {
     int tmdbId = 100,
     MediaType type = MediaType.tv,
     TrackStatus status = TrackStatus.watching,
-  }) => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: type,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: 'Show $tmdbId',
-      trackStatus: status,
-      addedAt: DateTime(2026),
-      updatedAt: DateTime(2026),
-      tmdbId: Value(tmdbId),
-    ),
-  );
+  }) async =>
+      (type == MediaType.movie
+              ? await seed.seedMovie(
+                  db,
+                  title: 'Show $tmdbId',
+                  tmdbId: tmdbId,
+                  status: status,
+                )
+              : await seed.seedShow(
+                  db,
+                  title: 'Show $tmdbId',
+                  tmdbId: tmdbId,
+                  status: status,
+                ))
+          .id;
 
   TrackedShowSync syncWith(_FakeRepo repo) => TrackedShowSync(
     dao: db.libraryDao,

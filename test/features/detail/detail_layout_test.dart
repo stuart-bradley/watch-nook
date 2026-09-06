@@ -1,4 +1,3 @@
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +12,8 @@ import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// The detail screen on a **real phone**, at 360dp wide.
 ///
@@ -68,18 +69,12 @@ void main() {
     );
 
     final now = DateTime(2026, 7, 12);
-    final id = await db.libraryDao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Severance',
-        trackStatus: TrackStatus.dropped,
-        addedAt: now,
-        updatedAt: now,
-        tmdbId: const Value(95396),
-      ),
+    final item = await seed.seedShow(
+      db,
+      status: TrackStatus.dropped,
+      now: now,
     );
-    final item = (await db.libraryDao.getItem(id))!;
+    final id = item.id;
     final source = _FakeSource(details);
 
     await tester.pumpWidget(

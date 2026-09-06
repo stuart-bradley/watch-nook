@@ -5,6 +5,8 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/features/library/presentation/library_screen.dart';
 
+import '../../support/library_fixtures.dart' as seed;
+
 /// Unit-tests the denormalized progress caption (#17). Built from a real row so
 /// the field wiring (which column feeds which part of the string) is exercised,
 /// not a hand-rolled stand-in. No metadata fetch anywhere — the whole point is
@@ -23,7 +25,11 @@ void main() {
     int? lastEpisode,
     int? episodeCountTotal,
   }) async {
-    final id = await db.libraryDao.insertItem(
+    // Raw on purpose: this exercises the label formatter across the column
+    // space, including combinations the app would never write, so seeding
+    // through markWatched would defeat the point.
+    final id = await seed.seedRawItem(
+      db,
       LibraryItemsCompanion.insert(
         mediaType: type,
         recordedSource: MetadataSourceKind.tmdb,

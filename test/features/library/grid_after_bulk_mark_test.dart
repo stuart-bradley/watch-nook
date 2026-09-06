@@ -1,4 +1,3 @@
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +13,8 @@ import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
 import 'package:watch_nook/features/library/presentation/library_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// #22 — the cross-screen seam nothing else covers: a **bulk mark on the detail
 /// screen** must move the **library grid's progress caption**, which reads only
@@ -82,18 +83,8 @@ void main() {
 
   /// `episodeCountTotal` is the add-time snapshot (AD-3) the caption divides
   /// against; posterPath stays null so no card image resolves a URL.
-  Future<int> insertShow() => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.tv,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: 'Severance',
-      trackStatus: TrackStatus.watching,
-      addedAt: now,
-      updatedAt: now,
-      tmdbId: const Value(95396),
-      episodeCountTotal: const Value(4),
-    ),
-  );
+  Future<int> insertShow() async =>
+      (await seed.seedShow(db, now: now, episodeCountTotal: 4)).id;
 
   /// The grid over a **synchronous snapshot** of the rows as they stand now —
   /// a live Drift `.watch()` never quiesces under fake-async (CLAUDE.md).

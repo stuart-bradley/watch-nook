@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:clock/clock.dart';
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +13,8 @@ import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 import 'package:watch_nook/features/up_next/presentation/up_next_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// #21 + R4 at the widget layer — the watch queue AND upcoming, on one page.
 /// `upNextBoardProvider` and the live `libraryItemsProvider` are overridden
@@ -160,17 +161,11 @@ void main() {
   testWidgets('the tick marks exactly that coordinate watched', (tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
-    final id = await db.libraryDao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'One Piece',
-        trackStatus: TrackStatus.watching,
-        addedAt: DateTime(2026),
-        updatedAt: DateTime(2026),
-        tmdbId: const Value(37854),
-      ),
-    );
+    final id = (await seed.seedShow(
+      db,
+      title: 'One Piece',
+      tmdbId: 37854,
+    )).id;
 
     await pumpWith(
       tester,

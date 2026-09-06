@@ -1,4 +1,3 @@
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +16,8 @@ import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// US-1/US-2 — the detail screen in **preview** mode: an untracked search hit,
 /// reachable before it is in the library.
@@ -244,17 +245,14 @@ void main() {
     // you already track — and pressing it silently keeps the old status while
     // reporting the new one.
     final now = DateTime(2026, 7, 12);
-    final existing = await db.libraryDao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Severance (2022)', // ≠ the hit's title, so no title+year match
-        trackStatus: TrackStatus.completed,
-        addedAt: now,
-        updatedAt: now,
-        imdbId: const Value('tt11280740'), // the ONLY thing that can match
-      ),
-    );
+    final existing = (await seed.seedShow(
+      db,
+      title: 'Severance (2022)', // ≠ the hit's title, so no title+year match
+      tmdbId: null,
+      imdbId: 'tt11280740', // the ONLY thing that can match
+      status: TrackStatus.completed,
+      now: now,
+    )).id;
 
     await pumpPreview(tester);
 

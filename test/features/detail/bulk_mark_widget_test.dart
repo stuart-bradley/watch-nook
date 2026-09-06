@@ -1,4 +1,3 @@
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +12,8 @@ import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// #20 from the UI in: the bulk buttons must write through the DAO's bulk path
 /// against a **real** in-memory DB. Assertions are on `WatchEvents`, so a
@@ -82,17 +83,7 @@ void main() {
     EpisodeInfo(seasonNumber: 2, episodeNumber: 2, airDate: aired),
   ];
 
-  Future<int> insertShow() => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.tv,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: 'Severance',
-      trackStatus: TrackStatus.watching,
-      addedAt: now,
-      updatedAt: now,
-      tmdbId: const Value(95396),
-    ),
-  );
+  Future<int> insertShow() async => (await seed.seedShow(db, now: now)).id;
 
   Future<void> pumpDetail(
     WidgetTester tester,
