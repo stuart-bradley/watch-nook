@@ -1,3 +1,4 @@
+import 'package:clock/clock.dart';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +21,7 @@ void main() {
     int? tmdbId = 95396,
     int? tvdbId,
     String? imdbId,
+    DateTime? at,
     int? year,
     TrackStatus status = TrackStatus.watching,
   }) => LibraryItemsCompanion.insert(
@@ -27,8 +29,8 @@ void main() {
     recordedSource: MetadataSourceKind.tmdb,
     title: title,
     trackStatus: status,
-    addedAt: now,
-    updatedAt: now,
+    addedAt: at ?? now,
+    updatedAt: at ?? now,
     tmdbId: Value(tmdbId),
     tvdbId: Value(tvdbId),
     imdbId: Value(imdbId),
@@ -716,5 +718,67 @@ void main() {
         expect((await db.libraryDao.getItem(a))!.watchedCount, 2);
       },
     );
+  });
+
+  // `watchLibrary` documents "most-recently-updated first so freshly-touched
+  // titles surface at the top". Only the status and rating writes used to stamp
+  // `updatedAt`, so the app's commonest write — marking an episode — left the
+  // title exactly where it was, and nothing in the suite noticed.
+  group('watchLibrary recency ordering', () {
+    late int stale;
+
+    setUp(() async {
+      stale = await add(aShow(title: 'Stale', tmdbId: 1, at: DateTime(2026)));
+      await add(aShow(title: 'Fresh', tmdbId: 2, at: DateTime(2026, 6)));
+    });
+
+    Future<List<String>> titles() async =>
+        (await db.libraryDao.watchLibrary().first).map((i) => i.title).toList();
+
+    Future<void> at(DateTime when, Future<void> Function() write) =>
+        withClock(Clock.fixed(when), write);
+
+    test('starts most-recently-updated first', () async {
+      expect(await titles(), ['Fresh', 'Stale']);
+    });
+
+    test('marking an episode lifts its title to the top', () async {
+      await at(
+        DateTime(2026, 12),
+        () => db.libraryDao.markWatched(stale, season: 1, episode: 1),
+      );
+
+      expect(await titles(), ['Stale', 'Fresh']);
+    });
+
+    test('bulk-marking lifts its title to the top', () async {
+      await at(
+        DateTime(2026, 12),
+        () async => db.libraryDao.markManyWatched(stale, [
+          (season: 1, episode: 1, runtimeMinutes: null),
+        ]),
+      );
+
+      expect(await titles(), ['Stale', 'Fresh']);
+    });
+
+    test('logging a rewatch lifts its title to the top', () async {
+      await at(
+        DateTime(2026, 12),
+        () => db.libraryDao.logRewatch(stale, season: 1, episode: 1),
+      );
+
+      expect(await titles(), ['Stale', 'Fresh']);
+    });
+
+    test('un-marking lifts its title to the top', () async {
+      await db.libraryDao.markWatched(stale, season: 1, episode: 1);
+      await at(
+        DateTime(2026, 12),
+        () => db.libraryDao.unwatch(stale, season: 1, episode: 1),
+      );
+
+      expect(await titles(), ['Stale', 'Fresh']);
+    });
   });
 }

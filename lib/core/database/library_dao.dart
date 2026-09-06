@@ -1,3 +1,4 @@
+import 'package:clock/clock.dart';
 import 'package:drift/drift.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
@@ -223,6 +224,14 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
 
   /// Patch one item by id. Used by the backend-switch service to relink ids /
   /// set `relinkFailed` without rewriting the whole row.
+  ///
+  /// **Deliberately does not stamp `updatedAt`** — unlike the watch writes,
+  /// which always do. Whether a patch counts as "the user touched this title"
+  /// is the caller's call, and the two callers legitimately disagree: a relink
+  /// is a real modification and stamps by hand, while the daily metadata sync
+  /// refreshes every tracked show and must NOT, or the grid's
+  /// most-recently-updated order would be rewritten wholesale once a day and
+  /// mean nothing. Auto-stamping here would silently break that.
   Future<void> updateItem(int id, LibraryItemsCompanion patch) =>
       (update(libraryItems)..where((t) => t.id.equals(id))).write(patch);
 
@@ -329,7 +338,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
         runtimeMinutes: Value(runtimeMinutes),
       ),
     );
-    await recomputeDenormalized(itemId);
+    await recomputeDenormalized(itemId, touchedAt: clock.now());
   });
 
   /// **Bulk mark watched** (#20) — the whole set in **one** transaction, ending
@@ -370,7 +379,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
     if (fresh.isEmpty) return 0;
 
     await batch((b) => b.insertAll(watchEvents, fresh));
-    await recomputeDenormalized(itemId);
+    await recomputeDenormalized(itemId, touchedAt: clock.now());
     return fresh.length;
   });
 
@@ -395,7 +404,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
         isRewatch: const Value(true),
       ),
     );
-    await recomputeDenormalized(itemId);
+    await recomputeDenormalized(itemId, touchedAt: clock.now());
   });
 
   /// **Unwatch** — deletes **all** rows for `(itemId, season, episode)`,
@@ -406,7 +415,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
         await (delete(
           watchEvents,
         )..where((t) => _sameEpisode(t, itemId, season, episode))).go();
-        await recomputeDenormalized(itemId);
+        await recomputeDenormalized(itemId, touchedAt: clock.now());
       });
 
   /// Matches one item's rows at one aired coordinate. A movie's null
@@ -432,7 +441,13 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   /// coordinate among non-rewatch rows (null for a movie or an empty history).
   /// Called in the same transaction after each watch write; grid stays
   /// join-free.
-  Future<void> recomputeDenormalized(int itemId) async {
+  ///
+  /// [touchedAt] also stamps `updatedAt`, which is what keeps [watchLibrary]'s
+  /// most-recently-updated ordering honest — the watch writes pass it. The
+  /// restore path deliberately does **not**: it is rebuilding history the user
+  /// already owns, and stamping would rewrite every row's recency to the moment
+  /// of the restore and flatten the grid's order.
+  Future<void> recomputeDenormalized(int itemId, {DateTime? touchedAt}) async {
     final watched =
         await (select(watchEvents)..where(
               (t) => t.libraryItemId.equals(itemId) & t.isRewatch.equals(false),
@@ -458,6 +473,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
         watchedCount: Value(watched.length),
         lastWatchedSeason: Value(lastSeason),
         lastWatchedEpisode: Value(lastEpisode),
+        updatedAt: touchedAt == null ? const Value.absent() : Value(touchedAt),
       ),
     );
   }
