@@ -11,6 +11,8 @@ import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/import_export/export/auto_backup_service.dart';
 import 'package:watch_nook/core/import_export/export/import_export_service.dart';
 
+import '../../support/library_fixtures.dart' as seed;
+
 /// ADR-3 / the "two data domains" invariant (CLAUDE.md): user tables are
 /// precious and exported; `CachedMedia`/`CachedEpisodes` are disposable and
 /// `SharedPreferences` holds the metadata API key — neither may ever reach the
@@ -82,28 +84,20 @@ void main() {
     // Every nullable user column is populated, so `_compact` drops nothing and
     // the emitted key set is the FULL one. A sparse row would let a newly
     // leaked nullable field hide behind its own null.
-    final id = await dao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Severance',
-        trackStatus: TrackStatus.watching,
-        addedAt: added,
-        updatedAt: added,
-        tmdbId: const Value(95396),
-        tvdbId: const Value(371980),
-        imdbId: const Value('tt11280740'),
-        year: const Value(2022),
-        posterPath: const Value('/severance.jpg'),
-        genresCsv: const Value('Drama,Mystery'),
-        runtimeMinutes: const Value(47),
-        showStatus: const Value('Returning Series'),
-        episodeCountTotal: const Value(19),
-        rating: const Value(9),
-        ratedAt: Value(added),
-        relinkFailed: const Value(true),
-      ),
-    );
+    final id = (await seed.seedShow(
+      db,
+      now: added,
+      tvdbId: 371980,
+      imdbId: 'tt11280740',
+      year: 2022,
+      posterPath: '/severance.jpg',
+      genresCsv: 'Drama,Mystery',
+      runtimeMinutes: 47,
+      showStatus: 'Returning Series',
+      episodeCountTotal: 19,
+      rating: 9,
+      relinkFailed: true,
+    )).id;
 
     // ...and it is watched, so the derived columns are non-null too. Without a
     // watch, `lastWatchedSeason` stays null and an accidental export of it

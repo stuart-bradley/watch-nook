@@ -1,4 +1,3 @@
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +18,8 @@ import 'package:watch_nook/features/settings/data/export_share.dart';
 import 'package:watch_nook/features/settings/data/shared_preferences_provider.dart';
 import 'package:watch_nook/features/settings/data/theme_mode_provider.dart';
 import 'package:watch_nook/features/settings/presentation/settings_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// #35 / US-14 at the widget layer.
 ///
@@ -296,17 +297,7 @@ void main() {
 
     // Seed every surface: a tracked item, a watch event, and cached metadata.
     final at = DateTime(2026);
-    final id = await dao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Severance',
-        trackStatus: TrackStatus.watching,
-        addedAt: at,
-        updatedAt: at,
-        tmdbId: const Value(95396),
-      ),
-    );
+    final id = (await seed.seedShow(db, now: at)).id;
     await dao.markWatched(id, season: 1, episode: 1, watchedAt: at);
     await db.mediaCacheDao.upsertMedia(
       CachedMediaCompanion.insert(
@@ -354,17 +345,7 @@ void main() {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final dao = db.libraryDao;
-    await dao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Kept',
-        trackStatus: TrackStatus.watching,
-        addedAt: DateTime(2026),
-        updatedAt: DateTime(2026),
-        tmdbId: const Value(1),
-      ),
-    );
+    await seed.seedShow(db, title: 'Kept', tmdbId: 1);
     final prefs = await prefsWith({onboardingSeenKey: true});
     await tester.pumpWidget(
       ProviderScope(

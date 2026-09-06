@@ -8,6 +8,8 @@ import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/switch/backend_switch_service.dart';
 
+import '../../../support/library_fixtures.dart' as seed;
+
 /// A fake `MetadataSource` for the new (TVDB) backend: only
 /// `resolveByExternalId` and `seasonEpisodes` matter to the switch service;
 /// everything else throws if the service ever calls down the wrong path.
@@ -63,18 +65,13 @@ void main() {
     String title = 'Severance',
     int tmdbId = 95396,
     String? imdbId = 'tt11280740',
-  }) => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.tv,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: title,
-      trackStatus: TrackStatus.watching,
-      addedAt: now,
-      updatedAt: now,
-      tmdbId: Value(tmdbId),
-      imdbId: Value(imdbId),
-    ),
-  );
+  }) async => (await seed.seedShow(
+    db,
+    title: title,
+    tmdbId: tmdbId,
+    imdbId: imdbId,
+    now: now,
+  )).id;
 
   Future<void> watch(int itemId, int season, int episode) => db
       .into(db.watchEvents)
@@ -174,18 +171,13 @@ void main() {
     });
 
     test('a movie relinks with no episode reconciliation', () async {
-      final id = await db.libraryDao.insertItem(
-        LibraryItemsCompanion.insert(
-          mediaType: MediaType.movie,
-          recordedSource: MetadataSourceKind.tmdb,
-          title: 'EEAAO',
-          trackStatus: TrackStatus.completed,
-          addedAt: now,
-          updatedAt: now,
-          tmdbId: const Value(545611),
-          imdbId: const Value('tt6710474'),
-        ),
-      );
+      final id = (await seed.seedMovie(
+        db,
+        title: 'EEAAO',
+        tmdbId: 545611,
+        imdbId: 'tt6710474',
+        now: now,
+      )).id;
       await db
           .into(db.watchEvents)
           .insert(
@@ -210,17 +202,14 @@ void main() {
     });
 
     test('a row already on the new backend is skipped untouched', () async {
-      final id = await db.libraryDao.insertItem(
-        LibraryItemsCompanion.insert(
-          mediaType: MediaType.tv,
-          recordedSource: MetadataSourceKind.tvdb,
-          title: 'Already TVDB',
-          trackStatus: TrackStatus.watching,
-          addedAt: now,
-          updatedAt: now,
-          tvdbId: const Value(1),
-        ),
-      );
+      final id = (await seed.seedShow(
+        db,
+        title: 'Already TVDB',
+        source: MetadataSourceKind.tvdb,
+        tmdbId: null,
+        tvdbId: 1,
+        now: now,
+      )).id;
 
       final report = await service(_FakeTvdb()).switchAll();
 

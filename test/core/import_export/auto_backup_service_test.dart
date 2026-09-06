@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
@@ -9,6 +8,8 @@ import 'package:watch_nook/core/database/library_dao.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/import_export/export/auto_backup_service.dart';
 import 'package:watch_nook/core/import_export/export/import_export_service.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// Fails the way a serializer fails: after the caller committed to backing up,
 /// before a single byte is on disk.
@@ -56,22 +57,18 @@ void main() {
   });
 
   var nextTmdbId = 693134;
-  Future<int> seed({String title = 'Dune'}) => dao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.movie,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: title,
-      trackStatus: TrackStatus.completed,
-      addedAt: added,
-      updatedAt: added,
-      tmdbId: Value(nextTmdbId++), // unique: (source, tmdbId) is constrained
-    ),
-  );
+  Future<int> seedItem({String title = 'Dune'}) async => (await seed.seedMovie(
+    db,
+    title: title,
+    now: added,
+    // unique: (source, tmdbId) is constrained
+    tmdbId: nextTmdbId++,
+  )).id;
 
   List<FileSystemEntity> contents() => dir.listSync();
 
   test('restores a fresh install from the backup file', () async {
-    await seed(title: 'Arrival');
+    await seedItem(title: 'Arrival');
     await dao.markWatched(await dao.getAll().then((i) => i.first.id));
     await backup.snapshot();
 
@@ -87,11 +84,11 @@ void main() {
   });
 
   test('never wipes a non-empty library', () async {
-    await seed(title: 'Backed up');
+    await seedItem(title: 'Backed up');
     await backup.snapshot();
 
     await dao.deleteAllUserData();
-    await seed(title: 'Already here');
+    await seedItem(title: 'Already here');
 
     expect(await backup.restoreIfEmpty(), isFalse);
     expect((await dao.getAll()).single.title, 'Already here');
@@ -103,7 +100,7 @@ void main() {
   });
 
   test('a failed snapshot leaves the previous backup byte-identical', () async {
-    await seed(title: 'Good');
+    await seedItem(title: 'Good');
     await backup.snapshot();
     final before = await backup.file.readAsString();
 
@@ -120,7 +117,7 @@ void main() {
   });
 
   test('a snapshot publishes exactly one file, and it parses', () async {
-    await seed();
+    await seedItem();
     await backup.snapshot();
 
     expect(contents().map((e) => e.path), [backup.file.path]);
@@ -129,7 +126,7 @@ void main() {
   });
 
   test('concurrent snapshots coalesce, and the latch releases', () async {
-    await seed();
+    await seedItem();
     final counting = _CountingService(dao);
     final coalescing = AutoBackupService(
       service: counting,
@@ -145,7 +142,7 @@ void main() {
     // The in-flight future MUST be nulled on completion. Leave it set and every
     // later snapshot() returns the already-completed future — backups stop
     // forever, silently. Only an independent, later call can see that.
-    await seed(title: 'Added after the first flight');
+    await seedItem(title: 'Added after the first flight');
     await coalescing.snapshot();
     expect(counting.calls, 2);
     expect(
@@ -176,7 +173,7 @@ void main() {
       expect(await backup.restoreIfEmpty(), isFalse);
 
       // And the service is not poisoned — the next backup still lands.
-      await seed();
+      await seedItem();
       await backup.snapshot();
       expect(await backup.file.readAsString(), contains('Dune'));
     },
@@ -185,7 +182,7 @@ void main() {
   test(
     'deleteBackup removes the snapshot so a wipe is not re-restored',
     () async {
-      await seed(title: 'Wiped');
+      await seedItem(title: 'Wiped');
       await backup.snapshot();
       expect(backup.file.existsSync(), isTrue);
 
@@ -208,7 +205,7 @@ void main() {
   });
 
   test('restore never resurrects the disposable cache', () async {
-    await seed();
+    await seedItem();
     await db
         .into(db.cachedMedia)
         .insert(

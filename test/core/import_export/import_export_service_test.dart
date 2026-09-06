@@ -1,13 +1,14 @@
 import 'dart:convert';
 
 import 'package:clock/clock.dart';
-import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/import_export/export/import_export_service.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 void main() {
   late AppDatabase db;
@@ -26,39 +27,29 @@ void main() {
   final added = DateTime(2026, 3, 4, 5, 6, 7);
   final watched = DateTime(2026, 3, 5, 20);
 
-  Future<int> seedMovie() => dao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.movie,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: 'Dune, Part Two "Extended"',
-      trackStatus: TrackStatus.completed,
-      addedAt: added,
-      updatedAt: added,
-      tmdbId: const Value(693134),
-      imdbId: const Value('tt15239678'),
-      year: const Value(2024),
-      posterPath: const Value('/dune.jpg'),
-      genresCsv: const Value('Science Fiction,Adventure'),
-      runtimeMinutes: const Value(166),
-      rating: const Value(9),
-      ratedAt: Value(added),
-    ),
-  );
+  Future<int> seedMovie() async => (await seed.seedMovie(
+    db,
+    title: 'Dune, Part Two "Extended"',
+    now: added,
+    tmdbId: 693134,
+    imdbId: 'tt15239678',
+    year: 2024,
+    posterPath: '/dune.jpg',
+    genresCsv: 'Science Fiction,Adventure',
+    runtimeMinutes: 166,
+    rating: 9,
+  )).id;
 
-  Future<int> seedShow() => dao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.tv,
-      recordedSource: MetadataSourceKind.tvdb,
-      title: 'Severance',
-      trackStatus: TrackStatus.watching,
-      addedAt: added,
-      updatedAt: added,
-      tvdbId: const Value(371980),
-      showStatus: const Value('Returning Series'),
-      episodeCountTotal: const Value(19),
-      relinkFailed: const Value(true),
-    ),
-  );
+  Future<int> seedShow() async => (await seed.seedShow(
+    db,
+    source: MetadataSourceKind.tvdb,
+    tmdbId: null,
+    tvdbId: 371980,
+    now: added,
+    showStatus: 'Returning Series',
+    episodeCountTotal: 19,
+    relinkFailed: true,
+  )).id;
 
   /// A minimal item document that restores cleanly, before [overrides] /
   /// [remove] make it adversarial.

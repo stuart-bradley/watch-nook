@@ -43,6 +43,7 @@ Future<LibraryItem> seedShow(
   String? showStatus,
   int? episodeCountTotal,
   int? rating,
+  bool relinkFailed = false,
   DateTime? now,
   List<(int season, int episode)> watched = const [],
 }) => _seed(
@@ -61,6 +62,7 @@ Future<LibraryItem> seedShow(
   showStatus: showStatus,
   episodeCountTotal: episodeCountTotal,
   rating: rating,
+  relinkFailed: relinkFailed,
   now: now,
   watched: watched,
 );
@@ -82,6 +84,7 @@ Future<LibraryItem> seedMovie(
   String? genresCsv,
   int? runtimeMinutes,
   int? rating,
+  bool relinkFailed = false,
   DateTime? now,
   bool watched = false,
 }) => _seed(
@@ -98,6 +101,7 @@ Future<LibraryItem> seedMovie(
   genresCsv: genresCsv,
   runtimeMinutes: runtimeMinutes,
   rating: rating,
+  relinkFailed: relinkFailed,
   now: now,
   watched: watched ? const [(null, null)] : const [],
 );
@@ -118,6 +122,7 @@ Future<LibraryItem> _seed(
   required int? rating,
   required DateTime? now,
   required List<(int?, int?)> watched,
+  bool relinkFailed = false,
   String? showStatus,
   int? episodeCountTotal,
 }) async {
@@ -141,6 +146,7 @@ Future<LibraryItem> _seed(
       runtimeMinutes: Value(runtimeMinutes),
       showStatus: Value(showStatus),
       episodeCountTotal: Value(episodeCountTotal),
+      relinkFailed: Value(relinkFailed),
     ),
   );
 
@@ -181,13 +187,15 @@ Future<int> seedRawWatch(
   DateTime? watchedAt,
   int? runtimeMinutes,
   bool isRewatch = false,
-}) => db.into(db.watchEvents).insert(
-  WatchEventsCompanion.insert(
-    libraryItemId: itemId,
-    seasonNumber: Value(season),
-    episodeNumber: Value(episode),
-    watchedAt: Value(watchedAt),
-    runtimeMinutes: Value(runtimeMinutes),
-    isRewatch: Value(isRewatch),
-  ),
-);
+}) => db
+    .into(db.watchEvents)
+    .insert(
+      WatchEventsCompanion.insert(
+        libraryItemId: itemId,
+        seasonNumber: Value(season),
+        episodeNumber: Value(episode),
+        watchedAt: Value(watchedAt),
+        runtimeMinutes: Value(runtimeMinutes),
+        isRewatch: Value(isRewatch),
+      ),
+    );
