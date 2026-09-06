@@ -227,11 +227,14 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   ///
   /// **Deliberately does not stamp `updatedAt`** — unlike the watch writes,
   /// which always do. Whether a patch counts as "the user touched this title"
-  /// is the caller's call, and the two callers legitimately disagree: a relink
-  /// is a real modification and stamps by hand, while the daily metadata sync
-  /// refreshes every tracked show and must NOT, or the grid's
-  /// most-recently-updated order would be rewritten wholesale once a day and
-  /// mean nothing. Auto-stamping here would silently break that.
+  /// is the caller's call, and the callers legitimately disagree: the backend
+  /// relink is a real modification and stamps by hand, while the import merge
+  /// (`MergeApplier`, filling null columns) does not.
+  ///
+  /// The same applies to [updateManyItems], whose one caller is the daily
+  /// tracked-show sync: auto-stamping there would rewrite every tracked show's
+  /// recency once a day and leave the grid's most-recently-updated order
+  /// meaning nothing.
   Future<void> updateItem(int id, LibraryItemsCompanion patch) =>
       (update(libraryItems)..where((t) => t.id.equals(id))).write(patch);
 
