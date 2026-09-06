@@ -37,7 +37,5 @@ secrets.json
 .DS_Store
 
 # Local agent/dev-tooling scratch (not part of the app)
-.autopilot/
-.autopilot.json
-/MORNING.md
-/STOP
+# /mattpocock-skills:to-tickets writes tickets here; tracker is local markdown.
+.scratch/
