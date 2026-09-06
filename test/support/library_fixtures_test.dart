@@ -108,4 +108,16 @@ void main() {
       expect((await db.libraryDao.getItem(id))!.watchedCount, 0);
     },
   );
+
+  test('a seeded stamp survives the watch writes', () async {
+    // The watch writes stamp `updatedAt` from the ambient clock, so a fixture
+    // that did not pin it would store today's date and quietly make every
+    // recency assertion depend on the machine's clock.
+    final asked = DateTime(2020, 5, 5);
+
+    final show = await seedShow(db, now: asked, watched: const [(1, 1)]);
+
+    expect(show.updatedAt, asked);
+    expect(show.addedAt, asked);
+  });
 }

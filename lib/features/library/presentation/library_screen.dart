@@ -328,8 +328,3 @@ class _Card extends ConsumerWidget {
     );
   }
 }
-
-/// Poster art — offline-safe. A null path (or an image not yet cached) shows a
-/// placeholder and never touches the network; only a non-null path reads the
-/// active source for its URL, so the grid renders with no source provider in
-/// tests.

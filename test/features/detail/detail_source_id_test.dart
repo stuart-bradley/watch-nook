@@ -14,6 +14,7 @@ import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
+import 'package:watch_nook/core/widgets/remote_image.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
 
@@ -134,6 +135,17 @@ void main() {
       find.text('Severance'),
       findsWidgets,
       reason: 'the stored row still renders — degrading, not blanking',
+    );
+    // Stored *progress* has no surface on this screen — the per-episode
+    // toggles need the fetched season listing, and the grid caption is where
+    // the denormalized columns are rendered (covered by the library tests).
+    // What must hold here is that nothing blanks and nothing is fetched.
+    expect(
+      find.byType(RemoteImage),
+      findsWidgets,
+      reason:
+          'artwork still renders — through the module, which shows its '
+          'placeholder rather than resolving a URL against the wrong backend',
     );
   });
 }

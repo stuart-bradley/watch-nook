@@ -100,6 +100,15 @@ void main() {
     expect(find.text('Relink your library'), findsNothing);
   });
 
+  testWidgets('nothing relinks until the user asks', (tester) async {
+    // The other half of the policy, and the half that is easy to lose: a
+    // backend flip is a remote config edit the user never saw, so merely
+    // opening Settings with stranded rows must rewrite nothing.
+    await pump(tester, stranded: 5);
+
+    expect(relink.calls, 0);
+  });
+
   testWidgets('the offer names how many titles are stranded', (tester) async {
     await pump(tester, stranded: 3);
 

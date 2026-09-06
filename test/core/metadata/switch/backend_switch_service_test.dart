@@ -73,15 +73,8 @@ void main() {
     now: now,
   )).id;
 
-  Future<void> watch(int itemId, int season, int episode) => db
-      .into(db.watchEvents)
-      .insert(
-        WatchEventsCompanion.insert(
-          libraryItemId: itemId,
-          seasonNumber: Value(season),
-          episodeNumber: Value(episode),
-        ),
-      );
+  Future<void> watch(int itemId, int season, int episode) =>
+      db.libraryDao.markWatched(itemId, season: season, episode: episode);
 
   MediaSearchResult tvdbHit(int tvdbId) => MediaSearchResult(
     kind: MediaKind.tv,
@@ -178,11 +171,8 @@ void main() {
         imdbId: 'tt6710474',
         now: now,
       )).id;
-      await db
-          .into(db.watchEvents)
-          .insert(
-            WatchEventsCompanion.insert(libraryItemId: id),
-          );
+      // A movie's watched coordinate is (null, null).
+      await db.libraryDao.markWatched(id);
 
       await service(
         _FakeTvdb(

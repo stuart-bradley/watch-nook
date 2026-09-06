@@ -177,6 +177,3 @@ Future<void> _openTitle(
     unawaited(context.push('/title/${existing.id}'));
   }
 }
-
-/// Poster thumbnail — offline-safe via the shared [PosterCacheManager], with a
-/// placeholder when there's no artwork or it hasn't been cached yet.

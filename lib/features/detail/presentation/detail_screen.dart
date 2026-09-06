@@ -233,8 +233,6 @@ class _Body extends ConsumerWidget {
   }
 }
 
-/// 16:9 backdrop. Offline-safe: a null path (or an uncached image) shows a
-/// placeholder and never blocks the screen.
 /// Title + a "2022 · TV · Returning Series" caption. Falls back to the stored
 /// row (or the search hit) when details haven't loaded, so it renders offline.
 ///

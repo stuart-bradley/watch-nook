@@ -392,5 +392,3 @@ class _QueueTile extends ConsumerWidget {
     );
   }
 }
-
-/// Show thumbnail — the same offline-safe poster the search + import rows use.

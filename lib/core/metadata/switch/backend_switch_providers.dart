@@ -1,4 +1,3 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
@@ -16,19 +15,17 @@ part 'backend_switch_providers.g.dart';
 /// are meaningless to the active catalogue, so nothing may fetch for them until
 /// they are relinked.
 ///
-/// A **one-shot** read, not a `.watch()` stream, and `autoDispose` so it is
-/// recomputed each time Settings is opened. The count only moves on a relink or
-/// an import, so live-ness buys nothing — and a live Drift stream never
-/// quiesces under `flutter_test` fake-async, which would hang `pumpAndSettle`
-/// in every widget test that mounts this screen (the CLAUDE.md hazard).
-final FutureProvider<int> backendMismatchCountProvider =
-    FutureProvider.autoDispose<int>((ref) async {
-      final active = metadataSourceKindOf(
-        ref.watch(activeMetadataBackendProvider),
-      );
-      final rows = await ref.watch(libraryDaoProvider).getAll();
-      return rows.where((r) => r.recordedSource != active).length;
-    });
+/// A **one-shot** read, not a `.watch()` stream: the count only moves on a
+/// relink or an import, so live-ness buys nothing — and a live Drift stream
+/// never quiesces under `flutter_test` fake-async, which would hang
+/// `pumpAndSettle` in every widget test that mounts Settings (the CLAUDE.md
+/// hazard). Auto-disposed, so it is recomputed each time Settings is opened.
+@riverpod
+Future<int> backendMismatchCount(Ref ref) async {
+  final active = metadataSourceKindOf(ref.watch(activeMetadataBackendProvider));
+  final rows = await ref.watch(libraryDaoProvider).getAll();
+  return rows.where((r) => r.recordedSource != active).length;
+}
 
 /// The relink service, pointed at the **active** backend.
 ///

@@ -372,5 +372,3 @@ class _Centered extends StatelessWidget {
     ),
   );
 }
-
-/// Candidate thumbnail — the same offline-safe poster the search results use.

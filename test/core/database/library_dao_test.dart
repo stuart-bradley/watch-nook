@@ -772,7 +772,16 @@ void main() {
     });
 
     test('un-marking lifts its title to the top', () async {
-      await db.libraryDao.markWatched(stale, season: 1, episode: 1);
+      // The setup mark is pinned BEFORE Fresh: left on the ambient clock it
+      // would stamp today, putting Stale on top before `unwatch` ran at all —
+      // and the assertion would pass with `unwatch`'s stamp deleted. Verified
+      // by deleting it and watching this go red.
+      await at(
+        DateTime(2026, 2),
+        () => db.libraryDao.markWatched(stale, season: 1, episode: 1),
+      );
+      expect(await titles(), ['Fresh', 'Stale']);
+
       await at(
         DateTime(2026, 12),
         () => db.libraryDao.unwatch(stale, season: 1, episode: 1),

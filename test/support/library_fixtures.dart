@@ -1,3 +1,4 @@
+import 'package:clock/clock.dart';
 import 'package:drift/drift.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
@@ -150,19 +151,26 @@ Future<LibraryItem> _seed(
     ),
   );
 
-  for (final (season, episode) in watched) {
-    await dao.markWatched(
-      item.id,
-      season: season,
-      episode: episode,
-      watchedAt: stamp,
-      // Faithful to the two production mark sites: a movie snapshots its own
-      // runtime (detail_screen), an episode snapshots the *episode's* runtime,
-      // which a fixture has no business inventing from the show average.
-      runtimeMinutes: mediaType == MediaType.movie ? runtimeMinutes : null,
-    );
-  }
-  if (rating != null) await dao.updateRating(item.id, rating, now: stamp);
+  // Pinned to [stamp], not wall-clock: the watch writes stamp `updatedAt` from
+  // `clock.now()`, so without this a fixture asked for a 2020 timestamp would
+  // silently store today's — and every recency assertion seeded through here
+  // would be testing the machine's clock.
+  await withClock(Clock.fixed(stamp), () async {
+    for (final (season, episode) in watched) {
+      await dao.markWatched(
+        item.id,
+        season: season,
+        episode: episode,
+        watchedAt: stamp,
+        // Faithful to the two production mark sites: a movie snapshots its own
+        // runtime (detail_screen), an episode snapshots the *episode's*
+        // runtime, which a fixture has no business inventing from the show
+        // average.
+        runtimeMinutes: mediaType == MediaType.movie ? runtimeMinutes : null,
+      );
+    }
+    if (rating != null) await dao.updateRating(item.id, rating, now: stamp);
+  });
 
   return (await dao.getItem(item.id))!;
 }
