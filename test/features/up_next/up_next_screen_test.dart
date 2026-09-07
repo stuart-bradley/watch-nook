@@ -52,7 +52,7 @@ void main() {
   }) => (
     itemId: itemId,
     showTitle: show,
-    posterPath: null, // null → placeholder, so the poster never hits network
+    poster: null, // null → placeholder, so the poster never hits network
     season: season,
     episode: episode,
   );
@@ -67,7 +67,7 @@ void main() {
   }) => (
     itemId: itemId,
     showTitle: show,
-    posterPath: null,
+    poster: null,
     season: season,
     episode: episode,
     episodeTitle: title,

@@ -100,3 +100,48 @@ extension MediaSearchResultSourceRef on MediaSearchResult {
     return id == null ? null : SourceRef(active, id);
   }
 }
+
+/// An artwork path **together with the backend that minted it**.
+///
+/// The same hazard as [SourceRef], one layer out. A poster path is
+/// backend-relative and only the source that produced it knows how to turn it
+/// into a URL — TMDB maps `/abc.jpg` onto its own size buckets, TheTVDB stores
+/// absolute URLs. Handing TMDB a TheTVDB path builds a URL that either 404s
+/// or, worse, resolves to an unrelated image.
+///
+/// Relinking after a backend switch rewrites ids and `recordedSource` but NOT
+/// the stored `posterPath`, and the periodic sync only heals TV rows — so a
+/// movie's poster never recovers on its own. Pairing the path with its backend
+/// is what lets a renderer notice and fall back to the placeholder.
+@immutable
+final class ArtworkRef {
+  const ArtworkRef(this.kind, this.path);
+
+  /// The backend that minted [path].
+  final MetadataSourceKind kind;
+
+  /// The backend-relative artwork path.
+  final String path;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ArtworkRef && other.kind == kind && other.path == path;
+
+  @override
+  int get hashCode => Object.hash(kind, path);
+
+  @override
+  String toString() => 'ArtworkRef(${kind.name}:$path)';
+}
+
+/// Builds the artwork reference for a stored row.
+extension LibraryItemArtwork on LibraryItem {
+  /// This row's poster, tagged with the backend that stored it — null when the
+  /// row has no artwork. Unlike ids, artwork is NOT filtered to the active
+  /// backend here: the grid renders every row, and it is the renderer that
+  /// decides a foreign path shows a placeholder.
+  ArtworkRef? get posterRef {
+    final path = posterPath;
+    return path == null ? null : ArtworkRef(recordedSource, path);
+  }
+}

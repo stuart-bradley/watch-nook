@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/import_export/import/merge_applier.dart';
 import 'package:watch_nook/core/import_export/import/resolver.dart';
+import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/widgets/remote_image.dart';
 import 'package:watch_nook/features/import/data/import_providers.dart';
 import 'package:watch_nook/features/import/domain/import_state.dart';
@@ -262,7 +265,10 @@ class _CandidateTile extends ConsumerWidget {
     final country = candidate.originCountry.join('/');
     return ListTile(
       selected: selected,
-      leading: RemoteImage.thumbnail(path: candidate.posterPath),
+      // Same as search: a candidate was just resolved by the active source.
+      leading: RemoteImage.thumbnail(
+        artwork: _poster(candidate, ref.watch(activeMetadataKindProvider)),
+      ),
       title: Text(
         candidate.title,
         maxLines: 1,
@@ -371,4 +377,10 @@ class _Centered extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// A resolved candidate's poster, tagged with the backend that produced it.
+ArtworkRef? _poster(MediaSearchResult candidate, MetadataSourceKind kind) {
+  final path = candidate.posterPath;
+  return path == null ? null : ArtworkRef(kind, path);
 }

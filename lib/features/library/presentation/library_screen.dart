@@ -7,6 +7,7 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/core/widgets/remote_image.dart';
@@ -301,7 +302,11 @@ class _Card extends ConsumerWidget {
             child: ClipRRect(
               borderRadius: WatchnookRadii.poster,
               child: RemoteImage.card(
-                path: item.posterPath,
+                // The row's OWN backend, not the active one: the grid renders
+                // every row, including ones stranded by a backend switch, and
+                // a stranded poster must show the placeholder rather than a
+                // path resolved through a catalogue that never minted it.
+                artwork: item.posterRef,
                 // The card is the one place the type isn't already spelled out
                 // in a subtitle, so the placeholder carries the badge.
                 tag: item.mediaType == MediaType.movie ? 'Film' : 'TV',

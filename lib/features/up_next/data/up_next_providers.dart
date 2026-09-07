@@ -17,7 +17,7 @@ part 'up_next_providers.g.dart';
 typedef QueueEntry = ({
   int itemId,
   String showTitle,
-  String? posterPath,
+  ArtworkRef? poster,
   int season,
   int episode,
 });
@@ -32,7 +32,7 @@ typedef QueueEntry = ({
 typedef UpcomingEntry = ({
   int itemId,
   String showTitle,
-  String? posterPath,
+  ArtworkRef? poster,
   int season,
   int episode,
   String? episodeTitle,
@@ -202,7 +202,7 @@ UpcomingEntry? upcomingFor(
   return (
     itemId: item.id,
     showTitle: item.title,
-    posterPath: item.posterPath,
+    poster: item.posterRef,
     season: next.seasonNumber,
     episode: next.episodeNumber,
     episodeTitle: next.title,
@@ -329,7 +329,7 @@ Future<UpNextBoard> upNextBoard(Ref ref) async {
       queue.add((
         itemId: item.id,
         showTitle: item.title,
-        posterPath: item.posterPath,
+        poster: item.posterRef,
         season: next.$1,
         episode: next.$2,
       ));

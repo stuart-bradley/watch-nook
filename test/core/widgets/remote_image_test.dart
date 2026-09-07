@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/widgets/poster_placeholder.dart';
 import 'package:watch_nook/core/widgets/remote_image.dart';
 
@@ -24,6 +26,9 @@ class _SpySource implements MetadataSource {
   dynamic noSuchMethod(Invocation i) => throw UnimplementedError();
 }
 
+/// A path this test's active source (TMDB) really did mint.
+ArtworkRef _tmdb(String path) => ArtworkRef(MetadataSourceKind.tmdb, path);
+
 void main() {
   setUpAll(() => GoogleFonts.config.allowRuntimeFetching = false);
 
@@ -34,7 +39,12 @@ void main() {
   Future<void> pump(WidgetTester tester, Widget child) async {
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [activeMetadataSourceProvider.overrideWithValue(source)],
+        overrides: [
+          activeMetadataSourceProvider.overrideWithValue(source),
+          activeMetadataKindProvider.overrideWithValue(
+            MetadataSourceKind.tmdb,
+          ),
+        ],
         child: MaterialApp(home: Scaffold(body: child)),
       ),
     );
@@ -44,7 +54,7 @@ void main() {
   testWidgets('a null path renders a placeholder and asks for no URL', (
     tester,
   ) async {
-    await pump(tester, const RemoteImage.thumbnail(path: null));
+    await pump(tester, const RemoteImage.thumbnail(artwork: null));
 
     expect(find.byType(PosterPlaceholder), findsOneWidget);
     expect(
@@ -55,7 +65,7 @@ void main() {
   });
 
   testWidgets('a null card path still carries its type badge', (tester) async {
-    await pump(tester, const RemoteImage.card(path: null, tag: 'Film'));
+    await pump(tester, const RemoteImage.card(artwork: null, tag: 'Film'));
 
     expect(find.text('Film'), findsOneWidget);
     expect(source.asked, isEmpty);
@@ -64,7 +74,7 @@ void main() {
   testWidgets('a null backdrop path renders 16:9 and asks for no URL', (
     tester,
   ) async {
-    await pump(tester, const RemoteImage.backdrop(path: null));
+    await pump(tester, const RemoteImage.backdrop(artwork: null));
 
     expect(find.byType(AspectRatio), findsOneWidget);
     expect(source.asked, isEmpty);
@@ -73,16 +83,47 @@ void main() {
   testWidgets('each shape asks the active source for its own image size', (
     tester,
   ) async {
-    await pump(tester, const RemoteImage.thumbnail(path: '/a.jpg'));
+    await pump(tester, RemoteImage.thumbnail(artwork: _tmdb('/a.jpg')));
     expect(source.asked.single, ('/a.jpg', ImageSize.small));
 
     source.asked.clear();
-    await pump(tester, const RemoteImage.card(path: '/b.jpg', tag: 'TV'));
+    await pump(
+      tester,
+      RemoteImage.card(artwork: _tmdb('/b.jpg'), tag: 'TV'),
+    );
     expect(source.asked.single, ('/b.jpg', ImageSize.medium));
 
     source.asked.clear();
-    await pump(tester, const RemoteImage.backdrop(path: '/c.jpg'));
+    await pump(tester, RemoteImage.backdrop(artwork: _tmdb('/c.jpg')));
     expect(source.asked.single, ('/c.jpg', ImageSize.large));
+  });
+
+  testWidgets('a poster from the other backend renders the placeholder', (
+    tester,
+  ) async {
+    // The stranded row. ADR-2 flips the backend remotely, and a relink rewrites
+    // ids and `recordedSource` but NOT `posterPath` — and the periodic sync
+    // only heals TV rows, so a movie's poster stays stranded indefinitely.
+    // Resolved through the active source this path builds a URL that 404s, or
+    // loads an unrelated image. Proved to fail first: without the kind check
+    // in RemoteImage the source is asked, and it is asked with a path from a
+    // catalogue that never minted it.
+    await pump(
+      tester,
+      const RemoteImage.card(
+        artwork: ArtworkRef(MetadataSourceKind.tvdb, 'https://tvdb/x.jpg'),
+        tag: 'Film',
+      ),
+    );
+
+    expect(find.byType(PosterPlaceholder), findsOneWidget);
+    expect(
+      source.asked,
+      isEmpty,
+      reason:
+          'the active source must never be asked to resolve a path it '
+          'did not mint',
+    );
   });
 
   test('the thumbnail box is defined once, at the poster aspect', () {

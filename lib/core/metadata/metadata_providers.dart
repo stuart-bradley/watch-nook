@@ -56,6 +56,17 @@ CachingMetadataRepository metadataRepository(Ref ref) {
   );
 }
 
+/// The active backend as the DB's per-row [MetadataSourceKind] — the value a
+/// stored row's `recordedSource` must match for its ids and artwork to mean
+/// anything (see `SourceRef` / `ArtworkRef`).
+///
+/// One provider rather than `metadataSourceKindOf(watch(...))` repeated at
+/// every widget that needs to ask "did this row come from the backend we are
+/// on now?".
+@riverpod
+MetadataSourceKind activeMetadataKind(Ref ref) =>
+    metadataSourceKindOf(ref.watch(activeMetadataBackendProvider));
+
 /// Bridges the config's [MetadataBackend] to the DB's per-row
 /// [MetadataSourceKind] (stamped onto `LibraryItems.recordedSource`).
 MetadataSourceKind metadataSourceKindOf(MetadataBackend backend) =>

@@ -329,7 +329,7 @@ class _UpcomingTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return ListTile(
-      leading: RemoteImage.thumbnail(path: entry.posterPath),
+      leading: RemoteImage.thumbnail(artwork: entry.poster),
       title: Text(entry.showTitle),
       subtitle: Text(
         episodeLabel(entry.season, entry.episode, entry.episodeTitle),
@@ -354,7 +354,7 @@ class _QueueTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final label = 'Next: ${episodeLabel(entry.season, entry.episode)}';
     return ListTile(
-      leading: RemoteImage.thumbnail(path: entry.posterPath),
+      leading: RemoteImage.thumbnail(artwork: entry.poster),
       title: Text(entry.showTitle),
       // When the show advances to its next episode the row stays put and only
       // this coordinate changes — cross-fade it. Keyed by the label so an

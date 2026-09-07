@@ -137,7 +137,7 @@ class _Body extends ConsumerWidget {
 
     return ListView(
       children: [
-        RemoteImage.backdrop(path: details?.backdropPath),
+        RemoteImage.backdrop(artwork: _backdrop(details, activeKind)),
         if (coldCache && async.isLoading) const LinearProgressIndicator(),
         Padding(
           padding: const EdgeInsets.all(WatchnookSpacing.screen),
@@ -808,3 +808,11 @@ String _isoDate(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-'
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
+
+/// The detail backdrop, tagged with the backend that fetched it. Details only
+/// ever come from the active source (a stranded row fetches nothing at all),
+/// so this is that backend by construction.
+ArtworkRef? _backdrop(MediaDetails? details, MetadataSourceKind kind) {
+  final path = details?.backdropPath;
+  return path == null ? null : ArtworkRef(kind, path);
+}

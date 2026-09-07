@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/core/widgets/remote_image.dart';
@@ -105,8 +107,11 @@ class _ResultTile extends ConsumerWidget {
     // Already tracked? Then say so on the row, rather than making the user tap
     // each hit to find out which of the six "Severance"s is the one they have.
     final tracked = ref.watch(trackedItemProvider(identityOf(result))).value;
+    final activeKind = ref.watch(activeMetadataKindProvider);
     return ListTile(
-      leading: RemoteImage.thumbnail(path: result.posterPath),
+      // A hit comes from whichever source is active right now, so its poster
+      // is tagged with that backend.
+      leading: RemoteImage.thumbnail(artwork: _poster(result, activeKind)),
       title: Text(
         result.title,
         maxLines: 1,
@@ -176,4 +181,10 @@ Future<void> _openTitle(
   } else {
     unawaited(context.push('/title/${existing.id}'));
   }
+}
+
+/// A search hit's poster, tagged with the backend that just produced it.
+ArtworkRef? _poster(MediaSearchResult result, MetadataSourceKind kind) {
+  final path = result.posterPath;
+  return path == null ? null : ArtworkRef(kind, path);
 }
