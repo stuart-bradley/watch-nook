@@ -18,6 +18,7 @@ import 'package:watch_nook/core/widgets/track_status_ui.dart';
 import 'package:watch_nook/features/detail/data/add_to_library.dart';
 import 'package:watch_nook/features/detail/data/bulk_mark.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
+import 'package:watch_nook/features/detail/data/detail_target.dart';
 
 /// Title detail (#18, US-6): backdrop, overview, the user's rating, the
 /// seasons→episodes list, and the per-source attribution footer.
@@ -93,24 +94,29 @@ class _Body extends ConsumerWidget {
     final entry = this.item;
     final result = this.result;
 
-    final mediaType = entry?.mediaType ?? mediaTypeOf(result!.kind);
-    // The reference to fetch details with. For a tracked row that's its own
-    // `recordedSource` id; for a preview it's the active backend's id off the
-    // hit — the same choice `addToLibrary` makes, so what you preview is what
-    // gets added. Null (render the stored row, fetch nothing) when the row has
-    // no id for its backend, or its backend is no longer the active one.
-    final activeKind = metadataSourceKindOf(
-      ref.watch(activeMetadataBackendProvider),
+    // Which title, from which backend, and is it tracked — answered once, by
+    // [detailTargetOf], rather than re-derived down the build method.
+    final activeKind = ref.watch(activeMetadataKindProvider);
+    final target = detailTargetOf(
+      item: entry,
+      result: result,
+      active: activeKind,
     );
-    final target = entry != null
-        ? entry.refFor(activeKind)
-        : result!.refFor(activeKind);
+    // The hit itself, when this is a preview — the only case with one.
+    final previewHit = switch (target) {
+      PreviewTitle(:final result) => result,
+      _ => null,
+    };
+    final mediaType = target.mediaType;
+    if (mediaType == null) return const _Notice("Couldn't open this title.");
 
-    // ponytail: conditional watch — a row with no id for its own backend has no
-    // details to fetch, so it renders from the stored columns alone.
-    final async = target == null
+    // A [StrandedTitle] or an id-less preview has no reference and so fetches
+    // nothing: it renders from what the row or the hit already carries.
+    // ponytail: conditional watch — no reference, no provider to watch.
+    final fetchRef = target.fetchRef;
+    final async = fetchRef == null
         ? null
-        : ref.watch(titleDetailsProvider(mediaType, target));
+        : ref.watch(titleDetailsProvider(mediaType, fetchRef));
     final details = async?.value;
     final coldCache = async != null && !async.hasValue;
     final seasons = details?.seasons ?? const <SeasonInfo>[];
@@ -122,18 +128,22 @@ class _Body extends ConsumerWidget {
     // become matchable once the details land. Re-resolve here with the enriched
     // identity — `identityOf` is the same builder `addToLibrary` uses, so the
     // two cannot disagree about whether this title is tracked.
-    final trackedId = result == null
-        ? null
-        : ref.watch(trackedItemProvider(identityOf(result, details))).value?.id;
+    final trackedId = switch (target) {
+      PreviewTitle(:final result) =>
+        ref.watch(trackedItemProvider(identityOf(result, details))).value?.id,
+      _ => null,
+    };
     // Re-read the resolved row through the **live** provider, not the one-shot
     // lookup above: from here on this is an ordinary tracked detail screen, and
     // its controls must repaint off the row like any other (a watch write
     // recomputes `watchedCount`).
-    final item =
-        entry ??
-        (trackedId == null
+    final item = switch (target) {
+      TrackedTitle(:final item) || StrandedTitle(:final item) => item,
+      _ =>
+        trackedId == null
             ? null
-            : ref.watch(libraryItemProvider(trackedId)).value);
+            : ref.watch(libraryItemProvider(trackedId)).value,
+    };
 
     return ListView(
       children: [
@@ -145,8 +155,8 @@ class _Body extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _Header(
-                title: details?.title ?? item?.title ?? result!.title,
-                year: details?.year ?? item?.year ?? result?.year,
+                title: details?.title ?? item?.title ?? previewHit?.title ?? '',
+                year: details?.year ?? item?.year ?? previewHit?.year,
                 mediaType: mediaType,
                 showStatus: details?.showStatus ?? item?.showStatus,
               ),
@@ -154,18 +164,18 @@ class _Body extends ConsumerWidget {
               // The one adaptive line: tracked titles get the controls that
               // manage them; an untracked one gets the single action that makes
               // it trackable.
-              if (item == null)
-                _AddButton(result: result!)
-              else
+              if (item case final tracked?)
                 Wrap(
                   spacing: WatchnookSpacing.sm,
                   runSpacing: WatchnookSpacing.sm,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    _StatusDropdown(item: item),
-                    _RatingRow(item: item),
+                    _StatusDropdown(item: tracked),
+                    _RatingRow(item: tracked),
                   ],
-                ),
+                )
+              else if (previewHit case final hit?)
+                _AddButton(result: hit),
               if (item != null && item.mediaType == MediaType.movie) ...[
                 const SizedBox(height: WatchnookSpacing.md),
                 _MovieWatchActions(item: item),
@@ -190,7 +200,7 @@ class _Body extends ConsumerWidget {
         // watched" is the *section action* for the list below it — it used to
         // sit up with the status control, where it read as the only thing you
         // could do with a title.
-        if (seasons.isNotEmpty)
+        if (fetchRef != null && seasons.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(
               WatchnookSpacing.screen,
@@ -216,19 +226,23 @@ class _Body extends ConsumerWidget {
                     icon: Icons.done_all,
                     label: 'Mark show watched',
                     itemId: item.id,
-                    showRef: target!,
+                    showRef: fetchRef,
                     seasons: _seasonNumbers(details!),
                   ),
               ],
             ),
           ),
-        for (final season in seasons)
-          _SeasonTile(
-            itemId: item?.id,
-            showRef: target!,
-            season: season,
-            allSeasons: _seasonNumbers(details!),
-          ),
+        // Seasons only exist once details have loaded, which cannot happen
+        // without a reference — so the guard is a formality the type system
+        // needs, not a case that occurs.
+        if (fetchRef != null)
+          for (final season in seasons)
+            _SeasonTile(
+              itemId: item?.id,
+              showRef: fetchRef,
+              season: season,
+              allSeasons: _seasonNumbers(details!),
+            ),
         // Attribution lives in Settings → About, not on every detail page.
       ],
     );
