@@ -37,6 +37,6 @@ Future<int> backendMismatchCount(Ref ref) async {
 @Riverpod(keepAlive: true)
 BackendSwitchService backendSwitchService(Ref ref) => BackendSwitchService(
   db: ref.watch(appDatabaseProvider),
-  newSource: ref.watch(activeMetadataSourceProvider),
+  newSource: ref.watch(metadataProvider),
   newKind: metadataSourceKindOf(ref.watch(activeMetadataBackendProvider)),
 );

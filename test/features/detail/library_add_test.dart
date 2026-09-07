@@ -2,7 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
@@ -57,12 +57,11 @@ void main() {
 
   /// The add goes through the SWR cache (not the bare source) so it warms the
   /// cache Up Next reads — see `up_next_after_add_test.dart`.
-  CachingMetadataRepository repoOver(_FakeSource source) =>
-      CachingMetadataRepository(
-        source: source,
-        sourceKind: source.kind,
-        dao: db.mediaCacheDao,
-      );
+  CachingMetadataSource repoOver(_FakeSource source) => CachingMetadataSource(
+    source: source,
+    sourceKind: source.kind,
+    dao: db.mediaCacheDao,
+  );
 
   const severance = MediaSearchResult(
     kind: MediaKind.tv,

@@ -12,5 +12,5 @@ part 'search_providers.g.dart';
 Future<List<MediaSearchResult>> searchResults(Ref ref, String query) async {
   final q = query.trim();
   if (q.isEmpty) return const [];
-  return ref.watch(activeMetadataSourceProvider).search(q);
+  return ref.watch(metadataProvider).search(q);
 }

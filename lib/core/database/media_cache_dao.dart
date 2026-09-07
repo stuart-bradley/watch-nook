@@ -6,7 +6,7 @@ part 'media_cache_dao.g.dart';
 
 /// Data access for the **disposable** metadata cache (`CachedMedia`,
 /// `CachedEpisodes`). Pure cache reads/writes — the stale-while-revalidate
-/// policy (TTL, refetch, error fallback) lives in `CachingMetadataRepository`,
+/// policy (TTL, refetch, error fallback) lives in `CachingMetadataSource`,
 /// which owns this DAO. See the cache-domain invariant in `tables.dart`.
 @DriftAccessor(tables: [CachedMedia, CachedEpisodes])
 class MediaCacheDao extends DatabaseAccessor<AppDatabase>

@@ -10,7 +10,7 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
@@ -127,8 +127,8 @@ void main() {
           appDatabaseProvider.overrideWithValue(db),
           activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(source),
-          metadataRepositoryProvider.overrideWithValue(
-            CachingMetadataRepository(
+          metadataProvider.overrideWithValue(
+            CachingMetadataSource(
               source: source,
               sourceKind: MetadataSourceKind.tmdb,
               dao: db.mediaCacheDao,

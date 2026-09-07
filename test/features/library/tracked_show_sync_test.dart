@@ -6,7 +6,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
@@ -18,17 +18,18 @@ import '../../support/library_fixtures.dart' as seed;
 /// (episode count, show status, poster) onto the library rows — the data the
 /// derived "Up to date" category and the progress labels depend on. It must be
 /// fault-tolerant: one offline show can't sink the whole pass.
-class _FakeRepo implements CachingMetadataRepository {
+class _FakeRepo implements CachingMetadataSource {
   _FakeRepo(this.byId);
 
   final Map<int, MediaDetails> byId;
   int calls = 0;
 
   @override
-  Stream<MediaDetails> showDetails(SourceRef ref) {
+  Future<MediaDetails> revalidatedShowDetails(SourceRef ref) async {
     calls++;
     final d = byId[ref.id];
-    return d == null ? Stream.error(StateError('offline')) : Stream.value(d);
+    if (d == null) throw StateError('offline');
+    return d;
   }
 
   @override
@@ -192,7 +193,7 @@ void main() {
       ),
     );
     final source = _FakeSource(details(total: 19, status: 'Returning Series'));
-    final repo = CachingMetadataRepository(
+    final repo = CachingMetadataSource(
       source: source,
       sourceKind: MetadataSourceKind.tmdb,
       dao: db.mediaCacheDao,

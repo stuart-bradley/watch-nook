@@ -7,7 +7,7 @@ import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
@@ -76,7 +76,7 @@ LibraryItem _item({
 /// A repository fake: [cachedShowDetails] returns the seeded details for the
 /// requested ids that it has. An id it lacks is simply omitted — the cold show
 /// the queue must SKIP rather than crash the whole list on.
-class _FakeRepo implements CachingMetadataRepository {
+class _FakeRepo implements CachingMetadataSource {
   _FakeRepo(this.byId);
 
   final Map<int, MediaDetails> byId;
@@ -97,7 +97,7 @@ ProviderContainer _containerOver(AppDatabase db, _FakeRepo repo) =>
       overrides: [
         appDatabaseProvider.overrideWithValue(db),
         activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
-        metadataRepositoryProvider.overrideWithValue(repo),
+        metadataProvider.overrideWithValue(repo),
       ],
     );
 

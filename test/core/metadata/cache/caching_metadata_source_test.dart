@@ -7,7 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/media_cache_dao.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_exception.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
@@ -31,6 +31,16 @@ class _FakeSource implements MetadataSource {
   int showCalls = 0;
   int movieCalls = 0;
   int episodeCalls = 0;
+  int searchCalls = 0;
+
+  @override
+  Future<List<MediaSearchResult>> search(
+    String query, {
+    MediaKind? kind,
+  }) async {
+    searchCalls++;
+    return const [];
+  }
 
   @override
   Future<MediaDetails> showDetails(SourceRef ref) async {
@@ -80,8 +90,8 @@ void main() {
   });
   tearDown(() => db.close());
 
-  CachingMetadataRepository repo(_FakeSource src, {required Duration age}) =>
-      CachingMetadataRepository(
+  CachingMetadataSource repo(_FakeSource src, {required Duration age}) =>
+      CachingMetadataSource(
         source: src,
         sourceKind: MetadataSourceKind.tmdb,
         dao: dao,
@@ -113,7 +123,7 @@ void main() {
   );
 
   // `status` drives the promoted `showStatus` COLUMN, which the TTL branch
-  // reads (not the payload) — see CachingMetadataRepository._ttl.
+  // reads (not the payload) — see CachingMetadataSource._ttl.
   Future<void> seedShow({
     required int id,
     required MediaDetails details,
@@ -153,7 +163,7 @@ void main() {
         .toList(),
   );
 
-  group('CachingMetadataRepository · foreign references', () {
+  group('CachingMetadataSource · foreign references', () {
     // The repo's own guard, not the wrapped source's. It has to be here and it
     // has to run BEFORE the cache read: every fetch below is wrapped in a
     // catch-all that keeps a stale cache alive on failure, so a guard left to
@@ -167,10 +177,11 @@ void main() {
       final src = _FakeSource()..show = showModel(title: 'Severance');
       final r = repo(src, age: Duration.zero);
 
-      await expectLater(r.showDetails(foreign), emitsError(isArgumentError));
-      await expectLater(r.movieDetails(foreign), emitsError(isArgumentError));
+      await expectLater(r.showDetails(foreign), throwsArgumentError);
+      await expectLater(r.movieDetails(foreign), throwsArgumentError);
+      await expectLater(r.seasonEpisodes(foreign, 1), throwsArgumentError);
       await expectLater(
-        r.seasonEpisodes(foreign, 1),
+        r.watchDetails(MediaType.tv, foreign),
         emitsError(isArgumentError),
       );
       expect(
@@ -187,19 +198,116 @@ void main() {
 
       await expectLater(
         repo(_FakeSource(), age: Duration.zero).showDetails(foreign),
-        emitsError(isArgumentError),
+        throwsArgumentError,
       );
     });
   });
 
-  group('CachingMetadataRepository · details SWR', () {
+  group('CachingMetadataSource · the interface over the cache', () {
+    test(
+      'a 404 on refresh keeps the cached value instead of throwing',
+      () async {
+        // The trap the add path used to work around by hand. A non-transient
+        // failure propagates AFTER the cached value has been emitted, so
+        // `Stream.last` would forward the error and throw away details it had
+        // already been handed — silently dropping the AD-3 snapshot and writing
+        // the row from thin search-hit fields. Proved by deleting the fallback
+        // in `_newest` and watching this go red.
+        await seedShow(id: 95396, details: showModel(title: 'Cached'));
+        final src = _FakeSource()
+          ..throwable = const MetadataException(404, 'gone');
+
+        final d = await repo(
+          src,
+          age: const Duration(days: 40),
+        ).showDetails(_ref(95396));
+
+        expect(d.title, 'Cached');
+        expect(src.showCalls, 1, reason: 'it did try to refresh');
+      },
+    );
+
+    test('a cold cache plus a failed fetch still throws', () async {
+      final src = _FakeSource()
+        ..throwable = const MetadataException(404, 'gone');
+
+      await expectLater(
+        repo(src, age: Duration.zero).showDetails(_ref(95396)),
+        throwsA(isA<MetadataException>()),
+        reason: 'there is nothing to fall back to',
+      );
+    });
+
+    test('it returns the revalidated value, not the stale one', () async {
+      await seedShow(id: 95396, details: showModel(title: 'Stale'));
+      final src = _FakeSource()..show = showModel(title: 'Fresh');
+
+      final d = await repo(
+        src,
+        age: const Duration(days: 40),
+      ).showDetails(_ref(95396));
+
+      expect(d.title, 'Fresh');
+    });
+
+    test('revalidatedShowDetails refuses to answer with the cache', () async {
+      // The daily sync must be able to tell that a refresh did not happen.
+      // A 404 propagates even over a warm cache — exactly the split
+      // `metadata_exception.dart` pins, and exactly what the sync's old
+      // `.last` did. (A transient 429/500 still degrades to cache here, which
+      // is the pre-existing behaviour and deliberately unchanged.)
+      await seedShow(id: 95396, details: showModel(title: 'Stale'));
+      final src = _FakeSource()
+        ..throwable = const MetadataException(404, 'gone');
+
+      await expectLater(
+        repo(src, age: const Duration(days: 40)).revalidatedShowDetails(
+          _ref(95396),
+        ),
+        throwsA(isA<MetadataException>()),
+        reason:
+            'showDetails hands back "Stale" here — which the sync would then '
+            'write over itself, once a day, forever',
+      );
+    });
+
+    test(
+      'cachedOrFetchedEpisodes takes the cache without revalidating',
+      () async {
+        await seedEpisodes(showId: 95396, season: 1, eps: [ep(1), ep(2)]);
+        final src = _FakeSource()..episodes = [ep(1), ep(2), ep(3)];
+
+        final out = await repo(
+          src,
+          age: const Duration(days: 40), // stale — a refresh WOULD find e3
+        ).cachedOrFetchedEpisodes(_ref(95396), 1);
+
+        expect(out.map((e) => e.episodeNumber), [1, 2]);
+        expect(
+          src.episodeCalls,
+          0,
+          reason: 'bulk-mark must not block N seasons on N round-trips',
+        );
+      },
+    );
+
+    test('search and relink pass straight through, uncached', () async {
+      final src = _FakeSource();
+
+      await repo(src, age: Duration.zero).search('severance');
+
+      expect(src.searchCalls, 1);
+    });
+  });
+
+  group('CachingMetadataSource · details SWR', () {
     test('cold cache → fetches, persists, and emits the fresh value', () async {
       final src = _FakeSource()..show = showModel(title: 'Severance');
 
       final out = await repo(
         src,
         age: Duration.zero,
-      ).showDetails(_ref(95396)).toList();
+      ).watchDetails(MediaType.tv, _ref(95396)).toList();
 
       expect(out.map((d) => d.title), ['Severance']);
       expect(src.showCalls, 1);
@@ -219,7 +327,7 @@ void main() {
       final out = await repo(
         src,
         age: const Duration(hours: 11), // < 12h airing TTL → fresh
-      ).showDetails(_ref(95396)).toList();
+      ).watchDetails(MediaType.tv, _ref(95396)).toList();
 
       expect(out.map((d) => d.title), ['Cached']);
       expect(src.showCalls, 0);
@@ -234,7 +342,7 @@ void main() {
         final out = await repo(
           src,
           age: const Duration(hours: 13), // > 12h → stale
-        ).showDetails(_ref(95396)).toList();
+        ).watchDetails(MediaType.tv, _ref(95396)).toList();
 
         expect(out.map((d) => d.title), ['Stale', 'Fresh']);
         expect(src.showCalls, 1);
@@ -260,7 +368,7 @@ void main() {
         final out = await repo(
           src,
           age: const Duration(hours: 13),
-        ).showDetails(_ref(95396)).toList();
+        ).watchDetails(MediaType.tv, _ref(95396)).toList();
 
         expect(out.map((d) => d.title), ['Stale']); // never blanked
         expect(src.showCalls, 1); // it did try to revalidate
@@ -276,7 +384,7 @@ void main() {
         final out = await repo(
           src,
           age: const Duration(hours: 13),
-        ).showDetails(_ref(95396)).toList();
+        ).watchDetails(MediaType.tv, _ref(95396)).toList();
 
         expect(out.map((d) => d.title), ['Stale']);
       },
@@ -289,7 +397,7 @@ void main() {
           ..throwable = const MetadataException(500, 'x');
 
         await expectLater(
-          repo(src, age: Duration.zero).showDetails(_ref(95396)),
+          repo(src, age: Duration.zero).watchDetails(MediaType.tv, _ref(95396)),
           emitsError(isA<MetadataException>()),
         );
       },
@@ -302,7 +410,10 @@ void main() {
         ..throwable = const MetadataException(404, 'gone');
 
       await expectLater(
-        repo(src, age: const Duration(hours: 13)).showDetails(_ref(95396)),
+        repo(
+          src,
+          age: const Duration(hours: 13),
+        ).watchDetails(MediaType.tv, _ref(95396)),
         emitsInOrder([
           isA<MediaDetails>(),
           emitsError(isA<MetadataException>()),
@@ -328,14 +439,14 @@ void main() {
         final ended = await repo(
           src,
           age: const Duration(hours: 13),
-        ).showDetails(_ref(1)).toList();
+        ).watchDetails(MediaType.tv, _ref(1)).toList();
         expect(ended.map((d) => d.title), ['Ended']);
         expect(src.showCalls, 0); // ended → no network
 
         final airing = await repo(
           src,
           age: const Duration(hours: 13),
-        ).showDetails(_ref(2)).toList();
+        ).watchDetails(MediaType.tv, _ref(2)).toList();
         expect(airing.map((d) => d.title), ['Airing', 'Refetched']);
         expect(src.showCalls, 1); // airing → refetched
       },
@@ -343,7 +454,7 @@ void main() {
   });
 
   group(
-    'CachingMetadataRepository · cachedShowDetails (batch, cache-only)',
+    'CachingMetadataSource · cachedShowDetails (batch, cache-only)',
     () {
       test('reads many in one query, skips cold + corrupt, never hits the '
           'source', () async {
@@ -383,14 +494,14 @@ void main() {
     },
   );
 
-  group('CachingMetadataRepository · seasonEpisodes SWR', () {
+  group('CachingMetadataSource · seasonEpisodes SWR', () {
     test('cold cache → fetches, persists aired order, and emits', () async {
       final src = _FakeSource()..episodes = [ep(1), ep(2), ep(3)];
 
       final out = await repo(
         src,
         age: Duration.zero,
-      ).seasonEpisodes(_ref(95396), 1).toList();
+      ).watchSeasonEpisodes(_ref(95396), 1).toList();
 
       expect(out.single.map((e) => e.episodeNumber), [1, 2, 3]);
       expect(src.episodeCalls, 1);
@@ -408,7 +519,7 @@ void main() {
         final out = await repo(
           src,
           age: const Duration(hours: 13),
-        ).seasonEpisodes(_ref(95396), 1).toList();
+        ).watchSeasonEpisodes(_ref(95396), 1).toList();
 
         expect(out.single.map((e) => e.episodeNumber), [1, 2]); // not blanked
         expect(src.episodeCalls, 1);

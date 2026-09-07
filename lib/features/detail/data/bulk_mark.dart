@@ -1,6 +1,6 @@
 import 'package:clock/clock.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart'
@@ -27,7 +27,7 @@ typedef BulkMarkResult = ({int marked, int airedCandidates});
 /// one episode, in a single action.
 ///
 /// The episode set is derived from the cache (`CachedEpisodes`) via the
-/// cache-first [CachingMetadataRepository]; a season that isn't cached is
+/// cache-first [CachingMetadataSource]; a season that isn't cached is
 /// fetched, so a partly-cached show still marks whole. The write is one
 /// transaction with one denormalized recompute ([LibraryDao.markManyWatched])
 /// and is idempotent — re-running marks nothing.
@@ -53,7 +53,7 @@ typedef BulkMarkResult = ({int marked, int airedCandidates});
 /// cache) — callers surface that; nothing is written.
 Future<BulkMarkResult> bulkMarkWatched({
   required LibraryDao dao,
-  required CachingMetadataRepository repo,
+  required CachingMetadataSource repo,
   required int itemId,
   required SourceRef showRef,
   required Iterable<int> seasons,
@@ -74,12 +74,9 @@ Future<BulkMarkResult> bulkMarkWatched({
 
   final marks = <EpisodeMark>[];
   for (final season in wanted) {
-    // `.first`, not `.last`: take the cache-first emission and don't block the
-    // write on a network revalidation. A whole-show mark walks every season, so
-    // waiting for each season's refetch made the mark appear to "do nothing
-    // until you reload" (the write was stuck behind N round-trips, or aborted
-    // offline). Cold seasons still fetch here; a warmed show marks instantly.
-    final episodes = await repo.seasonEpisodes(showRef, season).first;
+    // Named, not `.first`: don't block the write on a network revalidation.
+    // (Why that matters is documented on the method.)
+    final episodes = await repo.cachedOrFetchedEpisodes(showRef, season);
     for (final e in episodes) {
       if (e.seasonNumber <= 0) continue; // a special listed under a real season
       if (upTo != null &&

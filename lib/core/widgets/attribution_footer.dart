@@ -21,7 +21,7 @@ class AttributionFooter extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final attribution = ref.watch(activeMetadataSourceProvider).attribution();
+    final attribution = ref.watch(metadataProvider).attribution();
     final url = Uri.parse(attribution.linkUrl);
     return Padding(
       padding: const EdgeInsets.all(WatchnookSpacing.xl),

@@ -414,7 +414,7 @@ Future<void> _addTitle(
   final router = GoRouter.of(context);
   try {
     final (:item, :created) = await addToLibrary(
-      repo: ref.read(metadataRepositoryProvider),
+      repo: ref.read(metadataProvider),
       sourceKind: metadataSourceKindOf(ref.read(activeMetadataBackendProvider)),
       dao: ref.read(libraryDaoProvider),
       result: result,
@@ -648,7 +648,7 @@ Future<void> _runBulk(
   try {
     final result = await bulkMarkWatched(
       dao: ref.read(libraryDaoProvider),
-      repo: ref.read(metadataRepositoryProvider),
+      repo: ref.read(metadataProvider),
       itemId: itemId,
       showRef: showRef,
       seasons: seasons,

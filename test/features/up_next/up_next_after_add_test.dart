@@ -6,7 +6,7 @@ import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
@@ -78,24 +78,23 @@ void main() {
     lastEpisode: EpisodeInfo(seasonNumber: 1, episodeNumber: 2),
   );
 
-  CachingMetadataRepository repoOver(_FakeSource source) =>
-      CachingMetadataRepository(
-        source: source,
-        sourceKind: MetadataSourceKind.tmdb,
-        dao: db.mediaCacheDao,
-      );
+  CachingMetadataSource repoOver(_FakeSource source) => CachingMetadataSource(
+    source: source,
+    sourceKind: MetadataSourceKind.tmdb,
+    dao: db.mediaCacheDao,
+  );
 
   /// The queue the Up Next tab actually renders: the REAL
   /// `upNextBoardProvider`, over the real DAO and a real
-  /// `CachingMetadataRepository`. Re-implementing its rules here would only
+  /// `CachingMetadataSource`. Re-implementing its rules here would only
   /// test the copy — a board that started hitting the network, or dropped a
   /// filter, would still pass.
-  Future<List<QueueEntry>> queue(CachingMetadataRepository repo) async {
+  Future<List<QueueEntry>> queue(CachingMetadataSource repo) async {
     final container = ProviderContainer(
       overrides: [
         appDatabaseProvider.overrideWithValue(db),
         activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
-        metadataRepositoryProvider.overrideWithValue(repo),
+        metadataProvider.overrideWithValue(repo),
       ],
     );
     addTearDown(container.dispose);

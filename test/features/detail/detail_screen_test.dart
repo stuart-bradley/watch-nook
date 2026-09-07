@@ -13,7 +13,7 @@ import 'package:watch_nook/core/config/remote_config.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
@@ -30,7 +30,7 @@ import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
 ///   `attribution()`, not a fake's — a fake would only prove the fake. Each
 ///   test also asserts the *other* source's credit is absent, so a hardcoded
 ///   footer fails.
-/// - The screen is wired to a **real** `CachingMetadataRepository`, so the
+/// - The screen is wired to a **real** `CachingMetadataSource`, so the
 ///   offline tests drive the SWR path end-to-end: a **stale** cache (the fresh
 ///   case never calls the source, proving nothing) plus a throwing source still
 ///   renders, and a **cold** cache degrades to a notice rather than a crash.
@@ -118,7 +118,7 @@ void main() {
   );
 
   /// Mounts the detail screen with [active] as the attribution source and a
-  /// **real** `CachingMetadataRepository` over [repoSource] + the in-memory
+  /// **real** `CachingMetadataSource` over [repoSource] + the in-memory
   /// cache — so the SWR path (and its offline fallback) is exercised for real.
   ///
   /// `libraryItemProvider` is DB-backed, so it is overridden with a synchronous
@@ -131,8 +131,8 @@ void main() {
     overrides: [
       activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
       activeMetadataSourceProvider.overrideWithValue(active),
-      metadataRepositoryProvider.overrideWithValue(
-        CachingMetadataRepository(
+      metadataProvider.overrideWithValue(
+        CachingMetadataSource(
           source: repoSource,
           sourceKind: MetadataSourceKind.tmdb,
           dao: db.mediaCacheDao,

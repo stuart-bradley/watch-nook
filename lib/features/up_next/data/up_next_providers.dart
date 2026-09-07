@@ -299,7 +299,7 @@ Future<UpNextBoard> upNextBoard(Ref ref) async {
     ref.watch(activeMetadataBackendProvider),
   );
   final items = await ref.watch(libraryItemsProvider.future);
-  final repo = ref.watch(metadataRepositoryProvider);
+  final repo = ref.watch(metadataProvider);
   final now = clock.now();
 
   final shows = showsForQueue(items, backend);

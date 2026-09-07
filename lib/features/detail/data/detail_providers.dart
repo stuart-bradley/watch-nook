@@ -31,14 +31,13 @@ final StreamProviderFamily<Set<(int, int)>, int> watchedEpisodesProvider =
     );
 
 /// Cache-first details for the detail screen (#18). Goes through
-/// `metadataRepositoryProvider` (SWR), so it emits the cached value instantly
+/// `metadataProvider` (SWR), so it emits the cached value instantly
 /// and a stale-cache refetch failure never blanks the screen (US-13).
 @riverpod
 Stream<MediaDetails> titleDetails(Ref ref, MediaType type, SourceRef target) {
-  final repo = ref.watch(metadataRepositoryProvider);
-  return type == MediaType.movie
-      ? repo.movieDetails(target)
-      : repo.showDetails(target);
+  // The streaming form: paint from cache immediately, update in place when a
+  // revalidation lands. A screen is the one consumer that wants both emissions.
+  return ref.watch(metadataProvider).watchDetails(type, target);
 }
 
 /// Cache-first aired-order episodes for one season (ADR-4). Watched lazily —
@@ -49,4 +48,4 @@ Stream<List<EpisodeInfo>> seasonEpisodes(
   Ref ref,
   SourceRef show,
   int seasonNumber,
-) => ref.watch(metadataRepositoryProvider).seasonEpisodes(show, seasonNumber);
+) => ref.watch(metadataProvider).watchSeasonEpisodes(show, seasonNumber);

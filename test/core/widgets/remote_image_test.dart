@@ -1,7 +1,10 @@
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:watch_nook/core/database/app_database.dart';
+import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
@@ -33,13 +36,21 @@ void main() {
   setUpAll(() => GoogleFonts.config.allowRuntimeFetching = false);
 
   late _SpySource source;
+  late AppDatabase db;
 
-  setUp(() => source = _SpySource());
+  setUp(() {
+    source = _SpySource();
+    db = AppDatabase.forTesting(NativeDatabase.memory());
+  });
+  tearDown(() => db.close());
 
   Future<void> pump(WidgetTester tester, Widget child) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          // The one metadata provider IS the cache now, so it needs a database
+          // even where the test only exercises `imageUrl`.
+          appDatabaseProvider.overrideWithValue(db),
           activeMetadataSourceProvider.overrideWithValue(source),
           activeMetadataKindProvider.overrideWithValue(
             MetadataSourceKind.tmdb,

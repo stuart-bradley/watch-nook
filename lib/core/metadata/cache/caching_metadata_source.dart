@@ -29,10 +29,10 @@ import 'package:watch_nook/core/metadata/source_ref.dart';
 /// Live repaint-on-external-write (the on-resume refresh) is M2's concern.
 // ponytail: one-shot SWR; upgrade to a live cache `.watch()` when the
 // resume-refresh that would repaint it actually exists (M2).
-class CachingMetadataRepository {
+class CachingMetadataSource implements MetadataSource {
   /// Wraps [source] (whose backend is [sourceKind]) with a [dao]-backed cache.
   /// [clock] drives TTL staleness — inject a fixed clock in tests.
-  CachingMetadataRepository({
+  CachingMetadataSource({
     required MetadataSource source,
     required MetadataSourceKind sourceKind,
     required MediaCacheDao dao,
@@ -53,13 +53,105 @@ class CachingMetadataRepository {
   static const _endedTtl = Duration(days: 30);
   static const _airingTtl = Duration(hours: 12); // within ADR-7's 6–24h band.
 
-  /// Cache-first details for a show ([ref] must be this backend's own).
-  Stream<MediaDetails> showDetails(SourceRef ref) =>
-      _details(MediaType.tv, ref, () => _source.showDetails(ref));
+  /// The freshest details available for a show — the [MetadataSource]
+  /// contract, satisfied over the cache.
+  ///
+  /// Revalidates a stale or missing entry and returns the fresh value; falls
+  /// back to what was cached when the refresh fails, and only throws when
+  /// there was nothing cached to fall back to.
+  ///
+  /// That fallback is the whole reason this is not `watchDetails(...).last`.
+  /// A non-transient failure (a 404 on refresh) propagates *after* the cached
+  /// value has been emitted, and `Stream.last` forwards the error — throwing
+  /// away perfectly good details it had already been handed. The add path used
+  /// to reconstruct this loop itself, in a ten-line comment; it belongs here.
+  @override
+  Future<MediaDetails> showDetails(SourceRef ref) =>
+      _newest(watchDetails(MediaType.tv, ref));
 
-  /// Cache-first details for a movie ([ref] must be this backend's own).
-  Stream<MediaDetails> movieDetails(SourceRef ref) =>
-      _details(MediaType.movie, ref, () => _source.movieDetails(ref));
+  /// The freshest details available for a movie. See [showDetails].
+  @override
+  Future<MediaDetails> movieDetails(SourceRef ref) =>
+      _newest(watchDetails(MediaType.movie, ref));
+
+  /// The freshest aired-order episodes available for one season (ADR-4).
+  /// Same cache-preserving contract as [showDetails].
+  @override
+  Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int seasonNumber) =>
+      _newest(watchSeasonEpisodes(show, seasonNumber));
+
+  /// **Only the revalidated value**, never the cache alone — and so it throws
+  /// when the refresh fails.
+  ///
+  /// For the daily tracked-show sync, whose entire job is to pull fresh
+  /// episode counts, status and next-air. [showDetails] would hand it back the
+  /// stale value it already has and it would write that over itself once a
+  /// day; a caller that wants a refresh must be able to tell one didn't
+  /// happen.
+  Future<MediaDetails> revalidatedShowDetails(SourceRef ref) =>
+      watchDetails(MediaType.tv, ref).last;
+
+  /// The cached season if there is one, fetching **only** when it is cold —
+  /// never waiting on a revalidation.
+  ///
+  /// For bulk-mark, which walks every season of a show: waiting for each
+  /// season's refetch made a whole-show mark appear to do nothing until you
+  /// reloaded (the write sat behind N round-trips, and aborted offline). A
+  /// warmed show marks instantly; a cold season still fetches.
+  Future<List<EpisodeInfo>> cachedOrFetchedEpisodes(
+    SourceRef show,
+    int seasonNumber,
+  ) => watchSeasonEpisodes(show, seasonNumber).first;
+
+  /// Keeps the newest emission and re-raises only on a cold stream.
+  static Future<T> _newest<T>(Stream<T> stream) async {
+    T? newest;
+    try {
+      await for (final value in stream) {
+        newest = value;
+      }
+    } on Object {
+      if (newest == null) rethrow;
+    }
+    return newest!;
+  }
+
+  // --- uncached, delegated straight through -------------------------------
+  //
+  // Search and relink are one-shot user actions against live data; caching a
+  // query would only ever serve a stale answer to a new question. They are
+  // here so callers have ONE interface and one provider, not because the cache
+  // has anything to add.
+
+  @override
+  Future<List<MediaSearchResult>> search(String query, {MediaKind? kind}) =>
+      _source.search(query, kind: kind);
+
+  @override
+  Future<MediaSearchResult?> resolveByExternalId(
+    String id, {
+    ExternalIdKind kind = ExternalIdKind.imdb,
+  }) => _source.resolveByExternalId(id, kind: kind);
+
+  @override
+  String imageUrl(String path, ImageSize size) => _source.imageUrl(path, size);
+
+  @override
+  Attribution attribution() => _source.attribution();
+
+  // --- the streaming forms -------------------------------------------------
+
+  /// Cache-then-fresh details: emits the cached value **first** (instant,
+  /// offline-safe) and then, only if the cache was missing or stale, the
+  /// revalidated one. For a screen that should paint immediately and update in
+  /// place.
+  Stream<MediaDetails> watchDetails(MediaType type, SourceRef ref) => _details(
+    type,
+    ref,
+    () => type == MediaType.movie
+        ? _source.movieDetails(ref)
+        : _source.showDetails(ref),
+  );
 
   Stream<MediaDetails> _details(
     MediaType type,
@@ -124,8 +216,9 @@ class CachingMetadataRepository {
     return out;
   }
 
-  /// Cache-first aired-order episodes for one season (ADR-4).
-  Stream<List<EpisodeInfo>> seasonEpisodes(
+  /// Cache-then-fresh aired-order episodes for one season (ADR-4). The
+  /// episode twin of [watchDetails].
+  Stream<List<EpisodeInfo>> watchSeasonEpisodes(
     SourceRef show,
     int seasonNumber,
   ) async* {

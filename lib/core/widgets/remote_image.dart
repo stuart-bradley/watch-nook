@@ -82,7 +82,7 @@ class RemoteImage extends ConsumerWidget {
     }
 
     final url = ref
-        .watch(activeMetadataSourceProvider)
+        .watch(metadataProvider)
         .imageUrl(artwork.path, _shape.imageSize);
 
     final image = CachedNetworkImage(

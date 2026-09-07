@@ -5,7 +5,7 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
 
@@ -35,7 +35,7 @@ import 'package:watch_nook/core/metadata/source_ref.dart';
 /// Lives in the **detail** feature: search now navigates to the detail screen
 /// rather than adding on tap, so the Add button there is the only caller.
 Future<({LibraryItem item, bool created})> addToLibrary({
-  required CachingMetadataRepository repo,
+  required CachingMetadataSource repo,
   required MetadataSourceKind sourceKind,
   required LibraryDao dao,
   required MediaSearchResult result,
@@ -47,20 +47,15 @@ Future<({LibraryItem item, bool created})> addToLibrary({
 
   MediaDetails? details;
   if (target != null) {
-    final stream = result.kind == MediaKind.tv
-        ? repo.showDetails(target)
-        : repo.movieDetails(target);
     try {
-      // Keep the newest emission rather than taking `.last`. The SWR stream
-      // yields the cached value FIRST and then rethrows a non-transient
-      // revalidation failure (a 404/401 on refresh) — and `Stream.last` forwards
-      // that error, throwing away the perfectly good details it had already
-      // handed us. Losing them would silently drop the AD-3 snapshot and write
-      // the row from the thin search-hit fields instead. The cache write has
-      // happened by the time the fresh value arrives, either way.
-      await for (final fetched in stream) {
-        details = fetched;
-      }
+      // The plain interface call: freshest available, cache preserved when a
+      // revalidation fails. Losing the cached value to a 404-on-refresh would
+      // silently drop the AD-3 snapshot and write the row from the thin
+      // search-hit fields instead — which is why the cache, not this caller,
+      // owns that rule now.
+      details = result.kind == MediaKind.tv
+          ? await repo.showDetails(target)
+          : await repo.movieDetails(target);
     } on Object catch (e, s) {
       // Offline / hard failure with nothing cached: fall back to the search-hit
       // fields; the stats fields backfill on the next detail view (plan §7) and

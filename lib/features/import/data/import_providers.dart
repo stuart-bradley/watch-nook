@@ -86,7 +86,7 @@ class ImportController extends _$ImportController {
     }
 
     final resolver = Resolver(
-      source: ref.read(activeMetadataSourceProvider),
+      source: ref.read(metadataProvider),
       sourceKind: _sourceKind,
     );
 

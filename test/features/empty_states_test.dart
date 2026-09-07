@@ -1,3 +1,4 @@
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 // `Override` lives in the misc barrel, not the main one.
@@ -7,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:watch_nook/core/config/remote_config.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
+import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
@@ -53,6 +55,11 @@ class _BarrenSource implements MetadataSource {
 void main() {
   setUpAll(() => GoogleFonts.config.allowRuntimeFetching = false);
 
+  late AppDatabase emptyStateDb;
+
+  setUp(() => emptyStateDb = AppDatabase.forTesting(NativeDatabase.memory()));
+  tearDown(() => emptyStateDb.close());
+
   /// Every empty state renders an [EmptyState]; asserting on its headline keeps
   /// these tests about the *copy*, which is the thing that regresses.
   Future<void> pump(
@@ -64,6 +71,12 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          // The one metadata provider IS the cache, so it needs a database
+          // and an active backend even where the screen fetches nothing.
+          appDatabaseProvider.overrideWithValue(emptyStateDb),
+          activeMetadataKindProvider.overrideWithValue(
+            MetadataSourceKind.tmdb,
+          ),
           // Default: reaching the network from an empty state is a bug.
           activeMetadataSourceProvider.overrideWithValue(
             source ?? _ThrowingSource(),

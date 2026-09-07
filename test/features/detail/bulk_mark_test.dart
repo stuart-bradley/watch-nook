@@ -6,7 +6,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_exception.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
@@ -156,8 +156,8 @@ void main() {
     );
   }
 
-  CachingMetadataRepository repoOver(_RecordingSource source) =>
-      CachingMetadataRepository(
+  CachingMetadataSource repoOver(_RecordingSource source) =>
+      CachingMetadataSource(
         source: source,
         sourceKind: MetadataSourceKind.tmdb,
         dao: db.mediaCacheDao,
