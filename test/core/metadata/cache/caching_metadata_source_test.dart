@@ -476,7 +476,7 @@ void main() {
         final out = await repo(
           src,
           age: Duration.zero,
-        ).cachedShowDetails([100, 200, 300, 999]);
+        ).cachedShowDetails([_ref(100), _ref(200), _ref(300), _ref(999)]);
 
         expect(out.keys.toSet(), {100, 200}); // 300 corrupt, 999 cold
         expect(out[100]!.title, 'A');

@@ -189,20 +189,22 @@ class CachingMetadataSource implements MetadataSource {
     }
   }
 
-  /// Cache-**only** show details for many [sourceIds] in one query — no
+  /// Cache-**only** show details for many [shows] in one query — no
   /// network, no revalidation. The watch queue recomputes on every library
   /// write, so it reads all its shows this way (one round-trip, decode-once)
   /// instead of an N+1 of per-show `showDetails(...).first`. A cold title is
   /// absent from the map (the tracked-show sync warms it, and the queue
   /// recomputes when it has); a corrupt/legacy payload is skipped, not fatal.
   Future<Map<int, MediaDetails>> cachedShowDetails(
-    Iterable<int> sourceIds,
+    Iterable<SourceRef> shows,
   ) async {
-    final rows = await _dao.getManyMedia(
-      _sourceKind,
-      MediaType.tv,
-      sourceIds.toList(),
-    );
+    // Guarded like every other lookup. This one keys the cache by `_sourceKind`
+    // and a caller-supplied id, so a foreign id does not miss — it returns
+    // ANOTHER title's `nextEpisode`/`lastEpisode` markers, which is precisely
+    // what bulk-mark uses to decide what has aired and what the queue uses to
+    // decide what you are up to.
+    final ids = [for (final show in shows) show.idFor(_sourceKind)];
+    final rows = await _dao.getManyMedia(_sourceKind, MediaType.tv, ids);
     final out = <int, MediaDetails>{};
     for (final row in rows) {
       try {

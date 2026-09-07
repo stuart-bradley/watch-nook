@@ -193,6 +193,69 @@ void main() {
       expect(item.relinkFailed, isFalse);
     });
 
+    test("a relink drops the old backend's poster path", () async {
+      // The whole point of ticket 11, and the case its widget test cannot
+      // reach. `LibraryItem.posterRef` tags artwork with `recordedSource` —
+      // the field this very write rewrites. Keep the path and the reference
+      // starts claiming the NEW backend for a path the OLD one minted, so
+      // `RemoteImage`'s mismatch check waves it straight through to a 404 or
+      // an unrelated image. For a movie that is permanent: the daily sync only
+      // refills TV rows.
+      //
+      // Proved to fail first by restoring the carried-over path.
+      final id = (await seed.seedMovie(
+        db,
+        title: 'EEAAO',
+        tmdbId: 545611,
+        imdbId: 'tt6710474',
+        posterPath: '/tmdb-only.jpg',
+        now: now,
+      )).id;
+
+      await service(
+        _FakeTvdb(
+          resolve: {
+            'tt6710474': const MediaSearchResult(
+              kind: MediaKind.movie,
+              title: 'EEAAO',
+              tvdbId: 999,
+            ),
+          },
+        ),
+      ).switchAll();
+
+      final item = await reload(id);
+      expect(item.recordedSource, MetadataSourceKind.tvdb);
+      expect(
+        item.posterPath,
+        isNull,
+        reason:
+            'a placeholder until the next fetch refills it is the honest '
+            'answer; a TMDB path labelled tvdb is not',
+      );
+      expect(item.posterRef, isNull);
+    });
+
+    test(
+      'a flagged-only row keeps its poster, because it kept its backend',
+      () async {
+        // The control. `_flagOnly` leaves `recordedSource` alone, so the
+        // path is still true and dropping it would lose artwork for nothing.
+        final id = await addShow(imdbId: null);
+        await db.libraryDao.updateItem(
+          id,
+          const LibraryItemsCompanion(posterPath: Value('/still-tmdb.jpg')),
+        );
+
+        await service(_FakeTvdb()).switchAll();
+
+        final item = await reload(id);
+        expect(item.recordedSource, MetadataSourceKind.tmdb);
+        expect(item.relinkFailed, isTrue);
+        expect(item.posterPath, '/still-tmdb.jpg');
+      },
+    );
+
     test('a row already on the new backend is skipped untouched', () async {
       final id = (await seed.seedShow(
         db,

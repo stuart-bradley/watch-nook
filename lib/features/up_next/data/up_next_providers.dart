@@ -304,11 +304,11 @@ Future<UpNextBoard> upNextBoard(Ref ref) async {
   // reads on a provider that recomputes on every library write. A cold show is
   // absent from [details] and skipped; the tracked-show sync warms its cache
   // and the page recomputes (via [libraryItemsProvider]) once it does.
-  final sourceIds = [
+  final refs = [
     for (final item in shows)
-      if (item.refFor(backend) case final SourceRef r) r.id,
+      if (item.refFor(backend) case final SourceRef r) r,
   ];
-  final details = await repo.cachedShowDetails(sourceIds);
+  final details = await repo.cachedShowDetails(refs);
 
   final queue = <QueueEntry>[];
   final upcoming = <UpcomingEntry>[];

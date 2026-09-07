@@ -84,9 +84,14 @@ class ImportController extends _$ImportController {
       return;
     }
 
+    // Read ONCE, here, and carried from now on. Everything downstream — the
+    // candidates, their posters, the `recordedSource` the merge stamps — is
+    // relative to this backend, and the user can sit on the confirm screen
+    // long enough for an operator to flip it (ADR-2).
+    final resolveKind = ref.read(activeMetadataKindProvider);
     final resolver = Resolver(
       source: ref.read(metadataProvider),
-      sourceKind: _sourceKind,
+      sourceKind: resolveKind,
     );
 
     state = ImportRunning(
@@ -105,7 +110,7 @@ class ImportController extends _$ImportController {
 
     final pending = resolutions.whereType<Ambiguous>().toList();
     if (pending.isEmpty) {
-      await _apply(resolutions, result.skippedRows);
+      await _apply(resolutions, result.skippedRows, kind: resolveKind);
       return;
     }
 
@@ -122,6 +127,7 @@ class ImportController extends _$ImportController {
           if (a.candidates.isNotEmpty) i: a.candidates.first,
       },
       parseSkipped: result.skippedRows,
+      resolvedAgainst: resolveKind,
     );
   }
 
@@ -145,24 +151,37 @@ class ImportController extends _$ImportController {
   Future<void> applyConfirmed() async {
     final current = state;
     if (current is! ImportConfirming) return;
-    await _apply([
-      ...current.autoResolved,
-      for (final (i, ambiguous) in current.pending.indexed)
-        switch (current.choices[i]) {
-          final MediaSearchResult c => Auto(ambiguous.record, c),
-          null => ambiguous,
-        },
-    ], current.parseSkipped);
+    await _apply(
+      kind: current.resolvedAgainst,
+      [
+        ...current.autoResolved,
+        for (final (i, ambiguous) in current.pending.indexed)
+          switch (current.choices[i]) {
+            final MediaSearchResult c => Auto(ambiguous.record, c),
+            null => ambiguous,
+          },
+      ],
+      current.parseSkipped,
+    );
   }
 
   /// Back to the start, ready for another file.
   void reset() => state = const ImportIdle();
 
-  Future<void> _apply(List<Resolution> resolutions, int parseSkipped) async {
+  /// [kind] is the backend the resolutions were produced against, passed in
+  /// rather than re-read: the confirm screen can sit open across a remote
+  /// backend flip, and stamping `recordedSource` with the backend that happens
+  /// to be active at the moment the user taps Apply would label real watch
+  /// history with a catalogue that never minted its ids.
+  Future<void> _apply(
+    List<Resolution> resolutions,
+    int parseSkipped, {
+    required MetadataSourceKind kind,
+  }) async {
     state = const ImportRunning(ImportPhase.applying);
     final applier = MergeApplier(
       dao: ref.read(libraryDaoProvider),
-      sourceKind: _sourceKind,
+      sourceKind: kind,
     );
     state = ImportDone(
       await applier.apply(resolutions),
@@ -173,8 +192,6 @@ class ImportController extends _$ImportController {
     // category are right. Fire-and-forget — the summary is already shown.
     unawaited(ref.read(trackedShowSyncProvider).refresh());
   }
-
-  MetadataSourceKind get _sourceKind => ref.read(activeMetadataKindProvider);
 }
 
 /// Max metadata lookups in flight during import. Bounding concurrency is the

@@ -63,7 +63,7 @@ Future<BulkMarkResult> bulkMarkWatched({
   // The show's own next-/last-to-air markers — the SAME authority the watch
   // queue uses (`nextUnwatchedAired`). Cache-only, so this never fetches and
   // never throws; a cold show yields null and [hasAired] falls back to dates.
-  final details = (await repo.cachedShowDetails([showRef.id]))[showRef.id];
+  final details = (await repo.cachedShowDetails([showRef]))[showRef.id];
 
   final wanted =
       seasons

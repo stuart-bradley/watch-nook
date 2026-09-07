@@ -104,6 +104,16 @@ class BackendSwitchService {
             ? Value(newId)
             : const Value.absent(),
         recordedSource: Value(_newKind),
+        // Dropped, not kept. `posterPath` is backend-relative and only the
+        // backend that minted it can resolve it — and this write is the moment
+        // `recordedSource` starts claiming the NEW backend, which is the field
+        // `LibraryItem.posterRef` reads. Carried over, the path would look
+        // native to a catalogue that never produced it, and `RemoteImage`'s
+        // mismatch check would wave it through to a 404 or an unrelated image,
+        // permanently for a movie (the daily sync only refills TV rows).
+        // A null poster is the placeholder, which is the honest answer until
+        // the next detail view or sync refills it.
+        posterPath: const Value(null),
         relinkFailed: Value(!reconciled),
         updatedAt: Value(_clock.now()),
       ),

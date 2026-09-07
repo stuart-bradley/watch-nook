@@ -524,6 +524,12 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   /// restore path deliberately does **not**: it is rebuilding history the user
   /// already owns, and stamping would rewrite every row's recency to the moment
   /// of the restore and flatten the grid's order.
+  ///
+  /// **Not part of the DAO's advertised interface.** Every watch write already
+  /// ends in it and [restore] owns the restore path, so no production caller
+  /// outside this class needs it; it stays reachable only for the repair tests,
+  /// which point it at deliberately damaged rows.
+  @visibleForTesting
   Future<void> recomputeDenormalized(int itemId, {DateTime? touchedAt}) async {
     final watched =
         await (select(watchEvents)..where(

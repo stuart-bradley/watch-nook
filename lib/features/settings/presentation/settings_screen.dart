@@ -59,7 +59,7 @@ class SettingsScreen extends ConsumerWidget {
           ),
           // Only shown when there is something to relink. A backend flip is an
           // ADR-2 config edit the user never saw, so until they act, those rows
-          // render from stored columns and fetch nothing (see detailSourceId).
+          // render from stored columns and fetch nothing (LibraryItem.refFor).
           if (stranded > 0)
             ListTile(
               leading: const Icon(Icons.link_off),

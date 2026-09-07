@@ -155,7 +155,9 @@ void main() {
         reason: 'fetched once, for the snapshot',
       );
       // The row the queue depends on actually exists...
-      final cached = await repo.cachedShowDetails([95396]);
+      final cached = await repo.cachedShowDetails([
+        const SourceRef(MetadataSourceKind.tmdb, 95396),
+      ]);
       expect(cached[95396]?.title, 'Severance');
       // ...and reading the queue again costs no further fetch.
       expect(source.showDetailCalls, 1);

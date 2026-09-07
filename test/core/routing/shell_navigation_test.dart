@@ -49,7 +49,7 @@ void main() {
 
   final now = DateTime(2026, 7, 9);
 
-  // tmdbId is null (with `recordedSource` tmdb) so `detailSourceId` is null and
+  // tmdbId is null (with `recordedSource` tmdb) so `refFor` yields null and
   // the detail screen fetches no metadata — this test is about routing only.
   // posterPath is null so no card image resolves a URL.
   final item = LibraryItem(

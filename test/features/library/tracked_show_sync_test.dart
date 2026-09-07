@@ -172,6 +172,33 @@ void main() {
     expect(repo.calls, 0);
   });
 
+  test('a row recorded against the other backend is never fetched', () async {
+    // The sync used to check this twice — a `recordedSource == backend` filter
+    // in `refresh()` AND `refFor` in `_patchFor` — and ticket 08 collapsed it
+    // to the one construction. That is the right shape, but it left the path
+    // that writes episodeCountTotal / showStatus / posterPath onto real rows
+    // with a single point of failure and NO test. Loosen `refFor` and, without
+    // this, another title's data lands on a user's library with nothing red.
+    await seed.seedShow(
+      db,
+      title: 'Recorded against TVDB',
+      source: MetadataSourceKind.tvdb,
+      tmdbId: null,
+      tvdbId: 371980,
+    );
+    // Answers for BOTH ids, so a fetch would succeed and be written.
+    final repo = _FakeRepo({
+      371980: details(total: 42),
+      100: details(total: 42),
+    });
+
+    await syncWith(repo).refresh();
+
+    expect(repo.calls, 0, reason: 'its ids mean nothing to the active backend');
+    final row = (await db.libraryDao.getAll()).single;
+    expect(row.episodeCountTotal, isNull);
+  });
+
   test('a stale cache is revalidated, not served back (uses .last)', () async {
     // The bug this guards: `.first` on the SWR stream takes the cached value
     // and cancels before the refetch runs, so the daily/manual refresh silently

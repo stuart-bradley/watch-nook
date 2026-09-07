@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/import_export/import/merge_applier.dart';
 import 'package:watch_nook/core/import_export/import/resolver.dart';
-import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/widgets/remote_image.dart';
@@ -163,6 +162,7 @@ class _ConfirmState extends ConsumerState<_Confirm> {
                 ambiguous: state.pending[i],
                 choice: state.choices[i],
                 decided: state.choices.containsKey(i),
+                sourceKind: state.resolvedAgainst,
                 onChoose: (candidate) => ref
                     .read(importControllerProvider.notifier)
                     .choose(i, candidate),
@@ -193,12 +193,17 @@ class _AmbiguousCard extends StatelessWidget {
     required this.choice,
     required this.decided,
     required this.onChoose,
+    required this.sourceKind,
   });
 
   final Ambiguous ambiguous;
   final MediaSearchResult? choice;
   final bool decided;
   final ValueChanged<MediaSearchResult?> onChoose;
+
+  /// The backend these candidates were resolved against — carried down so a
+  /// poster is never tagged with a backend that did not produce it.
+  final MetadataSourceKind sourceKind;
 
   @override
   Widget build(BuildContext context) {
@@ -219,6 +224,7 @@ class _AmbiguousCard extends StatelessWidget {
               candidate: candidate,
               selected: candidate == choice,
               onTap: () => onChoose(candidate),
+              sourceKind: sourceKind,
             ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -250,11 +256,15 @@ class _CandidateTile extends ConsumerWidget {
     required this.candidate,
     required this.selected,
     required this.onTap,
+    required this.sourceKind,
   });
 
   final MediaSearchResult candidate;
   final bool selected;
   final VoidCallback onTap;
+
+  /// The backend this candidate was resolved against.
+  final MetadataSourceKind sourceKind;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -265,10 +275,11 @@ class _CandidateTile extends ConsumerWidget {
     final country = candidate.originCountry.join('/');
     return ListTile(
       selected: selected,
-      // Same as search: a candidate was just resolved by the active source.
-      leading: RemoteImage.thumbnail(
-        artwork: _poster(candidate, ref.watch(activeMetadataKindProvider)),
-      ),
+      // The backend this candidate was RESOLVED against, carried on the state
+      // — not whatever is active now. A flip while the confirm screen is open
+      // would otherwise re-tag every poster with a backend that never minted
+      // it, and render it through the wrong source.
+      leading: RemoteImage.thumbnail(artwork: _poster(candidate, sourceKind)),
       title: Text(
         candidate.title,
         maxLines: 1,

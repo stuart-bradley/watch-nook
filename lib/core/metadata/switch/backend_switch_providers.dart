@@ -28,6 +28,17 @@ Future<int> backendMismatchCount(Ref ref) async {
 
 /// The relink service, pointed at the **active** backend.
 ///
+/// **The one deliberate reader of the raw, uncached source** — the exemption
+/// named in `test/core/metadata/one_metadata_provider_test.dart`.
+///
+/// Relinking decides whether a row's watch history survives, by checking every
+/// watched coordinate against the new backend's air-dates. Answering that from
+/// cache is worse than not answering it: a warm entry means the check silently
+/// passes without ever reaching the new backend, and `relinkFailed` is written
+/// `false` for a row nothing verified — invariant 3's "never silently scramble
+/// watched flags". A failure here must stay a failure, so the reconcile can
+/// flag the row instead of trusting it.
+///
 /// Deliberately has no boot hook. Relinking rewrites ids, `recordedSource` and
 /// — where episodes cannot be reconciled by air-date — sets `relinkFailed` on
 /// rows carrying the user's watch history. Doing that unattended, in response
@@ -36,6 +47,6 @@ Future<int> backendMismatchCount(Ref ref) async {
 @Riverpod(keepAlive: true)
 BackendSwitchService backendSwitchService(Ref ref) => BackendSwitchService(
   db: ref.watch(appDatabaseProvider),
-  newSource: ref.watch(metadataProvider),
+  newSource: ref.watch(activeMetadataSourceProvider),
   newKind: ref.watch(activeMetadataKindProvider),
 );
