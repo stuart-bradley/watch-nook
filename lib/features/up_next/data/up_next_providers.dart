@@ -1,7 +1,6 @@
 import 'package:clock/clock.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
@@ -295,9 +294,7 @@ final libraryItemsProvider = StreamProvider<List<LibraryItem>>(
 /// updates the list live.
 @riverpod
 Future<UpNextBoard> upNextBoard(Ref ref) async {
-  final backend = metadataSourceKindOf(
-    ref.watch(activeMetadataBackendProvider),
-  );
+  final backend = ref.watch(activeMetadataKindProvider);
   final items = await ref.watch(libraryItemsProvider.future);
   final repo = ref.watch(metadataProvider);
   final now = clock.now();

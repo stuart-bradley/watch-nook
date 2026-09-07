@@ -1,6 +1,5 @@
 import 'package:drift/drift.dart' show Value;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
@@ -29,7 +28,7 @@ const lastLibrarySyncKey = 'last_library_sync';
 TrackedShowSync trackedShowSync(Ref ref) => TrackedShowSync(
   dao: ref.watch(libraryDaoProvider),
   repo: ref.watch(metadataProvider),
-  backend: metadataSourceKindOf(ref.watch(activeMetadataBackendProvider)),
+  backend: ref.watch(activeMetadataKindProvider),
 );
 
 /// Refreshes the per-show metadata an import can't fetch — `episodeCountTotal`,

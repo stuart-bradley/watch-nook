@@ -73,16 +73,20 @@ CachingMetadataSource metadata(Ref ref) => CachingMetadataSource(
 /// stored row's `recordedSource` must match for its ids and artwork to mean
 /// anything (see `SourceRef` / `ArtworkRef`).
 ///
-/// One provider rather than `metadataSourceKindOf(watch(...))` repeated at
+/// One provider rather than the enum conversion repeated at
 /// every widget that needs to ask "did this row come from the backend we are
 /// on now?".
 @riverpod
 MetadataSourceKind activeMetadataKind(Ref ref) =>
-    metadataSourceKindOf(ref.watch(activeMetadataBackendProvider));
+    _metadataSourceKindOf(ref.watch(activeMetadataBackendProvider));
 
 /// Bridges the config's [MetadataBackend] to the DB's per-row
 /// [MetadataSourceKind] (stamped onto `LibraryItems.recordedSource`).
-MetadataSourceKind metadataSourceKindOf(MetadataBackend backend) =>
+///
+/// Private on purpose: [activeMetadataKindProvider] is the one answer to "what
+/// backend are we on?", and a second call site converting the enum itself is
+/// how the cache key and a screen's mismatch check drift apart.
+MetadataSourceKind _metadataSourceKindOf(MetadataBackend backend) =>
     switch (backend) {
       MetadataBackend.tmdb => MetadataSourceKind.tmdb,
       MetadataBackend.tvdb => MetadataSourceKind.tvdb,

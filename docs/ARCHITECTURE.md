@@ -34,11 +34,20 @@ lib/
   change bumps `schemaVersion` + adds a `MigrationStrategy` step. Tests use an in-memory DB
   (`NativeDatabase.memory()`).
 - **Metadata: provider-agnostic** — one `MetadataSource` interface, two impls (`TmdbSource`,
-  `TvdbSource`), selected at runtime by `activeMetadataSourceProvider`. UI/features never call an
-  HTTP client directly — always go through `MetadataSource`.
+  `TvdbSource`), selected at runtime from `RemoteConfigService`. UI/features never call an HTTP
+  client directly — always go through `MetadataSource`.
+  - **One provider: `metadataProvider`.** It resolves a `CachingMetadataSource`, which *implements*
+    `MetadataSource` over the cache, so app code learns one interface and cannot pick an uncached
+    one by mistake. `activeMetadataSourceProvider` (the raw, uncached source) is the thing it wraps
+    and is for tests only — held to that by `test/core/metadata/one_metadata_provider_test.dart`.
+  - **Ids are `SourceRef`, never bare ints** — see invariant 3.
 - **Caching: stale-while-revalidate** — return cache instantly (offline-capable), background-refetch
   if stale, let Drift `.watch()` streams repaint. Refresh only tracked shows on app-resume; skip
   `dropped` / ended-`completed`. Images via `cached_network_image`.
+  - The three cached lookups are the interface methods and return the **freshest available**,
+    keeping the cache when a revalidation fails. Callers wanting something else say so by name —
+    `revalidatedShowDetails` (refresh or throw), `cachedOrFetchedEpisodes` (never wait on a
+    revalidation), `watchDetails` / `watchSeasonEpisodes` (both emissions, for a screen).
 
 ## Invariants (the load-bearing rules)
 
@@ -61,8 +70,19 @@ These are documented at their call sites too. Break one and something breaks els
    episodes by **air-date**; set `relinkFailed = true` on anomalies (absolute-numbered/anime,
    specials) — never silently scramble watched flags.
 
-4. **Import ≠ restore.** Restore uses a **replace** path (wipe + insert). Import uses an **additive
-   MergeApplier** (upsert by id-block: imdb/tmdb/tvdb, then title+year) that merges watch history and
+   **Ids and artwork paths are namespaced per backend, and the pairing is a type.** TMDB's `95396`
+   and TheTVDB's `95396` are unrelated titles, so the wrong catalogue does not reject a foreign id —
+   it returns a different title, which then caches and renders as this one. `SourceRef` (id +
+   backend) and `ArtworkRef` (path + backend) make that checkable: every `MetadataSource` throws on
+   a foreign reference, the cache guards *before* its own read, and `RemoteImage` falls back to the
+   placeholder. `LibraryItem.refFor(active)` / `MediaSearchResult.refFor(active)` are the **only**
+   place "is this row's backend the active one?" is decided — the detail screen's `DetailTarget`
+   carries that answer rather than re-deriving it.
+
+4. **Import ≠ restore.** Restore is a single call — `LibraryDao.restore` — owning the whole
+   protocol (wipe, insert items, insert their events, recompute the derived progress columns) in one
+   transaction, so no caller can assemble one that skips the recompute and leaves a full history
+   reading "0 watched". Import uses an **additive MergeApplier** (upsert by id-block: imdb/tmdb/tvdb, then title+year) that merges watch history and
    **never wipes** existing rows. Re-importing must not duplicate or destroy history.
 
 5. **Stats read snapshotted facts.** `runtimeMinutes` is snapshotted onto `WatchEvents` at mark-time;

@@ -1,5 +1,4 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/switch/backend_switch_service.dart';
@@ -22,7 +21,7 @@ part 'backend_switch_providers.g.dart';
 /// hazard). Auto-disposed, so it is recomputed each time Settings is opened.
 @riverpod
 Future<int> backendMismatchCount(Ref ref) async {
-  final active = metadataSourceKindOf(ref.watch(activeMetadataBackendProvider));
+  final active = ref.watch(activeMetadataKindProvider);
   final rows = await ref.watch(libraryDaoProvider).getAll();
   return rows.where((r) => r.recordedSource != active).length;
 }
@@ -38,5 +37,5 @@ Future<int> backendMismatchCount(Ref ref) async {
 BackendSwitchService backendSwitchService(Ref ref) => BackendSwitchService(
   db: ref.watch(appDatabaseProvider),
   newSource: ref.watch(metadataProvider),
-  newKind: metadataSourceKindOf(ref.watch(activeMetadataBackendProvider)),
+  newKind: ref.watch(activeMetadataKindProvider),
 );

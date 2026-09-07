@@ -3,7 +3,6 @@ import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/import_export/import/import_archive.dart';
@@ -175,8 +174,7 @@ class ImportController extends _$ImportController {
     unawaited(ref.read(trackedShowSyncProvider).refresh());
   }
 
-  MetadataSourceKind get _sourceKind =>
-      metadataSourceKindOf(ref.read(activeMetadataBackendProvider));
+  MetadataSourceKind get _sourceKind => ref.read(activeMetadataKindProvider);
 }
 
 /// Max metadata lookups in flight during import. Bounding concurrency is the
