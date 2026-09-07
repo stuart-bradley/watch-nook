@@ -16,19 +16,6 @@ typedef RestoreSummary = ({
 
 /// One parsed item, ready to insert. Watches are nested (AD-3) so the file
 /// carries no foreign keys and restore never remaps ids.
-typedef _ParsedItem = ({
-  LibraryItemsCompanion item,
-  List<_ParsedWatch> watches,
-});
-
-typedef _ParsedWatch = ({
-  int? season,
-  int? episode,
-  DateTime? watchedAt,
-  int? runtimeMinutes,
-  bool isRewatch,
-});
-
 /// The canonical portable format (ADR-6): **one** serializer, whose output is
 /// both the manual export and the auto-backup snapshot.
 ///
@@ -132,7 +119,7 @@ class ImportExportService {
     if (raw is! List) return nothing;
 
     var skipped = 0;
-    final parsed = <_ParsedItem>[];
+    final parsed = <RestoreItem>[];
     for (final entry in raw) {
       final item = _parseItem(entry);
       if (item == null) {
@@ -142,31 +129,13 @@ class ImportExportService {
       }
     }
 
-    var events = 0;
-    await dao.transaction(() async {
-      await dao.deleteAllUserData();
-      for (final p in parsed) {
-        final id = await dao.insertItem(p.item);
-        for (final w in p.watches) {
-          await dao.insertWatchEvent(
-            WatchEventsCompanion.insert(
-              libraryItemId: id,
-              seasonNumber: Value(w.season),
-              episodeNumber: Value(w.episode),
-              watchedAt: Value(w.watchedAt),
-              runtimeMinutes: Value(w.runtimeMinutes),
-              isRewatch: Value(w.isRewatch),
-            ),
-          );
-          events++;
-        }
-        await dao.recomputeDenormalized(id);
-      }
-    });
+    // The whole replace protocol — wipe, insert, events, recompute, one
+    // transaction — belongs to the DAO. This function's job ends at parsing.
+    final written = await dao.restore(parsed);
 
     return (
-      itemsRestored: parsed.length,
-      watchEventsRestored: events,
+      itemsRestored: written.items,
+      watchEventsRestored: written.watchEvents,
       skippedItems: skipped,
     );
   }
@@ -177,7 +146,7 @@ class ImportExportService {
   /// raises [TypeError], which is an [Error] and so escapes `on Exception`
   /// (CLAUDE.md Dart gotcha). A structurally-valid-but-malformed item must cost
   /// one item, never the file.
-  _ParsedItem? _parseItem(Object? entry) {
+  RestoreItem? _parseItem(Object? entry) {
     if (entry is! Map<String, Object?>) return null;
 
     final mediaType = _enum(entry['mediaType'], MediaType.values);

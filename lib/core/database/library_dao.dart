@@ -1,5 +1,6 @@
 import 'package:clock/clock.dart';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
 
@@ -9,6 +10,23 @@ part 'library_dao.g.dart';
 /// (the stats invariant). A record, not a metadata model — the DAO stays
 /// unaware of the metadata layer.
 typedef EpisodeMark = ({int season, int episode, int? runtimeMinutes});
+
+/// One watch event to restore, verbatim. A record rather than a companion so
+/// the caller never has to know the `libraryItemId` — [LibraryDao.restore]
+/// owns that, because only the insert it performs knows the new id.
+typedef RestoreWatch = ({
+  int? season,
+  int? episode,
+  DateTime? watchedAt,
+  int? runtimeMinutes,
+  bool isRewatch,
+});
+
+/// One item to restore: its row plus the history that belongs to it.
+typedef RestoreItem = ({
+  LibraryItemsCompanion item,
+  List<RestoreWatch> watches,
+});
 
 /// Data access for [LibraryItems] (+ read of its [WatchEvents]) and the
 /// denormalized-progress maintenance the whole M2 grid relies on.
@@ -172,6 +190,13 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
 
   /// Insert a library item, returning the generated id. Low-level — most
   /// callers want [addOrGetItem], which dedupes.
+  ///
+  /// Not part of the DAO's advertised interface: its one production caller was
+  /// the restore, which now lives in [restore] and inserts through here itself.
+  /// It stays reachable only so `seedRawItem` can fabricate the malformed rows
+  /// the repair tests need — which is precisely the bypass this annotation
+  /// makes visible at the call site.
+  @visibleForTesting
   Future<int> insertItem(LibraryItemsCompanion entry) =>
       into(libraryItems).insert(entry);
 
@@ -281,6 +306,10 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   /// Insert one watch event verbatim. Bypasses the idempotent [markWatched]
   /// semantics, so it is **only** for the restore path, which is rebuilding
   /// history the user already owns rather than recording a new viewing.
+  ///
+  /// [restore] is now that path and calls this internally; nothing outside the
+  /// DAO may assemble a restore out of raw inserts and skip the recompute.
+  @visibleForTesting
   Future<int> insertWatchEvent(WatchEventsCompanion entry) =>
       into(watchEvents).insert(entry);
 
@@ -294,6 +323,51 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   Future<void> deleteAllUserData() => transaction(() async {
     await delete(watchEvents).go();
     await delete(libraryItems).go();
+  });
+
+  /// **Restore a backup** — the whole replace protocol as one call: wipe both
+  /// user tables, insert each item, insert its watch events verbatim, and
+  /// recompute that item's denormalized progress. One transaction, so a
+  /// failure anywhere rolls back to the library the user started with.
+  ///
+  /// This exists because the ordering *is* the contract and it used to live in
+  /// prose. Assembled by hand from [deleteAllUserData] + [insertItem] +
+  /// [insertWatchEvent], a caller that forgot the final recompute would leave
+  /// every restored row reading "0 watched" over a full history — the grid and
+  /// the stats read only the denormalized columns, so nothing would look wrong
+  /// until the user noticed their progress had vanished. Now there is no
+  /// ordering left to get wrong.
+  ///
+  /// Restore **replaces**; import **merges** and never comes here (the
+  /// restore-vs-import invariant, CLAUDE.md).
+  ///
+  /// Returns what was written, for the caller to report.
+  Future<({int items, int watchEvents})> restore(
+    List<RestoreItem> restored,
+  ) => transaction(() async {
+    await deleteAllUserData();
+    var events = 0;
+    for (final entry in restored) {
+      final id = await insertItem(entry.item);
+      for (final w in entry.watches) {
+        await insertWatchEvent(
+          WatchEventsCompanion.insert(
+            libraryItemId: id,
+            seasonNumber: Value(w.season),
+            episodeNumber: Value(w.episode),
+            watchedAt: Value(w.watchedAt),
+            runtimeMinutes: Value(w.runtimeMinutes),
+            isRewatch: Value(w.isRewatch),
+          ),
+        );
+        events++;
+      }
+      // Deliberately unstamped: a restore rebuilds the library the user
+      // already had, so it must not rewrite every row's `updatedAt` to now and
+      // reorder the grid by the moment they happened to reinstall.
+      await recomputeDenormalized(id);
+    }
+    return (items: restored.length, watchEvents: events);
   });
 
   /// Cheap `LIMIT 1` existence probe — is the library empty?

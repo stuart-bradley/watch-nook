@@ -109,6 +109,76 @@ void main() {
     });
   });
 
+  group('restore (the replace protocol, AD-4)', () {
+    RestoreItem entry(
+      LibraryItemsCompanion item, {
+      List<(int, int)> watched = const [],
+    }) => (
+      item: item,
+      watches: [
+        for (final (season, episode) in watched)
+          (
+            season: season,
+            episode: episode,
+            watchedAt: now,
+            runtimeMinutes: null,
+            isRewatch: false,
+          ),
+      ],
+    );
+
+    test('rebuilds the derived columns it was never handed', () async {
+      final written = await db.libraryDao.restore([
+        entry(aShow(), watched: const [(1, 1), (1, 2)]),
+        entry(aMovie()),
+      ]);
+
+      expect((written.items, written.watchEvents), (2, 2));
+      final show = (await db.libraryDao.getAll()).firstWhere(
+        (i) => i.title == 'Severance',
+      );
+      expect(
+        (show.watchedCount, show.lastWatchedSeason, show.lastWatchedEpisode),
+        (2, 1, 2),
+        reason:
+            'the backup carries watch events, not progress columns — the '
+            'restore has to derive them or every restored row reads 0 watched '
+            'over a full history',
+      );
+    });
+
+    test('replaces: what was there before is gone', () async {
+      await add(aShow(title: 'Before'));
+
+      await db.libraryDao.restore([entry(aShow(title: 'After'))]);
+
+      expect(
+        (await db.libraryDao.getAll()).map((i) => i.title),
+        ['After'],
+        reason: 'a restore replaces; only an import merges',
+      );
+    });
+
+    test('a failure part-way leaves the original library untouched', () async {
+      // Two rows sharing an imdbId violate the unique index — but only on the
+      // SECOND insert, after the wipe and the first insert have already
+      // happened. Without one transaction around the whole protocol the user
+      // would be left with a half-restored library and their original gone:
+      // the worst outcome the restore path has, and silent.
+      await add(aShow(title: 'Keep', imdbId: 'tt0000001'));
+
+      await expectLater(
+        db.libraryDao.restore([
+          entry(aShow(title: 'New A', tmdbId: 1, imdbId: 'tt9999999')),
+          entry(aShow(title: 'New B', tmdbId: 2, imdbId: 'tt9999999')),
+        ]),
+        throwsA(anything),
+      );
+
+      expect((await db.libraryDao.getAll()).map((i) => i.title), ['Keep']);
+    });
+  });
+
   group('recomputeDenormalized (AD-4 — the join-free progress primitive)', () {
     test(
       'watchedCount counts non-rewatch rows only; a rewatch never inflates it '
