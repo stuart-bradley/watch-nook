@@ -14,6 +14,7 @@ import 'package:watch_nook/core/import_export/export/import_export_service.dart'
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/routing/app_router.dart';
 import 'package:watch_nook/features/import/data/import_providers.dart';
 import 'package:watch_nook/features/settings/data/export_share.dart';
@@ -467,11 +468,11 @@ class _FakeSource implements MetadataSource {
   ];
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async => _severanceDetails;
+  Future<MediaDetails> showDetails(SourceRef ref) async => _severanceDetails;
 
   @override
   Future<List<EpisodeInfo>> seasonEpisodes(
-    int showSourceId,
+    SourceRef show,
     int seasonNumber,
   ) async => [
     for (final e in _severanceEpisodes)
@@ -479,7 +480,7 @@ class _FakeSource implements MetadataSource {
   ];
 
   @override
-  Future<MediaDetails> movieDetails(int sourceId) async => const MediaDetails(
+  Future<MediaDetails> movieDetails(SourceRef ref) async => const MediaDetails(
     kind: MediaKind.movie,
     title: 'Blade Runner 2049',
     genres: ['Science Fiction'],

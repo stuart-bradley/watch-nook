@@ -4,10 +4,10 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
-import 'package:watch_nook/core/database/library_item_ids.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 
 part 'up_next_providers.g.dart';
 
@@ -309,15 +309,15 @@ Future<UpNextBoard> upNextBoard(Ref ref) async {
   // and the page recomputes (via [libraryItemsProvider]) once it does.
   final sourceIds = [
     for (final item in shows)
-      if (item.sourceIdFor(backend) case final int id) id,
+      if (item.refFor(backend) case final SourceRef r) r.id,
   ];
   final details = await repo.cachedShowDetails(sourceIds);
 
   final queue = <QueueEntry>[];
   final upcoming = <UpcomingEntry>[];
   for (final item in shows) {
-    final sourceId = item.sourceIdFor(backend);
-    final d = sourceId == null ? null : details[sourceId];
+    final show = item.refFor(backend);
+    final d = show == null ? null : details[show.id];
     if (d == null) continue;
 
     final next = nextUnwatchedAired(

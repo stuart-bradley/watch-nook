@@ -7,6 +7,7 @@ import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 
 /// **AD-3 snapshot-at-add.** Adds [result] with the chosen [status], fetching
 /// full details **once** to snapshot the offline-stats fields (`genresCsv`,
@@ -40,14 +41,15 @@ Future<({LibraryItem item, bool created})> addToLibrary({
   required MediaSearchResult result,
   required TrackStatus status,
 }) async {
-  // The id to fetch/store is this backend's own id (matches recordedSource).
-  final sourceId = addSourceId(result, sourceKind);
+  // The reference to fetch/store under: this backend's own id, paired with
+  // this backend (so it matches the row's `recordedSource`).
+  final target = result.refFor(sourceKind);
 
   MediaDetails? details;
-  if (sourceId != null) {
+  if (target != null) {
     final stream = result.kind == MediaKind.tv
-        ? repo.showDetails(sourceId)
-        : repo.movieDetails(sourceId);
+        ? repo.showDetails(target)
+        : repo.movieDetails(target);
     try {
       // Keep the newest emission rather than taking `.last`. The SWR stream
       // yields the cached value FIRST and then rethrows a non-transient
@@ -103,17 +105,3 @@ Future<({LibraryItem item, bool created})> addToLibrary({
     ),
   );
 }
-
-/// The backend id to use for an **untracked** search hit — [sourceKind]'s own
-/// id column, never the other backend's (the episode-identity invariant). The
-/// pre-add twin of `detailSourceId`, which reads the same rule off a tracked
-/// row's `recordedSource`.
-///
-/// INVARIANT: the detail screen previews a search hit with this id and
-/// [addToLibrary] stores the row under it — they must agree, or the preview
-/// shows one title's seasons and adds another's.
-int? addSourceId(MediaSearchResult result, MetadataSourceKind sourceKind) =>
-    switch (sourceKind) {
-      MetadataSourceKind.tmdb => result.tmdbId,
-      MetadataSourceKind.tvdb => result.tvdbId,
-    };

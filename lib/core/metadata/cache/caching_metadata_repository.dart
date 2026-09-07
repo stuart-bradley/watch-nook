@@ -8,6 +8,7 @@ import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_exception.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 
 /// Stale-while-revalidate cache over a [MetadataSource] (ADR-7, US-13).
 ///
@@ -52,19 +53,25 @@ class CachingMetadataRepository {
   static const _endedTtl = Duration(days: 30);
   static const _airingTtl = Duration(hours: 12); // within ADR-7's 6–24h band.
 
-  /// Cache-first details for a show ([sourceId] is this backend's own id).
-  Stream<MediaDetails> showDetails(int sourceId) =>
-      _details(MediaType.tv, sourceId, () => _source.showDetails(sourceId));
+  /// Cache-first details for a show ([ref] must be this backend's own).
+  Stream<MediaDetails> showDetails(SourceRef ref) =>
+      _details(MediaType.tv, ref, () => _source.showDetails(ref));
 
-  /// Cache-first details for a movie ([sourceId] is this backend's own id).
-  Stream<MediaDetails> movieDetails(int sourceId) =>
-      _details(MediaType.movie, sourceId, () => _source.movieDetails(sourceId));
+  /// Cache-first details for a movie ([ref] must be this backend's own).
+  Stream<MediaDetails> movieDetails(SourceRef ref) =>
+      _details(MediaType.movie, ref, () => _source.movieDetails(ref));
 
   Stream<MediaDetails> _details(
     MediaType type,
-    int sourceId,
+    SourceRef ref,
     Future<MediaDetails> Function() fetch,
   ) async* {
+    // Guarded HERE, before the try below, and not left to the wrapped source:
+    // the catch-alls that keep a stale cache alive on a network failure would
+    // otherwise swallow a foreign reference and serve whatever this backend
+    // had cached under the other backend's id — silently, which is exactly the
+    // wrong-title bug the reference exists to prevent.
+    final sourceId = ref.idFor(_sourceKind);
     final cached = await _dao.getMedia(_sourceKind, type, sourceId);
     if (cached != null) {
       yield MediaDetails.fromJson(
@@ -119,9 +126,11 @@ class CachingMetadataRepository {
 
   /// Cache-first aired-order episodes for one season (ADR-4).
   Stream<List<EpisodeInfo>> seasonEpisodes(
-    int showSourceId,
+    SourceRef show,
     int seasonNumber,
   ) async* {
+    // Guarded before the cache read, for the reason in [_details].
+    final showSourceId = show.idFor(_sourceKind);
     final cached = await _dao.getEpisodes(
       _sourceKind,
       showSourceId,
@@ -139,7 +148,7 @@ class CachingMetadataRepository {
     if (oldest != null && !_isStale(oldest, _airingTtl)) return; // fresh
 
     try {
-      final fresh = await _source.seasonEpisodes(showSourceId, seasonNumber);
+      final fresh = await _source.seasonEpisodes(show, seasonNumber);
       await _dao.replaceSeasonEpisodes(
         _sourceKind,
         showSourceId,

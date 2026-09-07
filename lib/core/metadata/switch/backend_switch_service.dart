@@ -4,6 +4,7 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 
 /// Re-resolves the library when the active metadata backend changes (ADR-4).
 ///
@@ -146,7 +147,10 @@ class BackendSwitchService {
     for (final season in watched.map((c) => c.$1).toSet()) {
       final List<EpisodeInfo> eps;
       try {
-        eps = await _newSource.seasonEpisodes(newShowId, season);
+        eps = await _newSource.seasonEpisodes(
+          SourceRef(_newKind, newShowId),
+          season,
+        );
       } on Object {
         return false; // can't fetch → can't verify → flag, don't scramble
       }

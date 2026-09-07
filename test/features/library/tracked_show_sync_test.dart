@@ -9,6 +9,7 @@ import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/features/library/data/tracked_show_sync.dart';
 
 import '../../support/library_fixtures.dart' as seed;
@@ -24,9 +25,9 @@ class _FakeRepo implements CachingMetadataRepository {
   int calls = 0;
 
   @override
-  Stream<MediaDetails> showDetails(int sourceId) {
+  Stream<MediaDetails> showDetails(SourceRef ref) {
     calls++;
-    final d = byId[sourceId];
+    final d = byId[ref.id];
     return d == null ? Stream.error(StateError('offline')) : Stream.value(d);
   }
 
@@ -43,7 +44,7 @@ class _FakeSource implements MetadataSource {
   int calls = 0;
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async {
+  Future<MediaDetails> showDetails(SourceRef sourceId) async {
     calls++;
     return fresh;
   }

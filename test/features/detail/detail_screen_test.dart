@@ -17,6 +17,7 @@ import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart'
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/metadata/tmdb/tmdb_source.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
@@ -47,13 +48,13 @@ class _FakeSource implements MetadataSource {
   final bool offline;
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async => _details();
+  Future<MediaDetails> showDetails(SourceRef ref) async => _details();
 
   @override
-  Future<MediaDetails> movieDetails(int sourceId) async => _details();
+  Future<MediaDetails> movieDetails(SourceRef ref) async => _details();
 
   @override
-  Future<List<EpisodeInfo>> seasonEpisodes(int showId, int season) async {
+  Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) async {
     if (offline) throw StateError('offline');
     return episodes.where((e) => e.seasonNumber == season).toList();
   }

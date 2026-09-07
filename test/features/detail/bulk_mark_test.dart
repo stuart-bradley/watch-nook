@@ -10,6 +10,7 @@ import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart'
 import 'package:watch_nook/core/metadata/metadata_exception.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/features/detail/data/bulk_mark.dart';
 
 import '../../support/library_fixtures.dart' as seed;
@@ -48,7 +49,7 @@ class _RecordingSource implements MetadataSource {
   final fetched = <int>[];
 
   @override
-  Future<List<EpisodeInfo>> seasonEpisodes(int showId, int season) async {
+  Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) async {
     fetched.add(season);
     final rows = bySeason[season];
     if (rows == null) throw onMissing;
@@ -174,7 +175,7 @@ void main() {
       dao: db.libraryDao,
       repo: repoOver(source),
       itemId: itemId,
-      showSourceId: showId,
+      showRef: const SourceRef(MetadataSourceKind.tmdb, showId),
       seasons: seasons,
       upTo: upTo,
     ),
@@ -422,7 +423,7 @@ void main() {
             dao: db.libraryDao,
             repo: repoOver(_RecordingSource({})),
             itemId: id,
-            showSourceId: showId,
+            showRef: const SourceRef(MetadataSourceKind.tmdb, showId),
             seasons: [1],
           ),
         );
@@ -453,7 +454,7 @@ void main() {
           dao: db.libraryDao,
           repo: repoOver(_RecordingSource({})),
           itemId: id,
-          showSourceId: showId,
+          showRef: const SourceRef(MetadataSourceKind.tmdb, showId),
           seasons: [1],
         ),
       );

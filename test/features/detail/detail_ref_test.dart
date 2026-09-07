@@ -14,6 +14,7 @@ import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/widgets/remote_image.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
@@ -57,14 +58,14 @@ void main() {
   test('a row on the active backend yields that backend id', () async {
     final item = await seed.seedShow(db, tmdbId: 95396);
 
-    expect(detailSourceId(item, MetadataSourceKind.tmdb), 95396);
+    expect(item.refFor(MetadataSourceKind.tmdb)?.id, 95396);
   });
 
   test('a row recorded against the inactive backend yields nothing', () async {
     final item = await seed.seedShow(db, tmdbId: 95396);
 
     expect(
-      detailSourceId(item, MetadataSourceKind.tvdb),
+      item.refFor(MetadataSourceKind.tvdb)?.id,
       isNull,
       reason:
           'null is the established "cannot fetch metadata for this row" '
@@ -81,14 +82,14 @@ void main() {
       tvdbId: 371980,
     );
 
-    expect(detailSourceId(item, MetadataSourceKind.tvdb), 371980);
-    expect(detailSourceId(item, MetadataSourceKind.tmdb), isNull);
+    expect(item.refFor(MetadataSourceKind.tvdb)?.id, 371980);
+    expect(item.refFor(MetadataSourceKind.tmdb)?.id, isNull);
   });
 
   test('a row with no id for its own backend still yields nothing', () async {
     final item = await seed.seedShow(db, tmdbId: null, imdbId: 'tt11280740');
 
-    expect(detailSourceId(item, MetadataSourceKind.tmdb), isNull);
+    expect(item.refFor(MetadataSourceKind.tmdb)?.id, isNull);
   });
 
   testWidgets('the screen renders the stored row and fetches nothing', (

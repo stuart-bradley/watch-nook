@@ -14,6 +14,7 @@ import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart'
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/routing/app_router.dart';
 
 /// The `/preview` route itself — mounted from the **real** `appRoutes`.
@@ -38,10 +39,10 @@ class _FakeSource implements MetadataSource {
   final MediaDetails details;
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async => details;
+  Future<MediaDetails> showDetails(SourceRef ref) async => details;
 
   @override
-  Future<List<EpisodeInfo>> seasonEpisodes(int show, int season) async =>
+  Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) async =>
       const [];
 
   @override

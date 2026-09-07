@@ -1,13 +1,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// StreamProviderFamily lives in the misc barrel, not the main one.
 import 'package:flutter_riverpod/misc.dart' show StreamProviderFamily;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
-import 'package:watch_nook/core/database/library_item_ids.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
+// StreamProviderFamily lives in the misc barrel, not the main one.
 
 part 'detail_providers.g.dart';
 
@@ -30,35 +30,15 @@ final StreamProviderFamily<Set<(int, int)>, int> watchedEpisodesProvider =
           ref.watch(libraryDaoProvider).watchWatchedEpisodes(itemId),
     );
 
-/// The backend id to fetch this row's metadata with — **this row's own**
-/// `recordedSource` id, never the other backend's (the episode-identity
-/// invariant). Delegates to the canonical [LibraryItemSourceId.sourceIdFor].
-///
-/// Null in two cases, which the detail screen treats identically by rendering
-/// the stored row alone:
-///
-/// - the row has no id for its own backend (offline add / import), and
-/// - the row was recorded against a backend that is no longer [active].
-///
-/// The second is the load-bearing one. ADR-2 makes flipping the backend an
-/// operator action taken remotely, so rows keep the ids of the backend they
-/// were recorded against until a relink runs. Handing one of those ids to the
-/// *active* source does not fail — it returns a perfectly valid response
-/// describing a completely different title, which then caches as this one.
-/// Refusing to fetch is the only safe answer until the user relinks from
-/// Settings.
-int? detailSourceId(LibraryItem item, MetadataSourceKind active) =>
-    item.recordedSource == active ? item.sourceIdFor(active) : null;
-
 /// Cache-first details for the detail screen (#18). Goes through
 /// `metadataRepositoryProvider` (SWR), so it emits the cached value instantly
 /// and a stale-cache refetch failure never blanks the screen (US-13).
 @riverpod
-Stream<MediaDetails> titleDetails(Ref ref, MediaType type, int sourceId) {
+Stream<MediaDetails> titleDetails(Ref ref, MediaType type, SourceRef target) {
   final repo = ref.watch(metadataRepositoryProvider);
   return type == MediaType.movie
-      ? repo.movieDetails(sourceId)
-      : repo.showDetails(sourceId);
+      ? repo.movieDetails(target)
+      : repo.showDetails(target);
 }
 
 /// Cache-first aired-order episodes for one season (ADR-4). Watched lazily —
@@ -67,11 +47,6 @@ Stream<MediaDetails> titleDetails(Ref ref, MediaType type, int sourceId) {
 @riverpod
 Stream<List<EpisodeInfo>> seasonEpisodes(
   Ref ref,
-  int showSourceId,
+  SourceRef show,
   int seasonNumber,
-) => ref
-    .watch(metadataRepositoryProvider)
-    .seasonEpisodes(
-      showSourceId,
-      seasonNumber,
-    );
+) => ref.watch(metadataRepositoryProvider).seasonEpisodes(show, seasonNumber);

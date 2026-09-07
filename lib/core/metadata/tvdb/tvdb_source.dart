@@ -2,9 +2,11 @@ import 'dart:convert';
 
 import 'package:clock/clock.dart';
 import 'package:http/http.dart' as http;
+import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_exception.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 
 /// TheTVDB v4 API root.
 const _apiBase = 'https://api4.thetvdb.com/v4';
@@ -136,7 +138,8 @@ class TvdbSource implements MetadataSource {
   }
 
   @override
-  Future<MediaDetails> movieDetails(int sourceId) async {
+  Future<MediaDetails> movieDetails(SourceRef ref) async {
+    final sourceId = ref.idFor(MetadataSourceKind.tvdb);
     final data = _dataOf(await _getJson('/movies/$sourceId/extended'));
     return MediaDetails(
       kind: MediaKind.movie,
@@ -153,7 +156,8 @@ class TvdbSource implements MetadataSource {
   }
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async {
+  Future<MediaDetails> showDetails(SourceRef ref) async {
+    final sourceId = ref.idFor(MetadataSourceKind.tvdb);
     // TVDB has no append_to_response: the extended record carries the show's
     // metadata + a bare `nextAired` date, and a separate aired-order episodes
     // call gives per-season counts and resolves `nextAired` to a real episode.
@@ -181,9 +185,10 @@ class TvdbSource implements MetadataSource {
 
   @override
   Future<List<EpisodeInfo>> seasonEpisodes(
-    int showSourceId,
+    SourceRef show,
     int seasonNumber,
   ) async {
+    final showSourceId = show.idFor(MetadataSourceKind.tvdb);
     final season =
         (await _airedEpisodes(
             showSourceId,

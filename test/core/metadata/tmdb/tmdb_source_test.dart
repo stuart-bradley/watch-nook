@@ -3,8 +3,10 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_exception.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/metadata/tmdb/tmdb_source.dart';
 
 String _fixture(String name) =>
@@ -59,6 +61,10 @@ TmdbSource _source({
   readToken: readToken,
 );
 
+/// This source's own ids, paired with this source's backend — the only shape
+/// the metadata interface accepts — a foreign one throws (contract suite).
+SourceRef _ref(int id) => SourceRef(MetadataSourceKind.tmdb, id);
+
 void main() {
   group('attribution (TMDB compliance — #53)', () {
     test('notice is the EXACT TMDB-required wording (no paraphrase)', () {
@@ -105,7 +111,7 @@ void main() {
 
   group('showDetails', () {
     test('inlines external_ids, next episode, seasons, and genres', () async {
-      final d = await _source().showDetails(95396);
+      final d = await _source().showDetails(_ref(95396));
 
       expect(d.kind, MediaKind.tv);
       expect(d.imdbId, 'tt11280740');
@@ -123,7 +129,7 @@ void main() {
     test(
       'normalizes runtime, year, imdbId, and leaves seasons empty',
       () async {
-        final d = await _source().movieDetails(545611);
+        final d = await _source().movieDetails(_ref(545611));
 
         expect(d.kind, MediaKind.movie);
         expect(d.title, 'Everything Everywhere All at Once');
@@ -138,7 +144,7 @@ void main() {
 
   group('seasonEpisodes', () {
     test('returns episodes in contiguous aired order (ADR-4)', () async {
-      final eps = await _source().seasonEpisodes(95396, 1);
+      final eps = await _source().seasonEpisodes(_ref(95396), 1);
 
       expect(eps.map((e) => e.episodeNumber), [1, 2, 3]);
       expect(eps.every((e) => e.seasonNumber == 1), isTrue);
@@ -259,7 +265,7 @@ void main() {
         // Unknown id → the handler's 404 branch. The source must surface it
         // (not swallow) so the SWR wrapper (#13) can fall back to cache.
         expect(
-          () => _source().movieDetails(999),
+          () => _source().movieDetails(_ref(999)),
           throwsA(
             isA<MetadataException>().having(
               (e) => e.statusCode,

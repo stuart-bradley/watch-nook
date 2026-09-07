@@ -10,6 +10,7 @@ import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart'
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/features/detail/data/add_to_library.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 
@@ -41,7 +42,7 @@ class _FakeSource implements MetadataSource {
   int showDetailCalls = 0;
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async {
+  Future<MediaDetails> showDetails(SourceRef ref) async {
     showDetailCalls++;
     return details;
   }

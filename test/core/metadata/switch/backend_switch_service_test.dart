@@ -6,6 +6,7 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/metadata/switch/backend_switch_service.dart';
 
 import '../../../support/library_fixtures.dart' as seed;
@@ -37,16 +38,17 @@ class _FakeTvdb implements MetadataSource {
   }
 
   @override
-  Future<List<EpisodeInfo>> seasonEpisodes(int showId, int season) =>
-      Future.value(episodes[(showId, season)] ?? const []);
+  Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) =>
+      Future.value(episodes[(show.id, season)] ?? const []);
 
   @override
   Future<List<MediaSearchResult>> search(String query, {MediaKind? kind}) =>
       throw UnimplementedError();
   @override
-  Future<MediaDetails> movieDetails(int sourceId) => throw UnimplementedError();
+  Future<MediaDetails> movieDetails(SourceRef ref) =>
+      throw UnimplementedError();
   @override
-  Future<MediaDetails> showDetails(int sourceId) => throw UnimplementedError();
+  Future<MediaDetails> showDetails(SourceRef ref) => throw UnimplementedError();
   @override
   String imageUrl(String path, ImageSize size) => throw UnimplementedError();
   @override

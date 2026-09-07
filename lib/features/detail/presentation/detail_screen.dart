@@ -11,6 +11,7 @@ import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/remote_image.dart';
 import 'package:watch_nook/core/widgets/track_status_ui.dart';
@@ -93,22 +94,23 @@ class _Body extends ConsumerWidget {
     final result = this.result;
 
     final mediaType = entry?.mediaType ?? mediaTypeOf(result!.kind);
-    // The id to fetch details with. For a tracked row that's its own
+    // The reference to fetch details with. For a tracked row that's its own
     // `recordedSource` id; for a preview it's the active backend's id off the
     // hit — the same choice `addToLibrary` makes, so what you preview is what
-    // gets added.
+    // gets added. Null (render the stored row, fetch nothing) when the row has
+    // no id for its backend, or its backend is no longer the active one.
     final activeKind = metadataSourceKindOf(
       ref.watch(activeMetadataBackendProvider),
     );
-    final sourceId = entry != null
-        ? detailSourceId(entry, activeKind)
-        : addSourceId(result!, activeKind);
+    final target = entry != null
+        ? entry.refFor(activeKind)
+        : result!.refFor(activeKind);
 
     // ponytail: conditional watch — a row with no id for its own backend has no
     // details to fetch, so it renders from the stored columns alone.
-    final async = sourceId == null
+    final async = target == null
         ? null
-        : ref.watch(titleDetailsProvider(mediaType, sourceId));
+        : ref.watch(titleDetailsProvider(mediaType, target));
     final details = async?.value;
     final coldCache = async != null && !async.hasValue;
     final seasons = details?.seasons ?? const <SeasonInfo>[];
@@ -214,7 +216,7 @@ class _Body extends ConsumerWidget {
                     icon: Icons.done_all,
                     label: 'Mark show watched',
                     itemId: item.id,
-                    showSourceId: sourceId!,
+                    showRef: target!,
                     seasons: _seasonNumbers(details!),
                   ),
               ],
@@ -223,7 +225,7 @@ class _Body extends ConsumerWidget {
         for (final season in seasons)
           _SeasonTile(
             itemId: item?.id,
-            showSourceId: sourceId!,
+            showRef: target!,
             season: season,
             allSeasons: _seasonNumbers(details!),
           ),
@@ -508,7 +510,7 @@ class _NextEpisode extends StatelessWidget {
 class _SeasonTile extends ConsumerWidget {
   const _SeasonTile({
     required this.itemId,
-    required this.showSourceId,
+    required this.showRef,
     required this.season,
     required this.allSeasons,
   });
@@ -516,7 +518,7 @@ class _SeasonTile extends ConsumerWidget {
   /// The tracked row, or null in preview mode — where there is nothing to mark.
   final int? itemId;
 
-  final int showSourceId;
+  final SourceRef showRef;
   final SeasonInfo season;
 
   /// Every season number of the show — "watch up to here" spans the seasons
@@ -566,7 +568,7 @@ class _SeasonTile extends ConsumerWidget {
                         context,
                         ref,
                         itemId: itemId,
-                        showSourceId: showSourceId,
+                        showRef: showRef,
                         seasons: [season.seasonNumber],
                       ),
                     ),
@@ -574,7 +576,7 @@ class _SeasonTile extends ConsumerWidget {
       children: [
         _SeasonEpisodes(
           itemId: itemId,
-          showSourceId: showSourceId,
+          showRef: showRef,
           seasonNumber: season.seasonNumber,
           allSeasons: allSeasons,
         ),
@@ -590,14 +592,14 @@ class _BulkButton extends ConsumerWidget {
     required this.icon,
     required this.label,
     required this.itemId,
-    required this.showSourceId,
+    required this.showRef,
     required this.seasons,
   });
 
   final IconData icon;
   final String label;
   final int itemId;
-  final int showSourceId;
+  final SourceRef showRef;
   final List<int> seasons;
 
   @override
@@ -609,7 +611,7 @@ class _BulkButton extends ConsumerWidget {
         context,
         ref,
         itemId: itemId,
-        showSourceId: showSourceId,
+        showRef: showRef,
         seasons: seasons,
       ),
     ),
@@ -624,7 +626,7 @@ Future<void> _runBulk(
   BuildContext context,
   WidgetRef ref, {
   required int itemId,
-  required int showSourceId,
+  required SourceRef showRef,
   required List<int> seasons,
   (int, int)? upTo,
 }) async {
@@ -634,7 +636,7 @@ Future<void> _runBulk(
       dao: ref.read(libraryDaoProvider),
       repo: ref.read(metadataRepositoryProvider),
       itemId: itemId,
-      showSourceId: showSourceId,
+      showRef: showRef,
       seasons: seasons,
       upTo: upTo,
     );
@@ -680,7 +682,7 @@ List<int> _seasonNumbers(MediaDetails details) =>
 class _SeasonEpisodes extends ConsumerWidget {
   const _SeasonEpisodes({
     required this.itemId,
-    required this.showSourceId,
+    required this.showRef,
     required this.seasonNumber,
     required this.allSeasons,
   });
@@ -688,7 +690,7 @@ class _SeasonEpisodes extends ConsumerWidget {
   /// Null in preview mode — the episode rows then carry no watch controls.
   final int? itemId;
 
-  final int showSourceId;
+  final SourceRef showRef;
   final int seasonNumber;
   final List<int> allSeasons;
 
@@ -696,7 +698,7 @@ class _SeasonEpisodes extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final itemId = this.itemId;
     final episodes = ref.watch(
-      seasonEpisodesProvider(showSourceId, seasonNumber),
+      seasonEpisodesProvider(showRef, seasonNumber),
     );
     // Before the first emission nothing is known to be watched — an unwatched
     // toggle that marks is the safe default (marking is idempotent; unwatching
@@ -728,7 +730,7 @@ class _SeasonEpisodes extends ConsumerWidget {
                         context,
                         ref,
                         itemId: itemId,
-                        showSourceId: showSourceId,
+                        showRef: showRef,
                         seasons: allSeasons,
                         upTo: (e.seasonNumber, e.episodeNumber),
                       ),

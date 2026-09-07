@@ -4,8 +4,10 @@ import 'package:clock/clock.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/metadata/tmdb/tmdb_source.dart';
 import 'package:watch_nook/core/metadata/tvdb/tvdb_source.dart';
 
@@ -84,6 +86,7 @@ class _Case {
     required this.build,
     required this.showId,
     required this.movieId,
+    required this.kind,
     required this.imagePath,
     required this.imageUrlContains,
   });
@@ -92,6 +95,20 @@ class _Case {
   final MetadataSource Function(Clock clock) build;
   final int showId;
   final int movieId;
+
+  /// The backend this case's ids belong to — what a [SourceRef] must carry for
+  /// this source to answer it.
+  final MetadataSourceKind kind;
+
+  SourceRef get show => SourceRef(kind, showId);
+  SourceRef get movie => SourceRef(kind, movieId);
+
+  /// A reference minted by the *other* backend, carrying an id this source
+  /// would happily answer if it only saw the int.
+  SourceRef get foreignShow => SourceRef(
+    MetadataSourceKind.values.firstWhere((k) => k != kind),
+    showId,
+  );
   final String imagePath;
   final String imageUrlContains;
 }
@@ -99,6 +116,7 @@ class _Case {
 final _cases = <_Case>[
   _Case(
     label: 'TmdbSource',
+    kind: MetadataSourceKind.tmdb,
     build: (_) => TmdbSource(client: _tmdbClient(), apiKey: 'test-key'),
     showId: 95396,
     movieId: 545611,
@@ -107,6 +125,7 @@ final _cases = <_Case>[
   ),
   _Case(
     label: 'TvdbSource',
+    kind: MetadataSourceKind.tvdb,
     build: (clock) =>
         TvdbSource(client: _tvdbClient(), apiKey: 'test-key', clock: clock),
     showId: 371980,
@@ -141,7 +160,7 @@ void main() {
       });
 
       test('showDetails → seasons populated, next episode present', () async {
-        final d = await source.showDetails(c.showId);
+        final d = await source.showDetails(c.show);
 
         expect(d.kind, MediaKind.tv);
         expect(d.title, 'Severance');
@@ -152,7 +171,7 @@ void main() {
       });
 
       test('movieDetails → runtime/year/imdb normalized, no seasons', () async {
-        final d = await source.movieDetails(c.movieId);
+        final d = await source.movieDetails(c.movie);
 
         expect(d.kind, MediaKind.movie);
         expect(d.title, 'Everything Everywhere All at Once');
@@ -162,8 +181,23 @@ void main() {
         expect(d.seasons, isEmpty);
       });
 
+      test('refuses a reference minted by the other backend', () async {
+        // `foreignShow` carries THIS case's id under the OTHER backend's name —
+        // the shape a stranded row produces after an operator flips the backend
+        // (ADR-2). Delete the guard in the source and these calls succeed,
+        // returning Severance and its episodes for an id that, on the backend
+        // the reference names, is a different title entirely. Throwing is the
+        // only answer that cannot silently become wrong data.
+        expect(() => source.showDetails(c.foreignShow), throwsArgumentError);
+        expect(() => source.movieDetails(c.foreignShow), throwsArgumentError);
+        expect(
+          () => source.seasonEpisodes(c.foreignShow, 1),
+          throwsArgumentError,
+        );
+      });
+
       test('seasonEpisodes → aired-ordered and contiguous (ADR-4)', () async {
-        final eps = await source.seasonEpisodes(c.showId, 1);
+        final eps = await source.seasonEpisodes(c.show, 1);
 
         expect(eps.map((e) => e.episodeNumber), [1, 2, 3]);
         expect(eps.every((e) => e.seasonNumber == 1), isTrue);

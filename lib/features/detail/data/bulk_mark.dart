@@ -2,6 +2,7 @@ import 'package:clock/clock.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
 import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart'
     show airsBefore;
 
@@ -54,7 +55,7 @@ Future<BulkMarkResult> bulkMarkWatched({
   required LibraryDao dao,
   required CachingMetadataRepository repo,
   required int itemId,
-  required int showSourceId,
+  required SourceRef showRef,
   required Iterable<int> seasons,
   (int, int)? upTo,
 }) async {
@@ -62,7 +63,7 @@ Future<BulkMarkResult> bulkMarkWatched({
   // The show's own next-/last-to-air markers — the SAME authority the watch
   // queue uses (`nextUnwatchedAired`). Cache-only, so this never fetches and
   // never throws; a cold show yields null and [hasAired] falls back to dates.
-  final details = (await repo.cachedShowDetails([showSourceId]))[showSourceId];
+  final details = (await repo.cachedShowDetails([showRef.id]))[showRef.id];
 
   final wanted =
       seasons
@@ -78,7 +79,7 @@ Future<BulkMarkResult> bulkMarkWatched({
     // waiting for each season's refetch made the mark appear to "do nothing
     // until you reload" (the write was stuck behind N round-trips, or aborted
     // offline). Cold seasons still fetch here; a warmed show marks instantly.
-    final episodes = await repo.seasonEpisodes(showSourceId, season).first;
+    final episodes = await repo.seasonEpisodes(showRef, season).first;
     for (final e in episodes) {
       if (e.seasonNumber <= 0) continue; // a special listed under a real season
       if (upTo != null &&

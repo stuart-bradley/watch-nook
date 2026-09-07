@@ -1,4 +1,5 @@
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 
 /// The single provider-agnostic metadata gateway (ADR-1). Two impls —
 /// `TmdbSource` (#10) and `TvdbSource` (#11) — do the provider-specific HTTP
@@ -8,9 +9,12 @@ import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 /// `RemoteConfigService.backend`, so flipping the backend swaps sources with
 /// no code change.
 ///
-/// All ids passed in ([movieDetails]/[showDetails]/[seasonEpisodes]) are **this
-/// source's own** ids (TMDB id when TMDB is active, TVDB id when TVDB is
-/// active) — matching the row's `recordedSource`.
+/// All ids passed in ([movieDetails]/[showDetails]/[seasonEpisodes]) are
+/// [SourceRef]s, which carry the backend that minted them. An impl handed a
+/// reference from the *other* backend throws rather than answering it: ids are
+/// namespaced per backend, so the wrong catalogue does not reject a foreign id
+/// — it returns a different title. The reference type is what makes that
+/// pairing checkable instead of conventional.
 /// [resolveByExternalId] is the exception: it takes an external id (IMDb, or a
 /// TVDB id from a TV Time import) and maps it to this source (ADR-4).
 abstract interface class MetadataSource {
@@ -18,16 +22,16 @@ abstract interface class MetadataSource {
   /// searches both.
   Future<List<MediaSearchResult>> search(String query, {MediaKind? kind});
 
-  /// Full details for a movie by this source's own id.
-  Future<MediaDetails> movieDetails(int sourceId);
+  /// Full details for a movie by [ref] — which must be this source's own.
+  Future<MediaDetails> movieDetails(SourceRef ref);
 
-  /// Full details for a show by this source's own id, including the next
+  /// Full details for a show by [ref] — this source's own — including the next
   /// episode to air and season summaries.
-  Future<MediaDetails> showDetails(int sourceId);
+  Future<MediaDetails> showDetails(SourceRef ref);
 
   /// Aired-order episodes for one season of a show (ADR-4 — never
   /// absolute/DVD numbering).
-  Future<List<EpisodeInfo>> seasonEpisodes(int showSourceId, int seasonNumber);
+  Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int seasonNumber);
 
   /// Relinks a title to this source by an external id. [kind] selects the id
   /// namespace: IMDb (the universal join key for a backend switch, ADR-4) or
