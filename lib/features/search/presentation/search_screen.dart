@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
@@ -107,7 +108,9 @@ class _ResultTile extends ConsumerWidget {
     // Already tracked? Then say so on the row, rather than making the user tap
     // each hit to find out which of the six "Severance"s is the one they have.
     final tracked = ref.watch(trackedItemProvider(identityOf(result))).value;
-    final activeKind = ref.watch(activeMetadataKindProvider);
+    final activeKind = metadataSourceKindOf(
+      ref.watch(activeMetadataBackendProvider),
+    );
     return ListTile(
       // A hit comes from whichever source is active right now, so its poster
       // is tagged with that backend.

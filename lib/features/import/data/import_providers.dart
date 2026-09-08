@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/import_export/import/import_archive.dart';
@@ -88,7 +89,9 @@ class ImportController extends _$ImportController {
     // candidates, their posters, the `recordedSource` the merge stamps — is
     // relative to this backend, and the user can sit on the confirm screen
     // long enough for an operator to flip it (ADR-2).
-    final resolveKind = ref.read(activeMetadataKindProvider);
+    final resolveKind = metadataSourceKindOf(
+      ref.read(activeMetadataBackendProvider),
+    );
     final resolver = Resolver(
       source: ref.read(metadataProvider),
       sourceKind: resolveKind,

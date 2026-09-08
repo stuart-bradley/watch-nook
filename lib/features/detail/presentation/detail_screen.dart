@@ -4,6 +4,7 @@ import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
@@ -95,7 +96,9 @@ class _Body extends ConsumerWidget {
 
     // Which title, from which backend, and is it tracked — answered once, by
     // [detailTargetOf], rather than re-derived down the build method.
-    final activeKind = ref.watch(activeMetadataKindProvider);
+    final activeKind = metadataSourceKindOf(
+      ref.watch(activeMetadataBackendProvider),
+    );
     final target = detailTargetOf(
       item: entry,
       result: result,
@@ -414,7 +417,7 @@ Future<void> _addTitle(
   try {
     final (:item, :created) = await addToLibrary(
       repo: ref.read(metadataProvider),
-      sourceKind: ref.read(activeMetadataKindProvider),
+      sourceKind: metadataSourceKindOf(ref.read(activeMetadataBackendProvider)),
       dao: ref.read(libraryDaoProvider),
       result: result,
       status: status,

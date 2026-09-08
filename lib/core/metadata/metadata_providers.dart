@@ -62,10 +62,10 @@ MetadataSource activeMetadataSource(Ref ref) {
 @Riverpod(keepAlive: true)
 CachingMetadataSource metadata(Ref ref) => CachingMetadataSource(
   source: ref.watch(activeMetadataSourceProvider),
-  // Through [activeMetadataKindProvider], not the backend enum directly: the
-  // cache keys every row by this value and `RemoteImage` compares against it,
-  // so they must be the same answer — and one provider to override.
-  sourceKind: ref.watch(activeMetadataKindProvider),
+  // The cache keys every row by this value and `RemoteImage` compares against
+  // it, so they must be the same answer — which is what [metadataSourceKindOf]
+  // over the single backend provider buys.
+  sourceKind: metadataSourceKindOf(ref.watch(activeMetadataBackendProvider)),
   dao: ref.watch(mediaCacheDaoProvider),
 );
 
@@ -73,20 +73,17 @@ CachingMetadataSource metadata(Ref ref) => CachingMetadataSource(
 /// stored row's `recordedSource` must match for its ids and artwork to mean
 /// anything (see `SourceRef` / `ArtworkRef`).
 ///
-/// One provider rather than the enum conversion repeated at
-/// every widget that needs to ask "did this row come from the backend we are
-/// on now?".
-@riverpod
-MetadataSourceKind activeMetadataKind(Ref ref) =>
-    _metadataSourceKindOf(ref.watch(activeMetadataBackendProvider));
-
-/// Bridges the config's [MetadataBackend] to the DB's per-row
-/// [MetadataSourceKind] (stamped onto `LibraryItems.recordedSource`).
+/// The two enums are **one concept with two representations** and stay two
+/// types for a layering reason (ADR-9). This is the only converter between
+/// them.
 ///
-/// Private on purpose: [activeMetadataKindProvider] is the one answer to "what
-/// backend are we on?", and a second call site converting the enum itself is
-/// how the cache key and a screen's mismatch check drift apart.
-MetadataSourceKind _metadataSourceKindOf(MetadataBackend backend) =>
+/// Deliberately a **function, not a provider** (ADR-9). It used to be a derived
+/// provider, which meant two overridable answers to "what backend are we on?" —
+/// and a harness that overrode only one got rows cached under one backend and
+/// compared against another. A function cannot be overridden, so
+/// [activeMetadataBackendProvider] is the single injection point and the
+/// split-brain is unrepresentable.
+MetadataSourceKind metadataSourceKindOf(MetadataBackend backend) =>
     switch (backend) {
       MetadataBackend.tmdb => MetadataSourceKind.tmdb,
       MetadataBackend.tvdb => MetadataSourceKind.tvdb,

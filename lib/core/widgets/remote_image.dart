@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
@@ -77,7 +78,8 @@ class RemoteImage extends ConsumerWidget {
 
     if (artwork == null) return placeholder;
     // The stranded case. Only the source that minted a path can resolve it.
-    if (artwork.kind != ref.watch(activeMetadataKindProvider)) {
+    if (artwork.kind !=
+        metadataSourceKindOf(ref.watch(activeMetadataBackendProvider))) {
       return placeholder;
     }
 

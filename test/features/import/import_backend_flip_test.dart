@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
@@ -70,7 +72,7 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         appDatabaseProvider.overrideWithValue(db),
-        activeMetadataKindProvider.overrideWithValue(MetadataSourceKind.tmdb),
+        activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
         activeMetadataSourceProvider.overrideWithValue(_FakeSource()),
       ],
     );
@@ -91,7 +93,7 @@ void main() {
     // The operator flips the backend while the screen is open.
     container.updateOverrides([
       appDatabaseProvider.overrideWithValue(db),
-      activeMetadataKindProvider.overrideWithValue(MetadataSourceKind.tvdb),
+      activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tvdb),
       activeMetadataSourceProvider.overrideWithValue(_FakeSource()),
     ]);
 

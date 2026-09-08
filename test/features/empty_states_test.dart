@@ -74,8 +74,8 @@ void main() {
           // The one metadata provider IS the cache, so it needs a database
           // and an active backend even where the screen fetches nothing.
           appDatabaseProvider.overrideWithValue(emptyStateDb),
-          activeMetadataKindProvider.overrideWithValue(
-            MetadataSourceKind.tmdb,
+          activeMetadataBackendProvider.overrideWithValue(
+            MetadataBackend.tmdb,
           ),
           // Default: reaching the network from an empty state is a bug.
           activeMetadataSourceProvider.overrideWithValue(
@@ -157,7 +157,6 @@ void main() {
           ),
         ),
         libraryItemsProvider.overrideWith((ref) => Stream.value(items)),
-        activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
       ],
     );
 
@@ -199,7 +198,6 @@ void main() {
           libraryItemsProvider.overrideWith(
             (ref) => const Stream<List<LibraryItem>>.empty(),
           ),
-          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
         ],
       );
       expect(find.text("You're all caught up"), findsOneWidget);
