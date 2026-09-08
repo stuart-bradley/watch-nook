@@ -1,12 +1,17 @@
 import 'package:clock/clock.dart';
 import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
+import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
+import 'package:watch_nook/core/metadata/switch/backend_switch_providers.dart';
 import 'package:watch_nook/core/metadata/switch/backend_switch_service.dart';
 
 import '../../../support/library_fixtures.dart' as seed;
@@ -397,6 +402,88 @@ void main() {
           },
         ),
         idsRelinked: true,
+      );
+    });
+  });
+
+  // The two ways a row becomes Unverified are NOT interchangeable, and the
+  // difference is entirely in what a *later* relink run does with them. See
+  // CONTEXT.md ("How the two interact on a relink") — the second case is the
+  // one that looks healthy, and the reason the position marker exists.
+  group('the two Unverified outcomes behave differently on a later run', () {
+    /// The Settings relink offer's number, read through the provider that
+    /// feeds it rather than a copy of its rule.
+    Future<int> relinkOfferCount() async {
+      final container = ProviderContainer(
+        overrides: [
+          appDatabaseProvider.overrideWithValue(db),
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tvdb),
+        ],
+      );
+      addTearDown(container.dispose);
+      return container.read(backendMismatchCountProvider.future);
+    }
+
+    test('could not relink at all → retried, and still counted', () async {
+      // No imdbId, so there is no way to find it on the new backend. Its ids
+      // and recordedSource are left alone, which is what keeps it eligible.
+      final id = await addShow(imdbId: null);
+
+      final first = await service(_FakeTvdb()).switchAll();
+      expect(first.flagged, 1);
+
+      final row = await reload(id);
+      expect(row.relinkFailed, isTrue);
+      expect(
+        row.recordedSource,
+        MetadataSourceKind.tmdb,
+        reason: 'nothing to point it at, so it stays on the old backend',
+      );
+
+      final second = await service(_FakeTvdb()).switchAll();
+      expect(
+        second.skipped,
+        0,
+        reason: 'a later run must not skip it — it never moved',
+      );
+      expect(second.flagged, 1, reason: 'it is tried again, and fails again');
+      expect(
+        await relinkOfferCount(),
+        1,
+        reason: 'the Settings offer must not vanish for a retryable row',
+      );
+    });
+
+    test('relinked but unreconciled → not retried, and not counted', () async {
+      final id = await addShow();
+      await watch(id, 1, 1);
+
+      // Resolves on the new backend (so the ids move) but the watched
+      // coordinate has no counterpart there.
+      final source = _FakeTvdb(resolve: {'tt11280740': tvdbHit(555)});
+      final first = await service(source).switchAll();
+      expect(first.flagged, 1);
+
+      final row = await reload(id);
+      expect(row.relinkFailed, isTrue);
+      expect(
+        row.recordedSource,
+        MetadataSourceKind.tvdb,
+        reason: 'the show was found, so the row moved to the new backend',
+      );
+
+      final second = await service(source).switchAll();
+      expect(
+        second.skipped,
+        1,
+        reason: 'already on the active backend — every later run skips it',
+      );
+      expect(second.flagged, 0);
+      expect(
+        await relinkOfferCount(),
+        0,
+        reason:
+            'not stranded, so the offer cannot reach it; only a dismiss can',
       );
     });
   });

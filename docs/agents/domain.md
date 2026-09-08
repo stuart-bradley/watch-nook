@@ -6,7 +6,13 @@ How the engineering skills should consume this repo's domain documentation when 
 
 - **`CONTEXT.md`** at the repo root, or
 - **`CONTEXT-MAP.md`** at the repo root if it exists: it points at one `CONTEXT.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`**: read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
+- **Architecture decisions.** This repo keeps them in two places, and both count:
+  - **`docs/PRD.md`** holds ADR-1…ADR-8 as a numbered list. They predate the
+    `docs/adr/` convention, and the citations throughout the code (`ADR-2`,
+    `ADR-7`, …) refer to that numbering — so they stay where they are.
+  - **`docs/adr/`** holds ADR-9 onwards, one file each. Read the ones that touch
+    the area you're about to work in. In multi-context repos, also check
+    `src/<context>/docs/adr/` for context-scoped decisions.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 
