@@ -127,6 +127,20 @@ void main() {
     watched: const [(1, 1)],
   );
 
+  /// Unverified **and** Stranded — recorded against the backend that is no
+  /// longer active. Not an exotic combination: "could not relink at all" leaves
+  /// the row on the old backend, so this is one of the two documented ways a
+  /// row becomes Unverified in the first place (CONTEXT.md).
+  Future<LibraryItem> seedStrandedRow() => seed.seedShow(
+    db,
+    source: MetadataSourceKind.tvdb,
+    tmdbId: null,
+    tvdbId: 371980,
+    imdbId: 'tt11280740',
+    relinkFailed: true,
+    watched: const [(1, 1)],
+  );
+
   testWidgets('an Unverified title shows the marker and its dismiss', (
     tester,
   ) async {
@@ -150,6 +164,36 @@ void main() {
     expect(find.text(unverifiedPositionNotice), findsNothing);
     expect(find.text(unverifiedPositionDismissLabel), findsNothing);
   });
+
+  // The bug the first round shipped: both notices were gated on the row alone,
+  // while the seasons list is gated on there being something to fetch. A
+  // Stranded row got "Check the seasons below, then dismiss this" with nothing
+  // below it, and a one-tap dismiss of a question it had shown no evidence for.
+  testWidgets(
+    'with no episode list, it neither points at one nor offers a dismiss',
+    (
+      tester,
+    ) async {
+      await pump(tester, await seedStrandedRow());
+
+      expect(
+        find.text(unverifiedPositionNotice),
+        findsNothing,
+        reason: 'that copy sends the user to a list this screen does not show',
+      );
+      expect(find.text(unverifiedPositionNoticeUncheckable), findsOneWidget);
+      expect(
+        find.text(unverifiedPositionDismissLabel),
+        findsNothing,
+        reason: 'nothing on screen could justify answering it',
+      );
+      expect(
+        find.text('Seasons'),
+        findsNothing,
+        reason: 'sanity: this row really has no list — the premise of the test',
+      );
+    },
+  );
 
   testWidgets('dismissing clears the flag and the screen updates', (
     tester,

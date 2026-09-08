@@ -71,6 +71,16 @@ cleared state is part of the exported backup, so it survives an export and
 re-import — and, symmetrically, restoring a pre-dismiss backup brings the
 marker back.
 
+A dismissal is **not permanent for a Stranded row.** The dismiss clears the same
+column the relink writes, and a row still on the other backend is re-tried by
+every later relink — so if that attempt fails again, the marker returns. This is
+the lesser of two evils and deliberate: the alternative is a second column whose
+only job is to suppress a warning, and a row that stops being offered for relink
+because a user once said its position looked right. For the row this feature is
+really about — relinked, episodes did not reconcile — no later run touches it,
+so a dismissal there is final. The detail screen only offers the dismiss when
+the episode list is on screen, which a Stranded row's never is.
+
 ## How the two interact on a relink
 
 The relink writes the same flag for two different outcomes, and they behave

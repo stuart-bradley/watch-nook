@@ -60,6 +60,23 @@ const unverifiedPositionNotice =
     'changed — your history and totals are exactly as they were. Check the '
     'seasons below, then dismiss this.';
 
+/// The same marker, for a detail screen with **no episode list on it** — a
+/// Stranded row (its ids belong to the other backend, so it fetches nothing) or
+/// a cold cache offline.
+///
+/// This case is not rare: "could not relink at all" leaves the row on the old
+/// backend, so Stranded **and** Unverified is one of the two documented ways a
+/// row reaches this state at all (CONTEXT.md). Sending that user to "the
+/// seasons below" points at nothing, and [unverifiedPositionDismissLabel] would
+/// ask them to confirm a position against evidence the screen cannot show — so
+/// the dismiss is withheld here and the notice says what to do instead.
+const unverifiedPositionNoticeUncheckable =
+    'Where you are in this show is unconfirmed. A catalogue change meant we '
+    "couldn't check that your watched episodes still line up. Nothing was "
+    'changed — your history and totals are exactly as they were. The episode '
+    'list is not available here, so there is nothing to check it against yet; '
+    'relink your library from Settings, then come back.';
+
 /// What the dismiss action reads as, on the detail screen.
 const unverifiedPositionDismissLabel = 'Looks right';
 

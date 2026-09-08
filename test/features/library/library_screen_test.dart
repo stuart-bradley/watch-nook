@@ -8,6 +8,7 @@ import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/features/library/presentation/library_screen.dart';
@@ -44,6 +45,15 @@ void main() {
   );
 
   Future<void> seedMovie() => seed.seedMovie(db, now: now, watched: true);
+
+  /// The same show and the same progress, but Unverified.
+  Future<void> seedUnverifiedShow() => seed.seedShow(
+    db,
+    now: now,
+    episodeCountTotal: 10,
+    relinkFailed: true,
+    watched: const [(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 3), (2, 4)],
+  );
 
   // The grid is fed a **synchronous snapshot** of real `LibraryItem` rows, not
   // the live DAO stream. That keeps the widget test deterministic and leaves no
@@ -91,6 +101,39 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Severance'), findsOneWidget);
+    expect(find.text('S2E4 · 3 left'), findsOneWidget);
+  });
+
+  // The third surface. The rule and its wording are tested at
+  // unverified_position.dart and the caption string at
+  // library_progress_label_test; the only thing left that neither can see is
+  // whether the grid WIDGET renders that caption's output — the wiring step.
+  // (The same gap on the Up Next side was a real finding, so it is not
+  // hypothetical here.)
+  //
+  // Proved to fail first: dropping markUnverifiedPosition from
+  // libraryProgressLabel reddens the first expectation.
+  testWidgets('an Unverified position is marked in the grid caption', (
+    tester,
+  ) async {
+    await seedUnverifiedShow();
+    await tester.pumpWidget(harness(await db.libraryDao.getAll()));
+    await tester.pumpAndSettle();
+
+    final marked = markUnverifiedPosition('S2E4', unverified: true);
+    expect(find.text('$marked · 3 left'), findsOneWidget);
+    expect(
+      find.text('S2E4 · 3 left'),
+      findsNothing,
+      reason: 'the unmarked caption must not also be on screen',
+    );
+  });
+
+  testWidgets('a healthy position is not marked', (tester) async {
+    await seedShow();
+    await tester.pumpWidget(harness(await db.libraryDao.getAll()));
+    await tester.pumpAndSettle();
+
     expect(find.text('S2E4 · 3 left'), findsOneWidget);
   });
 

@@ -201,9 +201,17 @@ class _Body extends ConsumerWidget {
         ),
         // The marker sits directly above the seasons list, because the list is
         // the evidence the user needs in order to answer it. Anywhere else and
-        // they are told to go and check something without being shown it.
+        // they are told to go and check something without being shown it —
+        // which is why [canCheck] is the SAME condition the seasons section
+        // below is gated on, not an approximation of it. A Stranded row
+        // (fetchRef == null) reaches here: "could not relink at all" leaves the
+        // row on the old backend, so Stranded AND Unverified is one of the two
+        // ways this state arises at all.
         if (item != null && hasUnverifiedPosition(item))
-          _UnverifiedNotice(itemId: item.id),
+          _UnverifiedNotice(
+            itemId: item.id,
+            canCheck: fetchRef != null && seasons.isNotEmpty,
+          ),
         // Seasons come from the details fetch; a movie has none. "Mark show
         // watched" is the *section action* for the list below it — it used to
         // sit up with the status control, where it read as the only thing you
@@ -821,9 +829,15 @@ class _EpisodeToggle extends ConsumerWidget {
 /// by a transient error. The only thing that truthfully resolves it is a person
 /// reading the list below and saying so.
 class _UnverifiedNotice extends ConsumerWidget {
-  const _UnverifiedNotice({required this.itemId});
+  const _UnverifiedNotice({required this.itemId, required this.canCheck});
 
   final int itemId;
+
+  /// Whether the season/episode list is actually on screen below this. When it
+  /// is not, the notice must not send the user to it and the dismiss is
+  /// withheld — confirming a position against evidence the screen cannot show
+  /// is not a question the user can honestly answer.
+  final bool canCheck;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -855,26 +869,29 @@ class _UnverifiedNotice extends ConsumerWidget {
                 const SizedBox(width: WatchnookSpacing.sm),
                 Expanded(
                   child: Text(
-                    unverifiedPositionNotice,
+                    canCheck
+                        ? unverifiedPositionNotice
+                        : unverifiedPositionNoticeUncheckable,
                     style: theme.textTheme.bodyMedium,
                   ),
                 ),
               ],
             ),
-            Align(
-              alignment: AlignmentDirectional.centerEnd,
-              child: TextButton(
-                // Clears the flag for THIS row only. The library stream
-                // re-emits, so the grid caption and the Up Next label drop
-                // their markers without a reload.
-                onPressed: () => unawaited(
-                  ref
-                      .read(libraryDaoProvider)
-                      .dismissUnverifiedPosition(itemId),
+            if (canCheck)
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: TextButton(
+                  // Clears the flag for THIS row only. The library stream
+                  // re-emits, so the grid caption and the Up Next label drop
+                  // their markers without a reload.
+                  onPressed: () => unawaited(
+                    ref
+                        .read(libraryDaoProvider)
+                        .dismissUnverifiedPosition(itemId),
+                  ),
+                  child: const Text(unverifiedPositionDismissLabel),
                 ),
-                child: const Text(unverifiedPositionDismissLabel),
               ),
-            ),
           ],
         ),
       ),
