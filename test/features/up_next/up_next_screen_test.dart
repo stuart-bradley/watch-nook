@@ -10,6 +10,7 @@ import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 import 'package:watch_nook/features/up_next/presentation/up_next_screen.dart';
@@ -49,12 +50,14 @@ void main() {
     String show = 'Severance',
     int season = 2,
     int episode = 5,
+    bool unverified = false,
   }) => (
     itemId: itemId,
     showTitle: show,
     poster: null, // null → placeholder, so the poster never hits network
     season: season,
     episode: episode,
+    unverified: unverified,
   );
 
   UpcomingEntry soon({
@@ -64,6 +67,7 @@ void main() {
     int season = 3,
     int episode = 1,
     String? title,
+    bool unverified = false,
   }) => (
     itemId: itemId,
     showTitle: show,
@@ -72,6 +76,7 @@ void main() {
     episode: episode,
     episodeTitle: title,
     airDate: airDate,
+    unverified: unverified,
   );
 
   Future<void> pumpWith(
@@ -560,6 +565,60 @@ void main() {
 
         expect(find.text('This week'), findsOneWidget);
         expect(find.text('Later'), findsNothing);
+      });
+    });
+  });
+
+  // Wiring coverage. The rule itself is tested at unverified_position.dart;
+  // what is worth asserting here is that the screen most likely to make the
+  // user act on a suspect coordinate actually renders the marker.
+  group('an Unverified position is marked', () {
+    testWidgets('the queue row carries it; a healthy row does not', (
+      tester,
+    ) async {
+      await pumpWith(
+        tester,
+        (ref) async => (
+          queue: [
+            entry(show: 'Doubtful', season: 1, episode: 14, unverified: true),
+            entry(show: 'Healthy', itemId: 2, season: 1, episode: 14),
+          ],
+          upcoming: <UpcomingEntry>[],
+          now: _now,
+        ),
+        items: [_libItem(), _libItem(id: 2)],
+      );
+      await tester.pumpAndSettle();
+
+      final marked = markUnverifiedPosition('S1E14', unverified: true);
+      expect(find.text('Next: $marked'), findsOneWidget);
+      expect(find.text('Next: S1E14'), findsOneWidget);
+    });
+
+    testWidgets('an upcoming row carries it too', (tester) async {
+      await withClock(Clock.fixed(_now), () async {
+        await pumpWith(
+          tester,
+          (ref) async => (
+            queue: <QueueEntry>[],
+            upcoming: [
+              soon(
+                show: 'Doubtful',
+                airDate: DateTime(2026, 7, 15),
+                season: 4,
+                episode: 2,
+                title: 'Cold Harbor',
+                unverified: true,
+              ),
+            ],
+            now: _now,
+          ),
+          items: [_libItem()],
+        );
+        await tester.pumpAndSettle();
+
+        final marked = markUnverifiedPosition('S4E2', unverified: true);
+        expect(find.text('$marked · Cold Harbor'), findsOneWidget);
       });
     });
   });

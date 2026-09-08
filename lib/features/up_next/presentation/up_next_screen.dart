@@ -332,7 +332,12 @@ class _UpcomingTile extends StatelessWidget {
       leading: RemoteImage.thumbnail(artwork: entry.poster),
       title: Text(entry.showTitle),
       subtitle: Text(
-        episodeLabel(entry.season, entry.episode, entry.episodeTitle),
+        episodeLabel(
+          entry.season,
+          entry.episode,
+          title: entry.episodeTitle,
+          unverified: entry.unverified,
+        ),
       ),
       trailing: Text(
         airLabel(entry.airDate, now),
@@ -352,7 +357,12 @@ class _QueueTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final label = 'Next: ${episodeLabel(entry.season, entry.episode)}';
+    final next = episodeLabel(
+      entry.season,
+      entry.episode,
+      unverified: entry.unverified,
+    );
+    final label = 'Next: $next';
     return ListTile(
       leading: RemoteImage.thumbnail(artwork: entry.poster),
       title: Text(entry.showTitle),

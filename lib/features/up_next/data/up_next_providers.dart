@@ -5,6 +5,7 @@ import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
@@ -20,6 +21,7 @@ typedef QueueEntry = ({
   ArtworkRef? poster,
   int season,
   int episode,
+  bool unverified,
 });
 
 /// One row of the **Upcoming** list (R4/US-5): a tracked show's next episode,
@@ -37,6 +39,7 @@ typedef UpcomingEntry = ({
   int episode,
   String? episodeTitle,
   DateTime airDate,
+  bool unverified,
 });
 
 /// Everything the Up Next page renders, from **one** batched cache read.
@@ -156,8 +159,20 @@ bool airsBefore((int, int) a, (int, int) b) =>
     a.$1 < b.$1 || (a.$1 == b.$1 && a.$2 < b.$2);
 
 /// `S2E5`, plus the episode title when the backend supplied one.
-String episodeLabel(int season, int episode, [String? title]) {
-  final code = 'S${season}E$episode';
+///
+/// [unverified] marks the coordinate — and only the coordinate, before the
+/// episode title, so it never reads as doubt about the title text. The rule and
+/// the wording belong to `unverified_position.dart`; this only renders them.
+String episodeLabel(
+  int season,
+  int episode, {
+  String? title,
+  bool unverified = false,
+}) {
+  final code = markUnverifiedPosition(
+    'S${season}E$episode',
+    unverified: unverified,
+  );
   return title == null || title.isEmpty ? code : '$code · $title';
 }
 
@@ -207,6 +222,10 @@ UpcomingEntry? upcomingFor(
     episode: next.episodeNumber,
     episodeTitle: next.title,
     airDate: airDate,
+    // Upcoming names a coordinate too, so it is marked by the same rule as the
+    // queue. A show whose numbering the app cannot vouch for does not become
+    // trustworthy because the episode has not aired yet.
+    unverified: hasUnverifiedPosition(item),
   );
 }
 
@@ -332,6 +351,9 @@ Future<UpNextBoard> upNextBoard(Ref ref) async {
         poster: item.posterRef,
         season: next.$1,
         episode: next.$2,
+        // Carried from the row, because the label builder below sees bare
+        // numbers and cannot ask. Same shape as `poster`, for the same reason.
+        unverified: hasUnverifiedPosition(item),
       ));
     }
 

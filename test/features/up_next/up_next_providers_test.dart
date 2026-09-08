@@ -7,6 +7,7 @@ import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
@@ -57,6 +58,7 @@ LibraryItem _item({
   int? tvdbId,
   int? lastSeason,
   int? lastEpisode,
+  bool relinkFailed = false,
 }) => LibraryItem(
   id: id,
   mediaType: mediaType,
@@ -71,7 +73,7 @@ LibraryItem _item({
   watchedCount: 0,
   addedAt: DateTime(2026),
   updatedAt: DateTime(2026),
-  relinkFailed: false,
+  relinkFailed: relinkFailed,
 );
 
 /// A repository fake: [cachedShowDetails] returns the seeded details for the
@@ -131,10 +133,12 @@ Future<int> _seed(
   required int tmdbId,
   int? lastSeason,
   int? lastEpisode,
+  bool relinkFailed = false,
 }) async => (await seed.seedShow(
   db,
   title: title,
   tmdbId: tmdbId,
+  relinkFailed: relinkFailed,
   // The progress pointer is set by marking that coordinate watched, so the
   // fixture exercises the same recompute the app runs on every tick.
   watched: lastSeason == null || lastEpisode == null
@@ -294,12 +298,15 @@ void main() {
 
   group('episodeLabel', () {
     test('adds the title when there is one', () {
-      expect(episodeLabel(2, 5, 'The Reckoning'), 'S2E5 · The Reckoning');
+      expect(
+        episodeLabel(2, 5, title: 'The Reckoning'),
+        'S2E5 · The Reckoning',
+      );
     });
 
     test('falls back to the coordinate alone', () {
       expect(episodeLabel(2, 5), 'S2E5');
-      expect(episodeLabel(2, 5, ''), 'S2E5');
+      expect(episodeLabel(2, 5, title: ''), 'S2E5');
     });
   });
 
@@ -629,6 +636,98 @@ void main() {
     test('adds the year only when it differs', () {
       expect(airLabel(DateTime(2027, 3, 12), now), '12 Mar 2027');
       expect(airLabel(DateTime(2026, 9), now), '1 Sep');
+    });
+  });
+
+  // Up Next is the one screen whose whole job is to ACT on the stored position,
+  // so it is where being wrong actually costs the user something: they watch
+  // the wrong episode. The label sees bare numbers, so the entries have to
+  // carry the flag from the row they were built from.
+  group('entries carry the Unverified flag from their row', () {
+    final now = DateTime(2026, 7, 14);
+
+    test('a queue entry carries it; a healthy row does not', () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+
+      final doubtful = await _seed(
+        db,
+        title: 'Doubtful',
+        tmdbId: 100,
+        lastSeason: 1,
+        lastEpisode: 3,
+        relinkFailed: true,
+      );
+      final healthy = await _seed(
+        db,
+        title: 'Healthy',
+        tmdbId: 200,
+        lastSeason: 1,
+        lastEpisode: 3,
+      );
+
+      final container = _containerOver(
+        db,
+        _FakeRepo({
+          100: _show(seasons: [(1, 10)], nextToAir: (1, 9)),
+          200: _show(seasons: [(1, 10)], nextToAir: (1, 9)),
+        }),
+      );
+      addTearDown(container.dispose);
+
+      final board = await _boardAt(container, now);
+      QueueEntry entryFor(int id) =>
+          board.queue.firstWhere((e) => e.itemId == id);
+
+      expect(entryFor(doubtful).unverified, isTrue);
+      expect(entryFor(healthy).unverified, isFalse);
+    });
+
+    test('an upcoming entry carries it — it names a coordinate too', () {
+      final details = _show(
+        seasons: [(1, 10)],
+        nextToAir: (2, 1),
+        nextAirDate: DateTime(2026, 7, 17),
+      );
+
+      expect(
+        upcomingFor(
+          _item(lastSeason: 1, lastEpisode: 3),
+          details,
+          now,
+        )!.unverified,
+        isFalse,
+      );
+      expect(
+        upcomingFor(
+          _item(lastSeason: 1, lastEpisode: 3, relinkFailed: true),
+          details,
+          now,
+        )!.unverified,
+        isTrue,
+      );
+    });
+  });
+
+  group('episodeLabel marks an unverified coordinate', () {
+    test('the marker qualifies the coordinate, not the episode title', () {
+      final marked = episodeLabel(
+        2,
+        5,
+        title: 'The Reckoning',
+        unverified: true,
+      );
+      expect(
+        marked,
+        '${markUnverifiedPosition('S2E5', unverified: true)} · The Reckoning',
+      );
+    });
+
+    test('unmarked is the default — a healthy label is untouched', () {
+      expect(
+        episodeLabel(2, 5, title: 'The Reckoning'),
+        'S2E5 · The Reckoning',
+      );
     });
   });
 }
