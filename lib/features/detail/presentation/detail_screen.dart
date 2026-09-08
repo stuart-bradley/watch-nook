@@ -9,6 +9,7 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
@@ -198,6 +199,11 @@ class _Body extends ConsumerWidget {
             ],
           ),
         ),
+        // The marker sits directly above the seasons list, because the list is
+        // the evidence the user needs in order to answer it. Anywhere else and
+        // they are told to go and check something without being shown it.
+        if (item != null && hasUnverifiedPosition(item))
+          _UnverifiedNotice(itemId: item.id),
         // Seasons come from the details fetch; a movie has none. "Mark show
         // watched" is the *section action* for the list below it — it used to
         // sit up with the status control, where it read as the only thing you
@@ -802,6 +808,73 @@ class _EpisodeToggle extends ConsumerWidget {
                 watchedAt: clock.now(),
                 runtimeMinutes: episode.runtimeMinutes,
               ),
+      ),
+    );
+  }
+}
+
+/// The Unverified marker on the detail screen: the one surface with room to
+/// say what the doubt actually is, and the one place a user can end it.
+///
+/// A **dismiss**, not a re-check. Re-checking would re-run the same air-date
+/// comparison against the same data and fail the same way — the flag is not set
+/// by a transient error. The only thing that truthfully resolves it is a person
+/// reading the list below and saying so.
+class _UnverifiedNotice extends ConsumerWidget {
+  const _UnverifiedNotice({required this.itemId});
+
+  final int itemId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        WatchnookSpacing.screen,
+        WatchnookSpacing.sm,
+        WatchnookSpacing.screen,
+        WatchnookSpacing.sm,
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(WatchnookSpacing.md),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(WatchnookSpacing.sm),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.help_outline,
+                  size: 20,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: WatchnookSpacing.sm),
+                Expanded(
+                  child: Text(
+                    unverifiedPositionNotice,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton(
+                // Clears the flag for THIS row only. The library stream
+                // re-emits, so the grid caption and the Up Next label drop
+                // their markers without a reload.
+                onPressed: () => ref
+                    .read(libraryDaoProvider)
+                    .dismissUnverifiedPosition(itemId),
+                child: const Text(unverifiedPositionDismissLabel),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

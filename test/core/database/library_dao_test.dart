@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/library/unverified_position.dart';
 
 import '../../support/library_fixtures.dart' as seed;
 
@@ -455,6 +456,89 @@ void main() {
       final id = await add(aMovie());
       await db.libraryDao.markWatched(id);
       expect(await db.libraryDao.watchWatchedEpisodes(id).first, isEmpty);
+    });
+  });
+
+  // The first and only way this flag has ever been cleared by a person. Its
+  // whole promise is that the user's history was never modified, so the write
+  // that clears it must not be the one that starts modifying it.
+  group('dismissUnverifiedPosition', () {
+    test('clears the flag for the named row only', () async {
+      final target = await seed.seedShow(
+        db,
+        title: 'Checked',
+        tmdbId: 1,
+        relinkFailed: true,
+        watched: const [(1, 1)],
+      );
+      final sibling = await seed.seedShow(
+        db,
+        title: 'Still Unverified',
+        tmdbId: 2,
+        relinkFailed: true,
+        watched: const [(1, 1)],
+      );
+
+      await db.libraryDao.dismissUnverifiedPosition(target.id);
+
+      expect((await db.libraryDao.getItem(target.id))!.relinkFailed, isFalse);
+      expect(
+        (await db.libraryDao.getItem(sibling.id))!.relinkFailed,
+        isTrue,
+        reason: 'a human looked at one title, not at every title',
+      );
+    });
+
+    test('changes nothing else about the row', () async {
+      final item = await seed.seedShow(
+        db,
+        tvdbId: 371980,
+        imdbId: 'tt11280740',
+        relinkFailed: true,
+        watched: const [(1, 1), (1, 2)],
+      );
+      final eventsBefore = await db.libraryDao.watchEventsFor(item.id);
+
+      await db.libraryDao.dismissUnverifiedPosition(item.id);
+
+      final after = (await db.libraryDao.getItem(item.id))!;
+      expect(after, item.copyWith(relinkFailed: false));
+      expect(
+        await db.libraryDao.watchEventsFor(item.id),
+        eventsBefore,
+        reason: 'the switch never touched watch history, and neither does this',
+      );
+      expect(
+        after.updatedAt,
+        item.updatedAt,
+        reason:
+            'acknowledging a question is not watching something — stamping '
+            'would jump the title up the grid recency order for a no-op',
+      );
+    });
+
+    test('afterwards the row is indistinguishable from a healthy one', () {
+      // Every surface reads the same predicate, so this is the whole of what
+      // "the marker is gone from the grid and from Up Next" means.
+      final dismissed = LibraryItem(
+        id: 1,
+        mediaType: MediaType.tv,
+        recordedSource: MetadataSourceKind.tmdb,
+        title: 'Severance',
+        trackStatus: TrackStatus.watching,
+        lastWatchedSeason: 2,
+        lastWatchedEpisode: 4,
+        watchedCount: 7,
+        addedAt: now,
+        updatedAt: now,
+        relinkFailed: false,
+      );
+      expect(hasUnverifiedPosition(dismissed), isFalse);
+      expect(
+        hasUnverifiedPosition(dismissed.copyWith(relinkFailed: true)),
+        isTrue,
+        reason: 'sanity: the flag is what the predicate turns on',
+      );
     });
   });
 

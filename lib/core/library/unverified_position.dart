@@ -47,6 +47,22 @@ bool hasUnverifiedPosition(LibraryItem item) =>
     item.lastWatchedSeason != null &&
     item.lastWatchedEpisode != null;
 
+/// The detail screen's fuller statement of the same marker — the one surface
+/// with room for a sentence, and the only one where the user can act on it.
+///
+/// It says three things, all of them load-bearing: which fact is in doubt (the
+/// position, not the title), that the history itself is intact, and what the
+/// user is being asked to do. Without the second, "unconfirmed" reads as
+/// "your watch history may be damaged", which is the opposite of true.
+const unverifiedPositionNotice =
+    'Where you are in this show is unconfirmed. A catalogue change meant we '
+    "couldn't check that your watched episodes still line up. Nothing was "
+    'changed — your history and totals are exactly as they were. Check the '
+    'seasons below, then dismiss this.';
+
+/// What the dismiss action reads as, on the detail screen.
+const unverifiedPositionDismissLabel = 'Looks right';
+
 /// [position] with the marker appended when [unverified], unchanged otherwise.
 ///
 /// Takes the already-rendered position rather than the row, because the two

@@ -504,6 +504,32 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
         await recomputeDenormalized(itemId, touchedAt: clock.now());
       });
 
+  /// **Dismiss the Unverified marker** on one row — the user has checked the
+  /// episode list and says the stored position is right.
+  ///
+  /// The first and only way this flag has ever been cleared by a person. The
+  /// relink sets it; later relink runs skip the row that most needs clearing
+  /// (it already matches the active backend), and the import only restores
+  /// whatever a backup recorded. Without this the marker is a warning the user
+  /// can never dismiss, which is worse than not showing it.
+  ///
+  /// **One row.** There is no bulk dismiss: the whole meaning of the state is
+  /// that a human looked at a specific title.
+  ///
+  /// Its own named method rather than callers reaching for [updateItem], so the
+  /// operation is visible in this interface and testable on its own.
+  ///
+  /// Touches **nothing else** — not the ids, not `recordedSource`, not a single
+  /// [WatchEvents] row. The promise this state makes is that the user's history
+  /// was never modified, and clearing the marker must not start modifying it.
+  /// It deliberately does not stamp `updatedAt` either: acknowledging a
+  /// question is not watching something, and stamping would jump the title to
+  /// the top of the grid's most-recently-updated order for a no-op.
+  Future<void> dismissUnverifiedPosition(int itemId) =>
+      (update(libraryItems)..where((t) => t.id.equals(itemId))).write(
+        const LibraryItemsCompanion(relinkFailed: Value(false)),
+      );
+
   /// Matches one item's rows at one aired coordinate. A movie's null
   /// season/episode needs `IS NULL`, not `= NULL` (which matches nothing in
   /// SQLite) — so a movie's rows would silently never be found.
