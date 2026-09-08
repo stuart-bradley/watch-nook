@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
@@ -88,6 +89,11 @@ libraryGridProvider = StreamProvider.family<List<LibraryItem>, LibraryFilter>((
 /// - TV, nothing watched: total episode count, or "Not started".
 /// - TV, in progress: `S{season}E{episode}` + " · {left} left" when the total
 ///   is known and any remain.
+///
+/// An Unverified row's position carries the marker — the rule and its wording
+/// belong to `unverified_position.dart`, not here. It qualifies the position
+/// only: the "{left} left" count is accurate either way, because the switch
+/// that raises the flag never touches watch history.
 String libraryProgressLabel(LibraryItem item) {
   if (item.mediaType == MediaType.movie) {
     return item.watchedCount > 0 ? 'Watched' : 'Unwatched';
@@ -98,7 +104,10 @@ String libraryProgressLabel(LibraryItem item) {
   if (season == null || episode == null) {
     return total != null ? '$total episodes' : 'Not started';
   }
-  final position = 'S${season}E$episode';
+  final position = markUnverifiedPosition(
+    'S${season}E$episode',
+    unverified: hasUnverifiedPosition(item),
+  );
   if (total == null) return position;
   final left = total - item.watchedCount;
   return left > 0 ? '$position · $left left' : position;

@@ -3,6 +3,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/features/library/presentation/library_screen.dart';
 
 import '../../support/library_fixtures.dart' as seed;
@@ -24,6 +25,7 @@ void main() {
     int? lastSeason,
     int? lastEpisode,
     int? episodeCountTotal,
+    bool relinkFailed = false,
   }) async {
     // Raw on purpose: this exercises the label formatter across the column
     // space, including combinations the app would never write, so seeding
@@ -41,6 +43,7 @@ void main() {
         lastWatchedSeason: Value(lastSeason),
         lastWatchedEpisode: Value(lastEpisode),
         episodeCountTotal: Value(episodeCountTotal),
+        relinkFailed: Value(relinkFailed),
       ),
     );
     return (await db.libraryDao.getItem(id))!;
@@ -100,5 +103,56 @@ void main() {
       libraryProgressLabel(await row(type: MediaType.movie, watchedCount: 1)),
       'Watched',
     );
+  });
+
+  // The caption is the first place a user can learn the app cannot vouch for
+  // where they are in a show. The marker qualifies the POSITION only — the
+  // "3 left" count is as accurate as ever, because the backend switch that
+  // raises the flag never touches watch history.
+  group('an Unverified position is marked', () {
+    test('the marker sits on the position, not on the count', () async {
+      final item = await row(
+        type: MediaType.tv,
+        watchedCount: 7,
+        lastSeason: 2,
+        lastEpisode: 4,
+        episodeCountTotal: 10,
+        relinkFailed: true,
+      );
+      expect(
+        libraryProgressLabel(item),
+        '${markUnverifiedPosition('S2E4', unverified: true)} · 3 left',
+      );
+    });
+
+    test('a healthy row with the same position is untouched', () async {
+      final item = await row(
+        type: MediaType.tv,
+        watchedCount: 7,
+        lastSeason: 2,
+        lastEpisode: 4,
+        episodeCountTotal: 10,
+      );
+      expect(libraryProgressLabel(item), 'S2E4 · 3 left');
+    });
+
+    test('an Unverified show with nothing watched is not marked', () async {
+      // "10 episodes" is not a position, so there is nothing to doubt.
+      final item = await row(
+        type: MediaType.tv,
+        episodeCountTotal: 10,
+        relinkFailed: true,
+      );
+      expect(libraryProgressLabel(item), '10 episodes');
+    });
+
+    test('an Unverified movie is not marked', () async {
+      final item = await row(
+        type: MediaType.movie,
+        watchedCount: 1,
+        relinkFailed: true,
+      );
+      expect(libraryProgressLabel(item), 'Watched');
+    });
   });
 }
