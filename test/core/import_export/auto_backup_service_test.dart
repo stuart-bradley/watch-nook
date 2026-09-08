@@ -72,7 +72,7 @@ void main() {
     await dao.markWatched(await dao.getAll().then((i) => i.first.id));
     await backup.snapshot();
 
-    await dao.deleteAllUserData();
+    await dao.eraseEverything();
     expect(await dao.hasAnyItems(), isFalse);
 
     expect(await backup.restoreIfEmpty(), isTrue);
@@ -87,7 +87,7 @@ void main() {
     await seedItem(title: 'Backed up');
     await backup.snapshot();
 
-    await dao.deleteAllUserData();
+    await dao.eraseEverything();
     await seedItem(title: 'Already here');
 
     expect(await backup.restoreIfEmpty(), isFalse);
@@ -194,7 +194,7 @@ void main() {
 
       // The GDPR delete-all wiped the DB too; with the backup gone, a fresh
       // install finds nothing to resurrect.
-      await dao.deleteAllUserData();
+      await dao.eraseEverything();
       expect(await backup.restoreIfEmpty(), isFalse);
     },
   );
@@ -226,7 +226,7 @@ void main() {
       reason: 'ADR-3: cache tables never enter the backup file',
     );
 
-    await dao.deleteAllUserData();
+    await dao.eraseEverything();
     await db.delete(db.cachedMedia).go();
 
     expect(await backup.restoreIfEmpty(), isTrue);

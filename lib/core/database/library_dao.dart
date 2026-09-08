@@ -313,14 +313,23 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   Future<int> insertWatchEvent(WatchEventsCompanion entry) =>
       into(watchEvents).insert(entry);
 
-  /// Wipe **both user-owned tables**. The restore-vs-import invariant
-  /// (CLAUDE.md): a restore *replaces* (this), an import *merges* (never calls
-  /// this). Callers wrap it with their inserts in one transaction so a failed
-  /// restore rolls back to the library it started with.
+  /// **Erase everything the user owns** — the library and its whole watch
+  /// history, both user-owned tables emptied. This is the DAO's half of
+  /// Settings → *Delete everything*, a real operation the app offers, not a
+  /// low-level write that leaked out of [restore]. The Settings flow adds what
+  /// this deliberately does not touch: the disposable media cache, the
+  /// on-device backup, and the first-run flag that sends the app back to
+  /// onboarding.
+  ///
+  /// [restore] calls it as its own first step, because a restore *replaces*.
+  /// That is the same erasure, not a different primitive — the two operations
+  /// share a first step and diverge immediately after it (a restore keeps the
+  /// cache and the backup on purpose). An import *merges* and never comes here
+  /// (the restore-vs-import invariant, CLAUDE.md).
   ///
   /// Events are deleted explicitly rather than left to the FK cascade, so the
   /// method stays correct even if `foreign_keys` is off.
-  Future<void> deleteAllUserData() => transaction(() async {
+  Future<void> eraseEverything() => transaction(() async {
     await delete(watchEvents).go();
     await delete(libraryItems).go();
   });
@@ -331,7 +340,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   /// failure anywhere rolls back to the library the user started with.
   ///
   /// This exists because the ordering *is* the contract and it used to live in
-  /// prose. Assembled by hand from [deleteAllUserData] + [insertItem] +
+  /// prose. Assembled by hand from [eraseEverything] + [insertItem] +
   /// [insertWatchEvent], a caller that forgot the final recompute would leave
   /// every restored row reading "0 watched" over a full history — the grid and
   /// the stats read only the denormalized columns, so nothing would look wrong
@@ -345,7 +354,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   Future<({int items, int watchEvents})> restore(
     List<RestoreItem> restored,
   ) => transaction(() async {
-    await deleteAllUserData();
+    await eraseEverything();
     var events = 0;
     for (final entry in restored) {
       final id = await insertItem(entry.item);

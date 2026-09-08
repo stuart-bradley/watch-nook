@@ -267,7 +267,7 @@ Future<void> _deleteAll(BuildContext context, WidgetRef ref) async {
   if (confirmed != true) return;
 
   try {
-    await ref.read(libraryDaoProvider).deleteAllUserData();
+    await ref.read(libraryDaoProvider).eraseEverything();
     await ref.read(mediaCacheDaoProvider).clearAll();
     final backup = await ref.read(autoBackupServiceProvider.future);
     await backup.deleteBackup();

@@ -151,7 +151,7 @@ void main() {
       };
 
       final json = await service.exportJson();
-      await dao.deleteAllUserData();
+      await dao.eraseEverything();
       expect(await dao.getAll(), isEmpty);
 
       final summary = await service.restore(json);
