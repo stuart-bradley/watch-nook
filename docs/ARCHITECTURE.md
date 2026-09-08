@@ -15,6 +15,7 @@ lib/
   core/            # shared infrastructure
     config/        # RemoteConfig + baked/cached key delivery
     database/      # Drift AppDatabase, DAOs, providers
+    library/       # pure rules over a library row (e.g. the Unverified marker)
     metadata/      # MetadataSource interface + TMDB/TVDB impls + SWR cache
     routing/       # go_router
     theme/         # Material 3 theme + design tokens

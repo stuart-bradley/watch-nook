@@ -6,6 +6,8 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/library/unverified_position.dart';
+import 'package:watch_nook/features/library/presentation/library_screen.dart';
+import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 
 import '../../support/library_fixtures.dart' as seed;
 
@@ -533,11 +535,21 @@ void main() {
         updatedAt: now,
         relinkFailed: false,
       );
+      final stillMarked = dismissed.copyWith(relinkFailed: true);
       expect(hasUnverifiedPosition(dismissed), isFalse);
       expect(
-        hasUnverifiedPosition(dismissed.copyWith(relinkFailed: true)),
+        hasUnverifiedPosition(stillMarked),
         isTrue,
         reason: 'sanity: the flag is what the predicate turns on',
+      );
+
+      // The two surfaces themselves, not just the predicate they share — so
+      // this asserts the acceptance criterion rather than a proxy for it.
+      expect(libraryProgressLabel(dismissed), 'S2E4');
+      expect(libraryProgressLabel(stillMarked), isNot('S2E4'));
+      expect(
+        episodeLabel(2, 5, unverified: hasUnverifiedPosition(dismissed)),
+        'S2E5',
       );
     });
   });

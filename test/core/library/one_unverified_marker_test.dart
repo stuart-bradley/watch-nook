@@ -11,7 +11,11 @@ import 'package:flutter_test/flutter_test.dart';
 /// surface is exactly how that starts.
 void main() {
   const owner = 'lib/core/library/unverified_position.dart';
-  const marker = 'unconfirmed';
+  // The marker EXACTLY as it renders, parentheses included — not the bare word.
+  // 'unconfirmed' also appears in unverifiedPositionNotice's prose, so scanning
+  // for that would make the positive control below pass even with the marker
+  // constant deleted: a guard that cannot fail.
+  const marker = '(unconfirmed)';
 
   test('the marker wording is written in exactly one lib/ file', () {
     final offenders =

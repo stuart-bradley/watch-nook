@@ -839,7 +839,7 @@ class _UnverifiedNotice extends ConsumerWidget {
         padding: const EdgeInsets.all(WatchnookSpacing.md),
         decoration: BoxDecoration(
           color: theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(WatchnookSpacing.sm),
+          borderRadius: BorderRadius.circular(WatchnookRadii.sm),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -867,9 +867,11 @@ class _UnverifiedNotice extends ConsumerWidget {
                 // Clears the flag for THIS row only. The library stream
                 // re-emits, so the grid caption and the Up Next label drop
                 // their markers without a reload.
-                onPressed: () => ref
-                    .read(libraryDaoProvider)
-                    .dismissUnverifiedPosition(itemId),
+                onPressed: () => unawaited(
+                  ref
+                      .read(libraryDaoProvider)
+                      .dismissUnverifiedPosition(itemId),
+                ),
                 child: const Text(unverifiedPositionDismissLabel),
               ),
             ),

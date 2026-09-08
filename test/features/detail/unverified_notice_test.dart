@@ -30,6 +30,17 @@ import '../../support/library_fixtures.dart' as seed;
 /// Wiring coverage; the rule lives in `unverified_position.dart` and the write
 /// is tested at the DAO. What is worth proving here is that tapping the action
 /// really performs that write, and that a row without the flag shows nothing.
+///
+/// **Proved to fail first**, all three: removing the notice from the build
+/// reddens the render and dismiss tests; showing it unconditionally (dropping
+/// the `hasUnverifiedPosition` gate) reddens the absence test; making the DAO
+/// write a no-op reddens the dismiss test.
+///
+/// This mounts over a real `AppDatabase` rather than a stub, against
+/// ARCHITECTURE.md's widget-test rule. That rule guards one hazard — a live
+/// Drift stream never quiescing under fake-async — and the hand-driven
+/// controller below removes it. The write under test is the point of the
+/// screen, so stubbing the DAO would leave nothing worth asserting.
 class _FakeSource implements MetadataSource {
   const _FakeSource();
 

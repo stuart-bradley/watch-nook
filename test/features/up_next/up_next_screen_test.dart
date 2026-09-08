@@ -572,6 +572,11 @@ void main() {
   // Wiring coverage. The rule itself is tested at unverified_position.dart;
   // what is worth asserting here is that the screen most likely to make the
   // user act on a suspect coordinate actually renders the marker.
+  //
+  // Proved to fail first: pinning the screen's `unverified:` argument to false
+  // (so the carried flag is ignored on the way to the label) reddens both.
+  // Note the provider-level proof in up_next_providers_test does NOT reach
+  // these — they build entries directly — which is why they need their own.
   group('an Unverified position is marked', () {
     testWidgets('the queue row carries it; a healthy row does not', (
       tester,

@@ -19,6 +19,11 @@ import '../../support/library_fixtures.dart' as seed;
 ///
 /// A row that is Unverified *and* Stranded is a real combination and must
 /// still be labelled Stranded for the reason it actually is one.
+///
+/// **Proved to fail first.** This guards behaviour that is correct today, so
+/// the only way to know it bites is to break it: making `detailTargetOf` treat
+/// `relinkFailed` as unfetchable reddens both tests. Without that check it
+/// would be exactly the decoration this spec set out to stop shipping.
 void main() {
   late AppDatabase db;
   setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));
