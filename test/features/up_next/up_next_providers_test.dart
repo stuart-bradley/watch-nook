@@ -58,7 +58,6 @@ LibraryItem _item({
   int? tvdbId,
   int? lastSeason,
   int? lastEpisode,
-  bool relinkFailed = false,
 }) => LibraryItem(
   id: id,
   mediaType: mediaType,
@@ -73,7 +72,7 @@ LibraryItem _item({
   watchedCount: 0,
   addedAt: DateTime(2026),
   updatedAt: DateTime(2026),
-  relinkFailed: relinkFailed,
+  relinkFailed: false,
 );
 
 /// A repository fake: [cachedShowDetails] returns the seeded details for the
@@ -641,9 +640,10 @@ void main() {
 
   // Up Next is the one screen whose whole job is to ACT on the stored position,
   // so it is where being wrong actually costs the user something: they watch
-  // the wrong episode. The label sees bare numbers, so the entries have to
-  // carry the flag from the row they were built from.
-  group('entries carry the Unverified flag from their row', () {
+  // the wrong episode. The label sees bare numbers, so the queue entries have
+  // to carry the flag from the row they were built from. Upcoming entries have
+  // no flag at all; that rule is guarded end to end in up_next_screen_test.
+  group('queue entries carry the Unverified flag from their row', () {
     final now = DateTime(2026, 7, 14);
 
     test('a queue entry carries it; a healthy row does not', () async {
@@ -681,31 +681,6 @@ void main() {
 
       expect(entryFor(doubtful).unverified, isTrue);
       expect(entryFor(healthy).unverified, isFalse);
-    });
-
-    test('an upcoming entry carries it — it names a coordinate too', () {
-      final details = _show(
-        seasons: [(1, 10)],
-        nextToAir: (2, 1),
-        nextAirDate: DateTime(2026, 7, 17),
-      );
-
-      expect(
-        upcomingFor(
-          _item(lastSeason: 1, lastEpisode: 3),
-          details,
-          now,
-        )!.unverified,
-        isFalse,
-      );
-      expect(
-        upcomingFor(
-          _item(lastSeason: 1, lastEpisode: 3, relinkFailed: true),
-          details,
-          now,
-        )!.unverified,
-        isTrue,
-      );
     });
   });
 

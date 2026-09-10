@@ -123,6 +123,11 @@ class _Body extends ConsumerWidget {
     final details = async?.value;
     final coldCache = async != null && !async.hasValue;
     final seasons = details?.seasons ?? const <SeasonInfo>[];
+    // The reference the season list renders against, or null when no list is
+    // on screen. This ONE value gates both the list and the Unverified notice's
+    // wording and dismiss, so the two cannot disagree. They once did, when each
+    // was computed separately.
+    final listRef = seasons.isEmpty ? null : fetchRef;
 
     // A search hit we already track is NOT a preview — it's that row's detail
     // page, and must never offer to add what's already in the library (US-3).
@@ -200,23 +205,27 @@ class _Body extends ConsumerWidget {
           ),
         ),
         // The marker sits directly above the seasons list, because the list is
-        // the evidence the user needs in order to answer it. Anywhere else and
-        // they are told to go and check something without being shown it —
-        // which is why [canCheck] is the SAME condition the seasons section
-        // below is gated on, not an approximation of it. A Stranded row
-        // (fetchRef == null) reaches here: "could not relink at all" leaves the
-        // row on the old backend, so Stranded AND Unverified is one of the two
-        // ways this state arises at all.
+        // the evidence the user needs in order to answer it. What it tells the
+        // user to do depends on WHY the list is or isn't there, read off
+        // [listRef] (the list's own gate) and [fetchRef].
         if (item != null && hasUnverifiedPosition(item))
           _UnverifiedNotice(
             itemId: item.id,
-            canCheck: fetchRef != null && seasons.isNotEmpty,
+            message: listRef != null
+                ? unverifiedPositionNoticeListShown
+                // No reference: Stranded. Only a relink can bring the list.
+                : fetchRef == null
+                ? unverifiedPositionNoticeStranded
+                // Fetchable, just not loaded. A relink skips this row, so
+                // pointing at Settings would send the user round in a circle.
+                : unverifiedPositionNoticeNotLoaded,
+            canDismiss: listRef != null,
           ),
         // Seasons come from the details fetch; a movie has none. "Mark show
         // watched" is the *section action* for the list below it — it used to
         // sit up with the status control, where it read as the only thing you
         // could do with a title.
-        if (fetchRef != null && seasons.isNotEmpty)
+        if (listRef != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(
               WatchnookSpacing.screen,
@@ -242,20 +251,17 @@ class _Body extends ConsumerWidget {
                     icon: Icons.done_all,
                     label: 'Mark show watched',
                     itemId: item.id,
-                    showRef: fetchRef,
+                    showRef: listRef,
                     seasons: _seasonNumbers(details!),
                   ),
               ],
             ),
           ),
-        // Seasons only exist once details have loaded, which cannot happen
-        // without a reference — so the guard is a formality the type system
-        // needs, not a case that occurs.
-        if (fetchRef != null)
+        if (listRef != null)
           for (final season in seasons)
             _SeasonTile(
               itemId: item?.id,
-              showRef: fetchRef,
+              showRef: listRef,
               season: season,
               allSeasons: _seasonNumbers(details!),
             ),
@@ -829,15 +835,22 @@ class _EpisodeToggle extends ConsumerWidget {
 /// by a transient error. The only thing that truthfully resolves it is a person
 /// reading the list below and saying so.
 class _UnverifiedNotice extends ConsumerWidget {
-  const _UnverifiedNotice({required this.itemId, required this.canCheck});
+  const _UnverifiedNotice({
+    required this.itemId,
+    required this.message,
+    required this.canDismiss,
+  });
 
   final int itemId;
 
+  /// One of the notice variants in `unverified_position.dart`, chosen by why
+  /// the episode list is or isn't on screen.
+  final String message;
+
   /// Whether the season/episode list is actually on screen below this. When it
-  /// is not, the notice must not send the user to it and the dismiss is
-  /// withheld — confirming a position against evidence the screen cannot show
-  /// is not a question the user can honestly answer.
-  final bool canCheck;
+  /// is not, the dismiss is withheld: confirming a position against evidence
+  /// the screen cannot show is not a question the user can honestly answer.
+  final bool canDismiss;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -868,16 +881,11 @@ class _UnverifiedNotice extends ConsumerWidget {
                 ),
                 const SizedBox(width: WatchnookSpacing.sm),
                 Expanded(
-                  child: Text(
-                    canCheck
-                        ? unverifiedPositionNotice
-                        : unverifiedPositionNoticeUncheckable,
-                    style: theme.textTheme.bodyMedium,
-                  ),
+                  child: Text(message, style: theme.textTheme.bodyMedium),
                 ),
               ],
             ),
-            if (canCheck)
+            if (canDismiss)
               Align(
                 alignment: AlignmentDirectional.centerEnd,
                 child: TextButton(

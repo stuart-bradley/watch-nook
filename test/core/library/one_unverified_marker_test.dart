@@ -12,7 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const owner = 'lib/core/library/unverified_position.dart';
   // The marker EXACTLY as it renders, parentheses included — not the bare word.
-  // 'unconfirmed' also appears in unverifiedPositionNotice's prose, so scanning
+  // 'unconfirmed' also appears in the detail notices' prose, so scanning
   // for that would make the positive control below pass even with the marker
   // constant deleted: a guard that cannot fail.
   const marker = '(unconfirmed)';

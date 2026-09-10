@@ -11,6 +11,10 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/library/unverified_position.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
+import 'package:watch_nook/core/metadata/metadata_providers.dart';
+import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
 import 'package:watch_nook/features/up_next/presentation/up_next_screen.dart';
@@ -44,6 +48,22 @@ LibraryItem _libItem({int id = 1, TrackStatus status = TrackStatus.watching}) =>
       relinkFailed: false,
     );
 
+/// [CachingMetadataSource.cachedShowDetails] over a fixed map. An id it lacks
+/// is omitted, as a cold cache would omit it.
+class _FakeRepo implements CachingMetadataSource {
+  _FakeRepo(this.byId);
+
+  final Map<int, MediaDetails> byId;
+
+  @override
+  Future<Map<int, MediaDetails>> cachedShowDetails(
+    Iterable<SourceRef> shows,
+  ) async => {for (final show in shows) show.id: ?byId[show.id]};
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
 void main() {
   QueueEntry entry({
     int itemId = 1,
@@ -67,7 +87,6 @@ void main() {
     int season = 3,
     int episode = 1,
     String? title,
-    bool unverified = false,
   }) => (
     itemId: itemId,
     showTitle: show,
@@ -76,7 +95,6 @@ void main() {
     episode: episode,
     episodeTitle: title,
     airDate: airDate,
-    unverified: unverified,
   );
 
   Future<void> pumpWith(
@@ -573,10 +591,10 @@ void main() {
   // what is worth asserting here is that the screen most likely to make the
   // user act on a suspect coordinate actually renders the marker.
   //
-  // Proved to fail first: pinning the screen's `unverified:` argument to false
-  // (so the carried flag is ignored on the way to the label) reddens both.
+  // Proved to fail first: pinning the queue tile's `unverified:` argument to
+  // false (so the carried flag is ignored on the way to the label) reddens it.
   // Note the provider-level proof in up_next_providers_test does NOT reach
-  // these — they build entries directly — which is why they need their own.
+  // this — it builds entries directly — which is why it needs its own.
   group('an Unverified position is marked', () {
     testWidgets('the queue row carries it; a healthy row does not', (
       tester,
@@ -599,32 +617,124 @@ void main() {
       expect(find.text('Next: $marked'), findsOneWidget);
       expect(find.text('Next: S1E14'), findsOneWidget);
     });
+  });
 
-    testWidgets('an upcoming row carries it too', (tester) async {
-      await withClock(Clock.fixed(_now), () async {
-        await pumpWith(
-          tester,
-          (ref) async => (
-            queue: <QueueEntry>[],
-            upcoming: [
-              soon(
-                show: 'Doubtful',
-                airDate: DateTime(2026, 7, 15),
-                season: 4,
-                episode: 2,
-                title: 'Cold Harbor',
-                unverified: true,
-              ),
-            ],
-            now: _now,
-          ),
-          items: [_libItem()],
-        );
-        await tester.pumpAndSettle();
+  // The marker describes the coordinate on its own row, and nothing else. A
+  // queue coordinate is derived from the stored position ("the episode after
+  // the last one watched"), so the doubt applies. An upcoming coordinate is the
+  // active backend's own next-to-air episode, fetched fresh, and it has nothing
+  // to do with the user's history. Marking it would be a false claim, made on
+  // the screen the user trusts to say what airs next.
+  //
+  // Driven through the REAL board provider over a fake repository. That is the
+  // only seam where "queue marked, upcoming unmarked" can be asserted in one
+  // render and actually fail. A hand-built UpcomingEntry cannot carry a flag at
+  // all, so a test that built one would have nothing to catch.
+  //
+  // The clock is fixed around the pump, because the board reads `clock.now()`.
+  // The fixtures' July air dates are the proof that it bites: under real time
+  // they are in the past and no upcoming row would render at all.
+  //
+  // The in-memory DB is only for seeding: `seedShow` derives each row's
+  // position through the real watch writes, so no fixture invents one. The
+  // library stream itself is NOT the live Drift watch (it never quiesces under
+  // fake async); it is a fixed `Stream.value` of the seeded rows.
+  //
+  // Proved to fail first: run against the previous `upcomingFor`, which set
+  // `unverified: hasUnverifiedPosition(item)` and passed it to the upcoming
+  // tile's label. That marks Doubtful's S1E4, and this goes red.
+  //
+  // Unstarted is here for the OTHER wrong reading of the old spec, "mark every
+  // Unverified show" (`relinkFailed && tv`, position or not). The old code
+  // never took that reading, so Unstarted could not redden against it. Proved
+  // separately: queue entries built with `relinkFailed && tv` mark Unstarted's
+  // "Next: S1E1", and this goes red.
+  testWidgets('an Unverified show: its queue row is marked, its upcoming row '
+      'is not', (tester) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    MediaDetails scheduled(
+      List<(int, int)> seasons,
+      (int, int) next,
+    ) => MediaDetails(
+      kind: MediaKind.tv,
+      title: 'A Show',
+      genres: const [],
+      seasons: [
+        for (final (n, c) in seasons)
+          SeasonInfo(seasonNumber: n, episodeCount: c),
+      ],
+      nextEpisode: EpisodeInfo(
+        seasonNumber: next.$1,
+        episodeNumber: next.$2,
+        airDate: DateTime(2026, 7, 17), // Friday, inside the week
+      ),
+    );
 
-        final marked = markUnverifiedPosition('S4E2', unverified: true);
-        expect(find.text('$marked · Cold Harbor'), findsOneWidget);
-      });
+    final items = [
+      // Watched S1E1; S1E2–3 aired, S1E4 scheduled. In BOTH lists.
+      await seed.seedShow(
+        db,
+        title: 'Doubtful',
+        tmdbId: 1,
+        relinkFailed: true,
+        watched: const [(1, 1)],
+      ),
+      // Unverified but never started: no position, so nothing is marked.
+      await seed.seedShow(
+        db,
+        title: 'Unstarted',
+        tmdbId: 2,
+        relinkFailed: true,
+      ),
+      // The control: the same shape, trusted.
+      await seed.seedShow(
+        db,
+        title: 'Healthy',
+        tmdbId: 3,
+        watched: const [(2, 1)],
+      ),
+    ];
+    final repo = _FakeRepo({
+      1: scheduled([(1, 10)], (1, 4)),
+      2: scheduled([(1, 10), (2, 10), (3, 10)], (3, 1)),
+      3: scheduled([(1, 10), (2, 10)], (2, 5)),
     });
+
+    await withClock(Clock.fixed(_now), () async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            libraryItemsProvider.overrideWith((ref) => Stream.value(items)),
+            activeMetadataBackendProvider.overrideWithValue(
+              MetadataBackend.tmdb,
+            ),
+            metadataProvider.overrideWithValue(repo),
+            appDatabaseProvider.overrideWithValue(db),
+          ],
+          child: const MaterialApp(home: Scaffold(body: UpNextScreen())),
+        ),
+      );
+      await tester.pumpAndSettle();
+    });
+
+    String marked(String position) =>
+        markUnverifiedPosition(position, unverified: true);
+
+    // Doubtful, in both lists.
+    expect(find.text('Next: ${marked('S1E2')}'), findsOneWidget);
+    expect(find.text('S1E4'), findsOneWidget, reason: 'its upcoming row');
+    // Unstarted: a queue row and an upcoming row, neither with a position.
+    expect(find.text('Next: S1E1'), findsOneWidget);
+    expect(find.text('S3E1'), findsOneWidget);
+    // Healthy: both unmarked, as before.
+    expect(find.text('Next: S2E2'), findsOneWidget);
+    expect(find.text('S2E5'), findsOneWidget);
+
+    expect(
+      find.textContaining(marked('').trim()),
+      findsOneWidget,
+      reason: "the whole page carries ONE marker: Doubtful's queue row",
+    );
   });
 }

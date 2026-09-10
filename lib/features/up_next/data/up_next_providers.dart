@@ -31,6 +31,13 @@ typedef QueueEntry = ({
 ///
 /// It deliberately has no "mark watched" affordance anywhere it is rendered —
 /// ticking an unaired episode would push the progress pointer past reality.
+///
+/// **It has no Unverified flag, and must not grow one.** Its coordinate is the
+/// active backend's own next-to-air episode, fetched fresh, not derived from
+/// the stored position, so the doubt the marker expresses does not apply to
+/// it. Without the field, marking an upcoming row is unrepresentable rather
+/// than merely avoided. A [QueueEntry]'s coordinate IS derived from the stored
+/// position, which is why that one carries the flag.
 typedef UpcomingEntry = ({
   int itemId,
   String showTitle,
@@ -39,7 +46,6 @@ typedef UpcomingEntry = ({
   int episode,
   String? episodeTitle,
   DateTime airDate,
-  bool unverified,
 });
 
 /// Everything the Up Next page renders, from **one** batched cache read.
@@ -161,8 +167,10 @@ bool airsBefore((int, int) a, (int, int) b) =>
 /// `S2E5`, plus the episode title when the backend supplied one.
 ///
 /// [unverified] marks the coordinate — and only the coordinate, before the
-/// episode title, so it never reads as doubt about the title text. The rule and
-/// the wording belong to `unverified_position.dart`; this only renders them.
+/// episode title, so it never reads as doubt about the title text. Only the
+/// watch queue passes it; see [UpcomingEntry] for why Upcoming never does. The
+/// rule and the wording belong to `unverified_position.dart`; this only renders
+/// them.
 String episodeLabel(
   int season,
   int episode, {
@@ -222,10 +230,6 @@ UpcomingEntry? upcomingFor(
     episode: next.episodeNumber,
     episodeTitle: next.title,
     airDate: airDate,
-    // Upcoming names a coordinate too, so it is marked by the same rule as the
-    // queue. A show whose numbering the app cannot vouch for does not become
-    // trustworthy because the episode has not aired yet.
-    unverified: hasUnverifiedPosition(item),
   );
 }
 

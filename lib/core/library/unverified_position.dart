@@ -8,8 +8,10 @@
 ///
 /// > The count is right, the position may not be. A human should look.
 ///
-/// Three surfaces render a position — the grid caption, the Up Next episode
-/// label, and the detail screen — and all three take the marker from here.
+/// Three surfaces render a position — the grid caption, the Up Next watch-queue
+/// label, and the detail screen — and all three take the marker from here. An
+/// Up Next *upcoming* row is not one of them: its coordinate is the backend's
+/// next-to-air episode, not derived from the position (see `UpcomingEntry`).
 /// Marking at each site independently would be three copies of one rule, free
 /// to drift in wording; this repo has already been bitten by a rule documented
 /// in one file and violated in the next one written the same day.
@@ -47,35 +49,50 @@ bool hasUnverifiedPosition(LibraryItem item) =>
     item.lastWatchedSeason != null &&
     item.lastWatchedEpisode != null;
 
-/// The detail screen's fuller statement of the same marker — the one surface
-/// with room for a sentence, and the only one where the user can act on it.
+/// How every detail-screen notice begins: the fuller statement of the marker,
+/// on the one surface with room for a sentence.
 ///
-/// It says three things, all of them load-bearing: which fact is in doubt (the
-/// position, not the title), that the history itself is intact, and what the
-/// user is being asked to do. Without the second, "unconfirmed" reads as
-/// "your watch history may be damaged", which is the opposite of true.
-const unverifiedPositionNotice =
-    'Where you are in this show is unconfirmed. A catalogue change meant we '
-    "couldn't check that your watched episodes still line up. Nothing was "
-    'changed — your history and totals are exactly as they were. Check the '
-    'seasons below, then dismiss this.';
+/// It says two load-bearing things: which fact is in doubt (the position, not
+/// the title), and that the history itself is intact. Without the second,
+/// "unconfirmed" reads as "your watch history may be damaged", which is the
+/// opposite of true. The third thing, what to do, depends on why the episode
+/// list is or isn't on screen, so each variant below closes with its own.
+///
+/// "Metadata provider" is the Settings relink offer's name for this event. Two
+/// names for one event make a user think two different things happened.
+const unverifiedPositionNoticeOpening =
+    'Where you are in this show is unconfirmed. After a switch of metadata '
+    "provider, we couldn't match your watched episodes to the new episode "
+    "list. Your history and totals haven't changed.";
 
-/// The same marker, for a detail screen with **no episode list on it** — a
-/// Stranded row (its ids belong to the other backend, so it fetches nothing) or
-/// a cold cache offline.
+/// The notice when the episode list **is** on screen: the evidence is right
+/// there, so the user can check it and dismiss with
+/// [unverifiedPositionDismissLabel].
+const unverifiedPositionNoticeListShown =
+    '$unverifiedPositionNoticeOpening Check the seasons below.';
+
+/// The notice for a **Stranded** row: its ids belong to the other backend, so
+/// nothing can be fetched for it and the list will never appear until a relink.
+/// No dismiss: the user would be confirming a position against evidence the
+/// screen cannot show.
+const unverifiedPositionNoticeStranded =
+    "$unverifiedPositionNoticeOpening Its episode list can't load until you "
+    'relink your library in Settings.';
+
+/// The notice for a **fetchable** row whose list simply hasn't loaded (offline,
+/// or the new backend's cache still cold straight after a switch).
 ///
-/// This case is not rare: "could not relink at all" leaves the row on the old
-/// backend, so Stranded **and** Unverified is one of the two documented ways a
-/// row reaches this state at all (CONTEXT.md). Sending that user to "the
-/// seasons below" points at nothing, and [unverifiedPositionDismissLabel] would
-/// ask them to confirm a position against evidence the screen cannot show — so
-/// the dismiss is withheld here and the notice says what to do instead.
-const unverifiedPositionNoticeUncheckable =
-    'Where you are in this show is unconfirmed. A catalogue change meant we '
-    "couldn't check that your watched episodes still line up. Nothing was "
-    'changed — your history and totals are exactly as they were. The episode '
-    'list is not available here, so there is nothing to check it against yet; '
-    'relink your library from Settings, then come back.';
+/// It must not mention Settings. A relink skips any row already on the active
+/// backend, so sending this user there changes nothing and they come straight
+/// back to the same advice. No dismiss, for the same reason as the Stranded
+/// variant; the list-shown variant takes over as soon as the list arrives.
+///
+/// Strictly, this is "fetchable, but no seasons on screen", so it also covers
+/// details that loaded with no seasons at all. A show the user has a stored
+/// position in should not reach that, so the copy assumes the common cause.
+const unverifiedPositionNoticeNotLoaded =
+    "$unverifiedPositionNoticeOpening Its episode list hasn't loaded yet, so "
+    'check back once it has.';
 
 /// What the dismiss action reads as, on the detail screen.
 const unverifiedPositionDismissLabel = 'Looks right';

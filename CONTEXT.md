@@ -65,6 +65,11 @@ What Unverified does **not** mean:
   data fails the same way, which is why there is no "re-check" — only a human
   checking the episode list and dismissing the marker.
 
+**"Unconfirmed" in the UI.** The user never sees the word Unverified: the marker
+reads "(unconfirmed)" and the detail notice says the position "is unconfirmed".
+The split is deliberate, because "unverified" reads as jargon to a user. Keep
+**Unverified** in code and in this glossary, and do not "fix" the UI to match.
+
 **Dismissed.** A user has looked at the episode list and confirmed the position
 is right, clearing the flag for that one row. There is no bulk dismiss. The
 cleared state is part of the exported backup, so it survives an export and

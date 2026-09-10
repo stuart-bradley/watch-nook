@@ -331,13 +331,9 @@ class _UpcomingTile extends StatelessWidget {
     return ListTile(
       leading: RemoteImage.thumbnail(artwork: entry.poster),
       title: Text(entry.showTitle),
+      // Never marked: this coordinate is the backend's, not the user's history.
       subtitle: Text(
-        episodeLabel(
-          entry.season,
-          entry.episode,
-          title: entry.episodeTitle,
-          unverified: entry.unverified,
-        ),
+        episodeLabel(entry.season, entry.episode, title: entry.episodeTitle),
       ),
       trailing: Text(
         airLabel(entry.airDate, now),

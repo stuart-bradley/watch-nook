@@ -74,4 +74,61 @@ void main() {
       expect(marker.length, greaterThan(3));
     });
   });
+
+  // The detail notice has three variants, one per reason the episode list is
+  // or isn't on screen. What a wrong set looks like: two variants collapse into
+  // one (the relink loop: a not-loaded row told to relink), a variant drops the
+  // shared opening and loses "your history is intact", or copy that works on
+  // screen reads as noise aloud.
+  //
+  // Proved to fail first: making the not-loaded variant the Stranded one (the
+  // previous single "no list" notice) reddens "distinct" and "only Stranded
+  // mentions Settings"; restoring the old em-dash copy reddens "plain words".
+  group('the detail notice variants', () {
+    const variants = {
+      'list shown': unverifiedPositionNoticeListShown,
+      'Stranded': unverifiedPositionNoticeStranded,
+      'not loaded': unverifiedPositionNoticeNotLoaded,
+    };
+
+    test('are distinct', () {
+      expect(variants.values.toSet(), hasLength(3));
+    });
+
+    test('share the opening, then close with one sentence of their own', () {
+      for (final MapEntry(:key, :value) in variants.entries) {
+        expect(value, startsWith(unverifiedPositionNoticeOpening), reason: key);
+        final closing = value.substring(unverifiedPositionNoticeOpening.length);
+        expect(
+          RegExp(r'^ [A-Z][^.]*\.$').hasMatch(closing),
+          isTrue,
+          reason: '$key closes with exactly one sentence, got "$closing"',
+        );
+      }
+    });
+
+    test('only the Stranded variant sends the user to Settings', () {
+      // A relink skips a row already on the active backend, so a not-loaded
+      // row sent to Settings comes straight back to the same advice.
+      expect(unverifiedPositionNoticeStranded, contains('Settings'));
+      expect(unverifiedPositionNoticeNotLoaded, isNot(contains('Settings')));
+      expect(unverifiedPositionNoticeListShown, isNot(contains('Settings')));
+    });
+
+    test("are plain words, in the app's own vocabulary", () {
+      for (final MapEntry(:key, :value) in variants.entries) {
+        // Letters and ordinary punctuation only, so a screen reader says it
+        // as written: no dashes, glyphs or symbols to be read out or skipped.
+        expect(
+          RegExp(r"^[A-Za-z ,.']+$").hasMatch(value),
+          isTrue,
+          reason: '$key: "$value"',
+        );
+        // Settings calls this event "a different metadata provider". A second
+        // name for it makes a user think a second thing happened.
+        expect(value.toLowerCase(), isNot(contains('catalogue')), reason: key);
+        expect(value, contains('metadata provider'), reason: key);
+      }
+    });
+  });
 }

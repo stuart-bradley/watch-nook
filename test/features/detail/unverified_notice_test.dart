@@ -27,33 +27,37 @@ import '../../support/library_fixtures.dart' as seed;
 /// the dismiss is the first path this flag has ever had to being cleared by a
 /// person.
 ///
-/// Wiring coverage; the rule lives in `unverified_position.dart` and the write
-/// is tested at the DAO. What is worth proving here is that tapping the action
-/// really performs that write, and that a row without the flag shows nothing.
+/// Wiring coverage; the rule and every variant's wording live in
+/// `unverified_position.dart` and the write is tested at the DAO. What is worth
+/// proving here is that the screen picks the variant by the real reason the
+/// list is or isn't there, offers the dismiss only beside the list, and that
+/// tapping it really performs the write.
 ///
-/// **Proved to fail first**, all three: removing the notice from the build
-/// reddens the render and dismiss tests; showing it unconditionally (dropping
-/// the `hasUnverifiedPosition` gate) reddens the absence test; making the DAO
-/// write a no-op reddens the dismiss test.
+/// **Proved to fail first**: removing the notice from the build reddens the
+/// list-shown and dismiss tests; showing it unconditionally (dropping the
+/// `hasUnverifiedPosition` gate) reddens the absence test; making the DAO write
+/// a no-op reddens the dismiss test. The variant tests record their own proofs.
 ///
 /// This mounts over a real `AppDatabase` rather than a stub, against
 /// ARCHITECTURE.md's widget-test rule. That rule guards one hazard — a live
 /// Drift stream never quiescing under fake-async — and the hand-driven
 /// controller below removes it. The write under test is the point of the
 /// screen, so stubbing the DAO would leave nothing worth asserting.
+///
+/// The fake source serves details on request. `gate`, when given, holds them
+/// back until the test completes it; `offline` fails every fetch, as having no
+/// network does.
 class _FakeSource implements MetadataSource {
-  const _FakeSource();
+  _FakeSource({this.gate, this.offline = false});
 
-  static const _details = MediaDetails(
-    kind: MediaKind.tv,
-    title: 'Severance',
-    genres: ['Drama'],
-    seasons: [SeasonInfo(seasonNumber: 1, episodeCount: 2)],
-    tmdbId: 95396,
-  );
+  final Completer<MediaDetails>? gate;
+  final bool offline;
 
   @override
-  Future<MediaDetails> showDetails(SourceRef ref) async => _details;
+  Future<MediaDetails> showDetails(SourceRef ref) async {
+    if (offline) throw Exception('offline');
+    return gate?.future ?? _details;
+  }
 
   @override
   Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) async =>
@@ -62,6 +66,14 @@ class _FakeSource implements MetadataSource {
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
+
+const _details = MediaDetails(
+  kind: MediaKind.tv,
+  title: 'Severance',
+  genres: ['Drama'],
+  seasons: [SeasonInfo(seasonNumber: 1, episodeCount: 2)],
+  tmdbId: 95396,
+);
 
 void main() {
   setUpAll(() => GoogleFonts.config.allowRuntimeFetching = false);
@@ -76,12 +88,18 @@ void main() {
   /// controller rather than `watchItem`: a live Drift stream never quiesces
   /// under fake-async and would hang `pumpAndSettle` (the CLAUDE.md hazard).
   /// Re-emitting by hand after the write is exactly what the real stream does.
+  ///
+  /// [settle] false stops after one frame, for a screen still loading details:
+  /// its progress bar animates forever, so `pumpAndSettle` would never return.
   Future<StreamController<LibraryItem?>> pump(
     WidgetTester tester,
-    LibraryItem row,
-  ) async {
+    LibraryItem row, {
+    _FakeSource? source,
+    bool settle = true,
+  }) async {
     final rows = StreamController<LibraryItem?>.broadcast();
     addTearDown(rows.close);
+    final fake = source ?? _FakeSource();
 
     tester.view.physicalSize = const Size(1000, 3000);
     tester.view.devicePixelRatio = 1;
@@ -92,10 +110,10 @@ void main() {
         overrides: [
           appDatabaseProvider.overrideWithValue(db),
           activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
-          activeMetadataSourceProvider.overrideWithValue(const _FakeSource()),
+          activeMetadataSourceProvider.overrideWithValue(fake),
           metadataProvider.overrideWithValue(
             CachingMetadataSource(
-              source: const _FakeSource(),
+              source: fake,
               sourceKind: MetadataSourceKind.tmdb,
               dao: db.mediaCacheDao,
               clock: fixed,
@@ -116,7 +134,7 @@ void main() {
     // and a spinner animates forever, so pumpAndSettle would never return.
     await tester.pump();
     rows.add(row);
-    await tester.pumpAndSettle();
+    settle ? await tester.pumpAndSettle() : await tester.pump();
     return rows;
   }
 
@@ -141,59 +159,110 @@ void main() {
     watched: const [(1, 1)],
   );
 
-  testWidgets('an Unverified title shows the marker and its dismiss', (
-    tester,
-  ) async {
+  final anyNotice = find.textContaining(unverifiedPositionNoticeOpening);
+  final dismiss = find.text(unverifiedPositionDismissLabel);
+
+  testWidgets('with the episode list on screen: check the seasons below, and '
+      'the dismiss', (tester) async {
     await pump(tester, await seedRow(unverified: true));
 
-    expect(find.text(unverifiedPositionNotice), findsOneWidget);
-    expect(find.text(unverifiedPositionDismissLabel), findsOneWidget);
+    expect(find.text(unverifiedPositionNoticeListShown), findsOneWidget);
+    expect(dismiss, findsOneWidget);
 
     // Above the seasons list, because the list is the evidence the user needs
     // in order to answer it. Anywhere else and they are told to go and check
     // something without being shown it.
     expect(
-      tester.getTopLeft(find.text(unverifiedPositionNotice)).dy,
+      tester.getTopLeft(find.text(unverifiedPositionNoticeListShown)).dy,
       lessThan(tester.getTopLeft(find.text('Seasons')).dy),
     );
   });
 
-  testWidgets('a healthy title shows neither', (tester) async {
+  testWidgets('a healthy title shows no notice and no dismiss', (tester) async {
     await pump(tester, await seedRow(unverified: false));
 
-    expect(find.text(unverifiedPositionNotice), findsNothing);
-    expect(find.text(unverifiedPositionDismissLabel), findsNothing);
+    expect(anyNotice, findsNothing);
+    expect(dismiss, findsNothing);
   });
 
-  // The bug the first round shipped: both notices were gated on the row alone,
-  // while the seasons list is gated on there being something to fetch. A
-  // Stranded row got "Check the seasons below, then dismiss this" with nothing
-  // below it, and a one-tap dismiss of a question it had shown no evidence for.
-  testWidgets(
-    'with no episode list, it neither points at one nor offers a dismiss',
-    (
-      tester,
-    ) async {
-      await pump(tester, await seedStrandedRow());
+  // A Stranded row fetches nothing, so its list can never appear until a
+  // relink. The first round of this feature pointed it at "the seasons below"
+  // with nothing below, and offered a dismiss nothing on screen could justify.
+  testWidgets('Stranded: the relink variant, and no dismiss', (tester) async {
+    await pump(tester, await seedStrandedRow());
 
-      expect(
-        find.text(unverifiedPositionNotice),
-        findsNothing,
-        reason: 'that copy sends the user to a list this screen does not show',
-      );
-      expect(find.text(unverifiedPositionNoticeUncheckable), findsOneWidget);
-      expect(
-        find.text(unverifiedPositionDismissLabel),
-        findsNothing,
-        reason: 'nothing on screen could justify answering it',
-      );
-      expect(
-        find.text('Seasons'),
-        findsNothing,
-        reason: 'sanity: this row really has no list — the premise of the test',
-      );
-    },
-  );
+    expect(find.text(unverifiedPositionNoticeStranded), findsOneWidget);
+    expect(
+      dismiss,
+      findsNothing,
+      reason: 'nothing on screen could justify answering it',
+    );
+    expect(
+      find.text('Seasons'),
+      findsNothing,
+      reason: 'sanity: this row really has no list — the premise of the test',
+    );
+  });
+
+  // THE regression guard for the relink loop. A fetchable row is on the active
+  // backend already, so a relink skips it. Told to relink, the user does, comes
+  // back, and is told to relink again, under "You're offline". This is common,
+  // not exotic: straight after a switch the new backend's cache is empty for
+  // every show. The Stranded test above cannot catch it: it seeds a Stranded
+  // row, which is the one case where the relink advice is right.
+  //
+  // Proved to fail first: choosing the variant from "list present" alone
+  // (`listRef != null ? ListShown : Stranded`, the previous behaviour) shows
+  // the relink copy here and reddens it.
+  testWidgets('fetchable but offline: the not-loaded variant, no dismiss, and '
+      'no mention of Settings', (tester) async {
+    await pump(
+      tester,
+      await seedRow(unverified: true),
+      source: _FakeSource(offline: true),
+    );
+
+    expect(
+      find.text("Couldn't load details. You're offline."),
+      findsOneWidget,
+      reason: 'sanity: the list is missing because the fetch failed',
+    );
+    expect(find.text(unverifiedPositionNoticeNotLoaded), findsOneWidget);
+    expect(dismiss, findsNothing);
+    expect(
+      find.textContaining('Settings'),
+      findsNothing,
+      reason: 'a relink skips this row, so Settings cannot help',
+    );
+  });
+
+  // Nothing special should be needed for this beyond the screen rebuilding;
+  // pinned so that stays true.
+  //
+  // Proved to fail first: choosing the variant from the fetch reference alone
+  // (`fetchRef == null ? Stranded : NotLoaded`, so a fetchable row never
+  // reaches ListShown) reddens the second half; the "list present" alone
+  // mutation above reddens the first.
+  testWidgets('a fetchable title whose details arrive moves to "check the '
+      'seasons below" and gains its dismiss', (tester) async {
+    final gate = Completer<MediaDetails>();
+    await pump(
+      tester,
+      await seedRow(unverified: true),
+      source: _FakeSource(gate: gate),
+      settle: false,
+    );
+
+    expect(find.text(unverifiedPositionNoticeNotLoaded), findsOneWidget);
+    expect(dismiss, findsNothing);
+
+    gate.complete(_details);
+    await tester.pumpAndSettle();
+
+    expect(find.text(unverifiedPositionNoticeListShown), findsOneWidget);
+    expect(dismiss, findsOneWidget);
+    expect(find.text(unverifiedPositionNoticeNotLoaded), findsNothing);
+  });
 
   testWidgets('dismissing clears the flag and the screen updates', (
     tester,
@@ -201,7 +270,7 @@ void main() {
     final row = await seedRow(unverified: true);
     final rows = await pump(tester, row);
 
-    await tester.tap(find.text(unverifiedPositionDismissLabel));
+    await tester.tap(dismiss);
     await tester.pumpAndSettle();
 
     final after = (await db.libraryDao.getItem(row.id))!;
@@ -212,7 +281,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.text(unverifiedPositionNotice),
+      anyNotice,
       findsNothing,
       reason: 'a dismissed title is indistinguishable from a healthy one',
     );
