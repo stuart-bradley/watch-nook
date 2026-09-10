@@ -6,10 +6,12 @@ import 'package:watch_nook/core/metadata/source_ref.dart';
 
 /// Why a title on the detail screen cannot have its metadata fetched.
 ///
-/// Both cases render identically — the stored row alone, no network — so this
-/// exists to keep them *distinguishable*, not to branch on. They have very
-/// different fixes: one is waiting on the user to relink from Settings, the
-/// other can only be filled in by a later search.
+/// Both cases render identically — the stored row alone, no network. They have
+/// very different fixes: one is waiting on the user to relink from Settings,
+/// the other has no reliable fix in the app (a search opens the same row
+/// untouched; only a re-import that matches it can fill the id). The one place
+/// that branches on it is the Unverified notice, which must not send an
+/// Unlinked row to a relink that cannot help it.
 enum Unfetchable {
   /// The row was recorded against a backend that is no longer the active one
   /// (ADR-2 flips it remotely). Its ids belong to the other catalogue and mean

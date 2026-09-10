@@ -213,12 +213,18 @@ class _Body extends ConsumerWidget {
             itemId: item.id,
             message: listRef != null
                 ? unverifiedPositionNoticeListShown
-                // No reference: Stranded. Only a relink can bring the list.
-                : fetchRef == null
-                ? unverifiedPositionNoticeStranded
-                // Fetchable, just not loaded. A relink skips this row, so
-                // pointing at Settings would send the user round in a circle.
-                : unverifiedPositionNoticeNotLoaded,
+                : switch (target) {
+                    // No reference, but on the active backend: a relink skips
+                    // it and Settings offers none, so it must not point there.
+                    StrandedTitle(reason: Unfetchable.noIdForItsBackend) =>
+                      unverifiedPositionNoticeUnlinked,
+                    // No reference: Stranded. Only a relink can bring the list.
+                    _ when fetchRef == null => unverifiedPositionNoticeStranded,
+                    // Fetchable, just not loaded. A relink skips this row, so
+                    // pointing at Settings would send the user round in a
+                    // circle.
+                    _ => unverifiedPositionNoticeNotLoaded,
+                  },
             canDismiss: listRef != null,
           ),
         // Seasons come from the details fetch; a movie has none. "Mark show

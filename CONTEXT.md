@@ -30,7 +30,8 @@ nothing may fetch for it. A relink from Settings repairs it.
 
 **Unlinked.** A row on the active backend that carries no id for it — an
 offline add, or an import matched on title alone. Nothing may fetch for it
-either, but a relink cannot help; only a later search can fill the id in.
+either, but a relink cannot help. Searching for the title opens this same row
+untouched; only a re-import that matches it can fill the id in.
 
 **Fetchable.** Neither of the above: the row is on the active backend and
 carries its id. The ordinary case.

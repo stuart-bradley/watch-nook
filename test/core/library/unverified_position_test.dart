@@ -88,11 +88,12 @@ void main() {
     const variants = {
       'list shown': unverifiedPositionNoticeListShown,
       'Stranded': unverifiedPositionNoticeStranded,
+      'Unlinked': unverifiedPositionNoticeUnlinked,
       'not loaded': unverifiedPositionNoticeNotLoaded,
     };
 
     test('are distinct', () {
-      expect(variants.values.toSet(), hasLength(3));
+      expect(variants.values.toSet(), hasLength(variants.length));
     });
 
     test('share the opening, then close with one sentence of their own', () {
@@ -112,6 +113,8 @@ void main() {
       // row sent to Settings comes straight back to the same advice.
       expect(unverifiedPositionNoticeStranded, contains('Settings'));
       expect(unverifiedPositionNoticeNotLoaded, isNot(contains('Settings')));
+      // Nor does it help an Unlinked row, and Settings offers it no relink.
+      expect(unverifiedPositionNoticeUnlinked, isNot(contains('Settings')));
       expect(unverifiedPositionNoticeListShown, isNot(contains('Settings')));
     });
 

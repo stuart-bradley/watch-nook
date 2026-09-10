@@ -79,6 +79,19 @@ const unverifiedPositionNoticeStranded =
     "$unverifiedPositionNoticeOpening Its episode list can't load until you "
     'relink your library in Settings.';
 
+/// The notice for an **Unlinked** row: on the active backend, but with no id
+/// for it, so nothing can be fetched and no list will appear.
+///
+/// It must not mention Settings: a relink skips any row already on the active
+/// backend, and Settings does not even offer one for it. It promises no fix
+/// either, because the app has no reliable one (search opens this same row
+/// untouched; only a re-import that happens to match can fill the id). So it
+/// says what is true: there is nothing here to check against. No dismiss, for
+/// the same reason as the Stranded variant.
+const unverifiedPositionNoticeUnlinked =
+    "$unverifiedPositionNoticeOpening Its episode list isn't available for "
+    "this title, so there's nothing to check it against.";
+
 /// The notice for a **fetchable** row whose list simply hasn't loaded (offline,
 /// or the new backend's cache still cold straight after a switch).
 ///

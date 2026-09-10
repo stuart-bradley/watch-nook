@@ -159,6 +159,17 @@ void main() {
     watched: const [(1, 1)],
   );
 
+  /// Unverified **and** Unlinked: on the active backend, but with no id for it.
+  /// Rare, but reachable: a title-matched import has no imdbId, so a relink
+  /// after a backend flip flags it in place, and a flip back leaves it on the
+  /// active backend with nothing to fetch by.
+  Future<LibraryItem> seedUnlinkedRow() => seed.seedShow(
+    db,
+    tmdbId: null,
+    relinkFailed: true,
+    watched: const [(1, 1)],
+  );
+
   final anyNotice = find.textContaining(unverifiedPositionNoticeOpening);
   final dismiss = find.text(unverifiedPositionDismissLabel);
 
@@ -233,6 +244,38 @@ void main() {
       find.textContaining('Settings'),
       findsNothing,
       reason: 'a relink skips this row, so Settings cannot help',
+    );
+  });
+
+  // An Unlinked row has no reference either, but it is NOT Stranded: it is
+  // already on the active backend, so a relink skips it and Settings does not
+  // even offer one. Keyed on "no reference" alone, it was sent to a Settings
+  // relink that is not there (D1 of the deviation audit).
+  //
+  // Proved to fail first: run against the previous variant choice, keyed on
+  // `fetchRef == null` alone, which showed the Stranded copy here and reddened
+  // the Settings assertion.
+  testWidgets('Unlinked: its own variant, never sent to Settings, no dismiss', (
+    tester,
+  ) async {
+    await pump(tester, await seedUnlinkedRow());
+
+    expect(
+      anyNotice,
+      findsOneWidget,
+      reason: 'sanity: the row is Unverified with a position',
+    );
+    expect(find.text(unverifiedPositionNoticeUnlinked), findsOneWidget);
+    expect(
+      find.textContaining('Settings'),
+      findsNothing,
+      reason: 'a relink skips this row, and Settings offers none',
+    );
+    expect(dismiss, findsNothing);
+    expect(
+      find.text('Seasons'),
+      findsNothing,
+      reason: 'sanity: no reference, so no list — the premise of the test',
     );
   });
 
