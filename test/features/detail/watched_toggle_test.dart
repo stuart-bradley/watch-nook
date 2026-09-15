@@ -376,6 +376,72 @@ void main() {
     expect((await db.libraryDao.getItem(id))!.trackStatus, TrackStatus.dropped);
   });
 
+  /// Ticket 02 of e2e-follow-ups: these writes failed silently, so a tap that
+  /// wrote nothing looked like one that hadn't landed yet. A real SQLite
+  /// failure, not a faked DAO: the trigger aborts every update to the library
+  /// row, which each of these writes performs (the watch toggles through their
+  /// denormalized recompute). Mutation: call the DAO bare, as before, instead
+  /// of through `_writeOrSay` → no message, and each test fails.
+  Future<void> failLibraryWrites() => db.customStatement(
+    'CREATE TRIGGER fail_writes BEFORE UPDATE ON library_items '
+    "BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+  );
+
+  testWidgets('a failed episode toggle says so, and writes nothing', (
+    tester,
+  ) async {
+    final id = await insertShow();
+    await pumpDetail(tester, itemId: id, details: showDetails);
+    await expandSeason1(tester);
+    await failLibraryWrites();
+
+    await tester.tap(find.byTooltip('Mark watched').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't mark the episode watched."), findsOneWidget);
+    expect(await db.libraryDao.watchEventsFor(id), isEmpty);
+  });
+
+  testWidgets('a failed film Mark watched says so', (tester) async {
+    final id = await insertMovie();
+    await pumpDetail(tester, itemId: id, details: movieDetails);
+    await failLibraryWrites();
+
+    await tester.tap(find.text('Mark watched'));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't mark this watched."), findsOneWidget);
+    expect(await db.libraryDao.watchEventsFor(id), isEmpty);
+  });
+
+  testWidgets('a failed status change says so', (tester) async {
+    final id = await insertShow();
+    await pumpDetail(tester, itemId: id, details: showDetails);
+    await failLibraryWrites();
+
+    await tester.tap(find.byType(DropdownMenu<TrackStatus>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('On hold').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't change the status."), findsOneWidget);
+    expect(
+      (await db.libraryDao.getItem(id))!.trackStatus,
+      TrackStatus.watching,
+    );
+  });
+
+  testWidgets('a failed rating says so', (tester) async {
+    final id = await pumpPhoneWithRating(tester, 7);
+    await failLibraryWrites();
+
+    await tester.tap(find.text('Clear rating'));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't save the rating."), findsOneWidget);
+    expect((await db.libraryDao.getItem(id))!.rating, 7);
+  });
+
   testWidgets('an out-of-band status change repaints the status control', (
     tester,
   ) async {

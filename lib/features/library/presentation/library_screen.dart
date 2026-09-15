@@ -10,6 +10,7 @@ import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
+import 'package:watch_nook/core/widgets/count_label.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/core/widgets/remote_image.dart';
 
@@ -102,7 +103,7 @@ String libraryProgressLabel(LibraryItem item) {
   final episode = item.lastWatchedEpisode;
   final total = item.episodeCountTotal;
   if (season == null || episode == null) {
-    return total != null ? '$total episodes' : 'Not started';
+    return total != null ? countOf(total, 'episode') : 'Not started';
   }
   final position = markUnverifiedPosition(
     'S${season}E$episode',

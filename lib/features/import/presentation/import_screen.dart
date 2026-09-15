@@ -8,6 +8,7 @@ import 'package:watch_nook/core/import_export/import/merge_applier.dart';
 import 'package:watch_nook/core/import_export/import/resolver.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
+import 'package:watch_nook/core/widgets/count_label.dart';
 import 'package:watch_nook/core/widgets/remote_image.dart';
 import 'package:watch_nook/features/import/data/import_providers.dart';
 import 'package:watch_nook/features/import/domain/import_state.dart';
@@ -184,8 +185,7 @@ class _ConfirmState extends ConsumerState<_Confirm> {
   }
 }
 
-String _titles(int n, String prefix) =>
-    '$prefix$n ${n == 1 ? 'title' : 'titles'}';
+String _titles(int n, String prefix) => '$prefix${countOf(n, 'title')}';
 
 class _AmbiguousCard extends StatelessWidget {
   const _AmbiguousCard({

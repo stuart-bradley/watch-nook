@@ -7,7 +7,6 @@ import 'package:go_router/go_router.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
-import 'package:watch_nook/core/database/library_dao.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/library/unverified_position.dart';
@@ -15,6 +14,7 @@ import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
+import 'package:watch_nook/core/widgets/count_label.dart';
 import 'package:watch_nook/core/widgets/remote_image.dart';
 import 'package:watch_nook/core/widgets/track_status_ui.dart';
 import 'package:watch_nook/features/detail/data/add_to_library.dart';
@@ -347,6 +347,8 @@ Future<void> _pickRating(
   WidgetRef ref,
   LibraryItem item,
 ) async {
+  // Captured before the sheet's await, so no `BuildContext` crosses the gap.
+  final messenger = ScaffoldMessenger.of(context);
   // -1 distinguishes "cleared" from "dismissed" (null) — a rating of 0 is real.
   final picked = await showModalBottomSheet<int>(
     context: context,
@@ -375,9 +377,13 @@ Future<void> _pickRating(
     ),
   );
   if (picked == null) return;
-  await ref
-      .read(libraryDaoProvider)
-      .updateRating(item.id, picked == -1 ? null : picked, now: clock.now());
+  await _writeOrSay(
+    messenger,
+    "Couldn't save the rating.",
+    () => ref
+        .read(libraryDaoProvider)
+        .updateRating(item.id, picked == -1 ? null : picked, now: clock.now()),
+  );
 }
 
 /// The show's track status (`LibraryItems.trackStatus`) — a labelled Material 3
@@ -401,9 +407,13 @@ class _StatusDropdown extends ConsumerWidget {
       onSelected: (status) {
         if (status == null) return;
         unawaited(
-          ref
-              .read(libraryDaoProvider)
-              .updateStatus(item.id, status, now: clock.now()),
+          _writeOrSay(
+            ScaffoldMessenger.of(context),
+            "Couldn't change the status.",
+            () => ref
+                .read(libraryDaoProvider)
+                .updateStatus(item.id, status, now: clock.now()),
+          ),
         );
       },
       dropdownMenuEntries: [
@@ -481,6 +491,34 @@ Future<void> _addTitle(
   }
 }
 
+/// Runs a library write from a tap, and says so when it fails: a write that
+/// landed nothing must not look like one still on its way. Every library write
+/// on this screen goes through here, apart from the two flows with their own
+/// reporting ([_addTitle], [_runBulk]); a new control reaches for this, not a
+/// bare `unawaited(dao…)`.
+///
+/// [success] is only for writes that change nothing on screen (a rewatch).
+/// The rest repaint off the live row, which is confirmation enough.
+///
+/// Takes the messenger, not a context: capture it before any await.
+Future<void> _writeOrSay(
+  ScaffoldMessengerState messenger,
+  String failure,
+  Future<void> Function() write, {
+  String? success,
+}) async {
+  try {
+    await write();
+  } on Object catch (e, s) {
+    debugPrint('wn-error: $failure $e\n$s');
+    messenger.showSnackBar(SnackBar(content: Text(failure)));
+    return;
+  }
+  if (success != null) {
+    messenger.showSnackBar(SnackBar(content: Text(success)));
+  }
+}
+
 /// A movie's watched toggle + rewatch log (#19, US-2/US-4). Watched-ness is the
 /// denormalized `watchedCount` on the live row — no cross-domain join, and a
 /// rewatch (which never raises the count) leaves the button as it was.
@@ -501,43 +539,43 @@ class _MovieWatchActions extends ConsumerWidget {
           icon: Icon(watched ? Icons.check_circle : Icons.check_circle_outline),
           label: Text(watched ? 'Watched' : 'Mark watched'),
           onPressed: () => unawaited(
-            watched
-                ? dao.unwatch(item.id)
-                : dao.markWatched(
-                    item.id,
-                    watchedAt: clock.now(),
-                    runtimeMinutes: item.runtimeMinutes,
-                  ),
+            _writeOrSay(
+              ScaffoldMessenger.of(context),
+              watched
+                  ? "Couldn't mark this unwatched."
+                  : "Couldn't mark this watched.",
+              () => watched
+                  ? dao.unwatch(item.id)
+                  : dao.markWatched(
+                      item.id,
+                      watchedAt: clock.now(),
+                      runtimeMinutes: item.runtimeMinutes,
+                    ),
+            ),
           ),
         ),
         if (watched)
           TextButton.icon(
             icon: const Icon(Icons.replay),
             label: const Text('Log rewatch'),
-            onPressed: () => unawaited(_logRewatch(context, dao)),
+            // A rewatch changes nothing on screen (the count never rises), so
+            // the SnackBar is the only sign the tap landed; without it a second
+            // tap logs a second rewatch.
+            onPressed: () => unawaited(
+              _writeOrSay(
+                ScaffoldMessenger.of(context),
+                "Couldn't log the rewatch.",
+                () => dao.logRewatch(
+                  item.id,
+                  watchedAt: clock.now(),
+                  runtimeMinutes: item.runtimeMinutes,
+                ),
+                success: 'Rewatch logged.',
+              ),
+            ),
           ),
       ],
     );
-  }
-
-  /// A rewatch changes nothing on screen (the count never rises), so the
-  /// SnackBar is the only sign the tap landed; without it a second tap logs a
-  /// second rewatch.
-  Future<void> _logRewatch(BuildContext context, LibraryDao dao) async {
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      await dao.logRewatch(
-        item.id,
-        watchedAt: clock.now(),
-        runtimeMinutes: item.runtimeMinutes,
-      );
-      messenger.showSnackBar(const SnackBar(content: Text('Rewatch logged.')));
-    } on Object catch (e, s) {
-      debugPrint('wn-error: log rewatch failed: $e\n$s');
-      messenger.showSnackBar(
-        const SnackBar(content: Text("Couldn't log the rewatch.")),
-      );
-    }
   }
 }
 
@@ -614,8 +652,7 @@ class _SeasonTile extends ConsumerWidget {
       title: Text(name),
       subtitle: Text(
         itemId == null
-            ? '${season.episodeCount} episode'
-                  '${season.episodeCount == 1 ? '' : 's'}'
+            ? countOf(season.episodeCount, 'episode')
             : '$watchedHere/${season.episodeCount} watched',
       ),
       trailing: !bulkable
@@ -718,9 +755,8 @@ Future<void> _runBulk(
             // skips plenty and is also genuinely already watched.
             (marked: 0, airedCandidates: 0) => 'Nothing has aired yet.',
             (marked: 0, airedCandidates: _) => 'Already watched.',
-            (marked: 1, airedCandidates: _) => 'Marked 1 episode watched.',
             (marked: final n, airedCandidates: _) =>
-              'Marked $n episodes watched.',
+              'Marked ${countOf(n, 'episode')} watched.',
           },
         ),
       ),
@@ -837,19 +873,25 @@ class _EpisodeToggle extends ConsumerWidget {
       icon: Icon(watched ? Icons.check_circle : Icons.check_circle_outline),
       tooltip: watched ? 'Mark unwatched' : 'Mark watched',
       onPressed: () => unawaited(
-        watched
-            ? dao.unwatch(
-                itemId,
-                season: episode.seasonNumber,
-                episode: episode.episodeNumber,
-              )
-            : dao.markWatched(
-                itemId,
-                season: episode.seasonNumber,
-                episode: episode.episodeNumber,
-                watchedAt: clock.now(),
-                runtimeMinutes: episode.runtimeMinutes,
-              ),
+        _writeOrSay(
+          ScaffoldMessenger.of(context),
+          watched
+              ? "Couldn't mark the episode unwatched."
+              : "Couldn't mark the episode watched.",
+          () => watched
+              ? dao.unwatch(
+                  itemId,
+                  season: episode.seasonNumber,
+                  episode: episode.episodeNumber,
+                )
+              : dao.markWatched(
+                  itemId,
+                  season: episode.seasonNumber,
+                  episode: episode.episodeNumber,
+                  watchedAt: clock.now(),
+                  runtimeMinutes: episode.runtimeMinutes,
+                ),
+        ),
       ),
     );
   }
@@ -921,9 +963,13 @@ class _UnverifiedNotice extends ConsumerWidget {
                   // re-emits, so the grid caption and the Up Next label drop
                   // their markers without a reload.
                   onPressed: () => unawaited(
-                    ref
-                        .read(libraryDaoProvider)
-                        .dismissUnverifiedPosition(itemId),
+                    _writeOrSay(
+                      ScaffoldMessenger.of(context),
+                      "Couldn't save your answer.",
+                      () => ref
+                          .read(libraryDaoProvider)
+                          .dismissUnverifiedPosition(itemId),
+                    ),
                   ),
                   child: const Text(unverifiedPositionDismissLabel),
                 ),

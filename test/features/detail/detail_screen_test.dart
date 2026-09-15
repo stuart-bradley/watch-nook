@@ -41,11 +41,20 @@ import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
 /// A source that serves [details]/[episodes], or throws every call when
 /// [offline] — never the network.
 class _FakeSource implements MetadataSource {
-  _FakeSource({this.details, this.episodes = const [], this.offline = false});
+  _FakeSource({
+    this.details,
+    this.episodes = const [],
+    this.offline = false,
+    this.episodesOffline = false,
+  });
 
   final MediaDetails? details;
   final List<EpisodeInfo> episodes;
   final bool offline;
+
+  /// Serves details but fails every episode fetch. Mutable, so a test can
+  /// bring the network back and try again.
+  bool episodesOffline;
 
   @override
   Future<MediaDetails> showDetails(SourceRef ref) async => _details();
@@ -58,7 +67,7 @@ class _FakeSource implements MetadataSource {
   // behaviour ticket 03 is about.
   @override
   Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) async {
-    if (offline) throw http.ClientException('offline');
+    if (offline || episodesOffline) throw http.ClientException('offline');
     return episodes.where((e) => e.seasonNumber == season).toList();
   }
 
@@ -185,6 +194,42 @@ void main() {
     expect(find.text('Good News'), findsOneWidget);
     expect(find.text('Half Loop'), findsOneWidget);
     expect(find.text('Hello, Ms.'), findsNothing);
+  });
+
+  // Ticket 03 of e2e-follow-ups: offline, expanding an uncached season spun
+  // for about a minute, because Riverpod 3 retries a failed provider and
+  // reports loading in between. Bounded pumps, NOT `pumpAndSettle`, which would
+  // wait out the retries and pass anyway. Mutation: drop `retry: noRetry` from
+  // `seasonEpisodes` → still spinning.
+  testWidgets('an uncached season offline says so at once, and retries on '
+      're-expand', (tester) async {
+    final source = _FakeSource(
+      details: details,
+      episodes: episodes,
+      episodesOffline: true,
+    );
+    await pumpDetail(
+      tester,
+      active: TmdbSource(client: noNetwork(), apiKey: 'k'),
+      repoSource: source,
+    );
+
+    await tester.tap(find.text('Season 1'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text("Couldn't load episodes."), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    // The network comes back: collapsing and re-expanding fetches again.
+    source.episodesOffline = false;
+    await tester.tap(find.text('Season 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Season 1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Good News'), findsOneWidget);
+    expect(find.text("Couldn't load episodes."), findsNothing);
   });
 
   testWidgets('attribution is not on detail (it moved to Settings)', (

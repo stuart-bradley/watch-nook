@@ -82,6 +82,16 @@ void main() {
     },
   );
 
+  // Ticket 01 of e2e-follow-ups: a one-episode show read "1 episodes".
+  // Mutation: drop the singular branch from `countOf` → the first expectation
+  // fails.
+  test('a one-episode show reads "1 episode"; zero is plural', () async {
+    final one = await row(type: MediaType.tv, episodeCountTotal: 1);
+    expect(libraryProgressLabel(one), '1 episode');
+    final none = await row(type: MediaType.tv, episodeCountTotal: 0);
+    expect(libraryProgressLabel(none), '0 episodes');
+  });
+
   test('TV with no total and nothing watched → Not started', () async {
     final item = await row(type: MediaType.tv);
     expect(libraryProgressLabel(item), 'Not started');

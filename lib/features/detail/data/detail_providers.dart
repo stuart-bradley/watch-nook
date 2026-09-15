@@ -44,8 +44,9 @@ Stream<MediaDetails> titleDetails(Ref ref, MediaType type, SourceRef target) {
 
 /// Cache-first aired-order episodes for one season (ADR-4). Watched lazily —
 /// only when its season tile is expanded — so opening a 20-season show doesn't
-/// fan out 20 fetches.
-@riverpod
+/// fan out 20 fetches. Not retried: offline, an uncached season shows its error
+/// at once ([noRetry]); collapsing and re-expanding the tile fetches again.
+@Riverpod(retry: noRetry)
 Stream<List<EpisodeInfo>> seasonEpisodes(
   Ref ref,
   SourceRef show,
