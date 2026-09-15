@@ -163,6 +163,24 @@ void main() {
       .controller
       ?.text;
 
+  // Ticket 04 of emulator-e2e-findings singularised the preview's
+  // "N episodes"; a tracked season must keep its progress subtitle. Mutation:
+  // render the episode count on the tracked branch too → fails.
+  testWidgets('a tracked season still reads its x/y watched progress', (
+    tester,
+  ) async {
+    final id = await insertShow();
+    await pumpDetail(
+      tester,
+      itemId: id,
+      details: showDetails,
+      watched: {(1, 1)},
+    );
+
+    expect(find.text('1/2 watched'), findsOneWidget);
+    expect(find.textContaining('episode'), findsNothing);
+  });
+
   testWidgets('tapping an episode toggle marks it watched, once', (
     tester,
   ) async {
