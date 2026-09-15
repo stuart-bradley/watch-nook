@@ -16,6 +16,19 @@ part 'metadata_providers.g.dart';
 // providers only: never an HTTP client or a concrete source directly (the
 // provider-agnostic rule in CLAUDE.md). All `keepAlive` (app-lifetime).
 
+/// Retry policy for a provider whose failure the screen should show at once:
+/// `@Riverpod(retry: noRetry)`.
+///
+/// Riverpod 3 retries every failed provider by default (backoff 200 ms → 6.4 s)
+/// and reports *loading* between attempts, so offline a search spun for about a
+/// minute and an uncached detail page showed its offline notice beside a moving
+/// loading bar. The request fails fast; the retries were what stretched it. The
+/// metadata layer already falls back to cache, so a retry rarely buys anything.
+///
+/// ponytail: applied per provider (search + details), not app-wide. Set
+/// `ProviderScope(retry:)` in `main.dart` if every provider should behave so.
+Duration? noRetry(int retryCount, Object error) => null;
+
 /// Shared HTTP client for every metadata call. Closed when the container tears
 /// down so sockets don't leak.
 @Riverpod(keepAlive: true)

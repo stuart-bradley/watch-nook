@@ -9,6 +9,7 @@ import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/attribution_footer.dart';
 import 'package:watch_nook/features/library/data/tracked_show_sync.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
+import 'package:watch_nook/features/settings/data/device_cache.dart';
 import 'package:watch_nook/features/settings/data/export_share.dart';
 import 'package:watch_nook/features/settings/data/theme_mode_provider.dart';
 
@@ -231,13 +232,18 @@ Future<void> _export(
   }
 }
 
-/// GDPR "delete everything" (US-D1). Wipes all four surfaces a user's data can
-/// hide in — the library + watch events, the disposable metadata cache, and the
-/// Auto Backup snapshot — then resets first-run so the app returns to a
+/// GDPR "delete everything" (US-D1). Wipes every surface a user's data can hide
+/// in — the cache directory (shared exports, imported copies, posters) and the
+/// poster index, the library + watch events, the disposable metadata cache, and
+/// the Auto Backup snapshot — then resets first-run so the app returns to a
 /// fresh-install state (the router redirect reacts and reopens onboarding).
 /// Deleting the backup file is load-bearing: the manifest allowlist backs up
 /// exactly that file, so leaving it would silently re-restore the wiped data on
 /// the next launch.
+///
+/// The file wipe runs first: if it fails, nothing the user can see has changed
+/// and they can try again, rather than being left with an erased library and
+/// its exports still on disk.
 Future<void> _deleteAll(BuildContext context, WidgetRef ref) async {
   // Captured before the await so the SnackBar doesn't reach across the gap.
   final messenger = ScaffoldMessenger.of(context);
@@ -267,6 +273,7 @@ Future<void> _deleteAll(BuildContext context, WidgetRef ref) async {
   if (confirmed != true) return;
 
   try {
+    await ref.read(cacheWiperProvider)();
     await ref.read(libraryDaoProvider).eraseEverything();
     await ref.read(mediaCacheDaoProvider).clearAll();
     final backup = await ref.read(autoBackupServiceProvider.future);

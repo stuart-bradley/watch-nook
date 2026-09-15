@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:watch_nook/core/config/remote_config.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
@@ -30,15 +31,21 @@ import '../../support/library_fixtures.dart' as seed;
 /// point: this file's whole claim is that a tap neither fetches details nor
 /// writes, so any detail fetch must blow up rather than be quietly served.
 class _FakeSource implements MetadataSource {
-  _FakeSource({required this.results});
+  _FakeSource({required this.results, this.offline = false});
 
   final List<MediaSearchResult> results;
+  final bool offline;
 
   @override
   Future<List<MediaSearchResult>> search(
     String query, {
     MediaKind? kind,
-  }) async => results;
+  }) async {
+    // An Exception, as package:http throws with no network. Not a StateError:
+    // Riverpod never retries an `Error`, which would hide what ticket 03 fixes.
+    if (offline) throw http.ClientException('offline');
+    return results;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
@@ -73,11 +80,13 @@ void main() {
   /// observable. `/preview` and `/title/:id` render a stub — this file is about
   /// where the tap goes and what it does (or doesn't) write, not about the
   /// detail screen (see `preview_test.dart` for that).
-  Widget harness() {
+  Widget harness({bool offline = false}) {
     // NOT broadcast: a broadcast controller drops events sent before anyone is
     // listening, and the seed below is added before the provider subscribes.
     revisions = StreamController<int>();
-    addTearDown(revisions.close);
+    // Not awaited: `close()` on a single-subscription controller completes only
+    // once a listener drains it, and a search with no results never listens.
+    addTearDown(() => unawaited(revisions.close()));
     revisions.add(0);
     router = GoRouter(
       initialLocation: '/search',
@@ -101,7 +110,7 @@ void main() {
         appDatabaseProvider.overrideWithValue(db),
         activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
         activeMetadataSourceProvider.overrideWithValue(
-          _FakeSource(results: results),
+          _FakeSource(results: results, offline: offline),
         ),
         libraryRevisionProvider.overrideWith((ref) => revisions.stream),
       ],
@@ -129,6 +138,24 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400)); // fire debounce
     await tester.pumpAndSettle(); // resolve the search future + build the list
   }
+
+  // Ticket 03 of emulator-e2e-findings: offline, the spinner ran for about a
+  // minute because Riverpod 3 retries a failed provider with backoff and
+  // reports loading in between. Pumped for one second, NOT `pumpAndSettle` —
+  // the spinner animates, so that would wait out every retry and pass anyway.
+  // Mutation: drop `retry: noRetry` from `searchResults` → still spinning.
+  testWidgets('offline, search says so straight away', (tester) async {
+    await tester.pumpWidget(harness(offline: true));
+    await tester.enterText(find.byType(TextField), 'severance');
+    await tester.pump(const Duration(milliseconds: 400)); // fire debounce
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(
+      find.text("Couldn't search. Check your connection and try again."),
+      findsOneWidget,
+    );
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
 
   testWidgets('tapping a result opens its detail page and adds nothing', (
     tester,

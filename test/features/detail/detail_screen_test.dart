@@ -53,14 +53,17 @@ class _FakeSource implements MetadataSource {
   @override
   Future<MediaDetails> movieDetails(SourceRef ref) async => _details();
 
+  // An Exception, as package:http throws with no network. Not a StateError:
+  // Riverpod never retries an `Error`, so a fake throwing one hides the retry
+  // behaviour ticket 03 is about.
   @override
   Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) async {
-    if (offline) throw StateError('offline');
+    if (offline) throw http.ClientException('offline');
     return episodes.where((e) => e.seasonNumber == season).toList();
   }
 
   MediaDetails _details() {
-    if (offline) throw StateError('offline');
+    if (offline) throw http.ClientException('offline');
     return details!;
   }
 
@@ -241,5 +244,29 @@ void main() {
     // The stored row still renders; the details region says so.
     expect(find.text('Severance'), findsWidgets);
     expect(find.text("Couldn't load details. You're offline."), findsOneWidget);
+  });
+
+  // Ticket 03 of emulator-e2e-findings: offline, the notice showed while the
+  // loading bar kept animating, because Riverpod 3 retries the failed provider
+  // and reports loading between attempts. Bounded pumps, NOT `pumpAndSettle`,
+  // which would wait out the retries and pass anyway. Mutation: drop
+  // `retry: noRetry` from `titleDetails` → the bar is still there.
+  testWidgets('a cold cache offline shows the notice with no loading bar', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      harness(
+        active: TmdbSource(client: noNetwork(), apiKey: 'k'),
+        repoSource: _FakeSource(offline: true),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text("Couldn't load details. You're offline."), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
   });
 }

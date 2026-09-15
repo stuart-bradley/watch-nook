@@ -33,7 +33,9 @@ final StreamProviderFamily<Set<(int, int)>, int> watchedEpisodesProvider =
 /// Cache-first details for the detail screen (#18). Goes through
 /// `metadataProvider` (SWR), so it emits the cached value instantly
 /// and a stale-cache refetch failure never blanks the screen (US-13).
-@riverpod
+/// Not retried: a cold-cache failure shows the offline notice at once, without
+/// a loading bar beside it ([noRetry]).
+@Riverpod(retry: noRetry)
 Stream<MediaDetails> titleDetails(Ref ref, MediaType type, SourceRef target) {
   // The streaming form: paint from cache immediately, update in place when a
   // revalidation lands. A screen is the one consumer that wants both emissions.

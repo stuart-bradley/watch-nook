@@ -317,9 +317,9 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   /// history, both user-owned tables emptied. This is the DAO's half of
   /// Settings → *Delete everything*, a real operation the app offers, not a
   /// low-level write that leaked out of [restore]. The Settings flow adds what
-  /// this deliberately does not touch: the disposable media cache, the
-  /// on-device backup, and the first-run flag that sends the app back to
-  /// onboarding.
+  /// this deliberately does not touch: the cache directory and poster index,
+  /// the disposable media cache, the on-device backup, and the first-run flag
+  /// that sends the app back to onboarding.
   ///
   /// [restore] calls it as its own first step, because a restore *replaces*.
   /// That is the same erasure, not a different primitive — the two operations

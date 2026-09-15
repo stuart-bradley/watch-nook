@@ -250,6 +250,76 @@ void main() {
     // The first watch's date survives, and a rewatch is not a second watch.
     expect(rows.where((e) => !e.isRewatch).single.watchedAt, DateTime(2020));
     expect((await db.libraryDao.getItem(id))!.watchedCount, 1);
+    // A rewatch leaves the button as it was, so without this the tap looked
+    // like it did nothing and invited a second, unintended rewatch (ticket 05
+    // of emulator-e2e-findings). Mutation: drop the SnackBar → fails.
+    expect(find.text('Rewatch logged.'), findsOneWidget);
+  });
+
+  testWidgets('a rewatch that fails to write says so, not that it logged', (
+    tester,
+  ) async {
+    final id = await insertMovie();
+    await db.libraryDao.markWatched(id, watchedAt: DateTime(2020));
+    await pumpDetail(tester, itemId: id, details: movieDetails);
+    // The screen still holds its snapshot of the row; the insert now violates
+    // the foreign key, which is a real write failure, not a faked one.
+    await db.libraryDao.deleteItem(id);
+
+    await tester.tap(find.text('Log rewatch'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rewatch logged.'), findsNothing);
+    expect(find.text("Couldn't log the rewatch."), findsOneWidget);
+  });
+
+  /// Ticket 02 of emulator-e2e-findings: on a Pixel 5-sized screen the rating
+  /// sheet stopped after 3/10, so 1/10 and *Clear rating* were unreachable.
+  /// Pumped at that size (1080×2340 @ 2.75). Mutation: put the sheet's `Wrap`
+  /// back (non-scrolling, capped at 9/16 of the screen) → the taps miss and
+  /// the rating is unchanged.
+  Future<int> pumpPhoneWithRating(WidgetTester tester, int? rating) async {
+    final id = await insertMovie();
+    await db.libraryDao.updateRating(id, rating, now: now);
+    await pumpDetail(tester, itemId: id, details: movieDetails);
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 2.75;
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(ActionChip));
+    await tester.pumpAndSettle();
+    return id;
+  }
+
+  testWidgets('on a phone, Clear rating is reachable and clears it', (
+    tester,
+  ) async {
+    final id = await pumpPhoneWithRating(tester, 7);
+
+    await tester.tap(find.text('Clear rating'));
+    await tester.pumpAndSettle();
+
+    expect((await db.libraryDao.getItem(id))!.rating, isNull);
+  });
+
+  testWidgets('on a phone, 1/10 is reachable and sets the rating', (
+    tester,
+  ) async {
+    final id = await pumpPhoneWithRating(tester, null);
+
+    await tester.tap(find.text('1/10'));
+    await tester.pumpAndSettle();
+
+    expect((await db.libraryDao.getItem(id))!.rating, 1);
+  });
+
+  testWidgets('dismissing the rating sheet changes nothing', (tester) async {
+    final id = await pumpPhoneWithRating(tester, 7);
+
+    await tester.tapAt(const Offset(10, 10)); // the barrier, above the sheet
+    await tester.pumpAndSettle();
+
+    expect(find.text('Clear rating'), findsNothing);
+    expect((await db.libraryDao.getItem(id))!.rating, 7);
   });
 
   testWidgets('a movie shows no episode toggle and no seasons', (tester) async {

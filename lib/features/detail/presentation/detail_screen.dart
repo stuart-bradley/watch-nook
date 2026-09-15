@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
+import 'package:watch_nook/core/database/library_dao.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/library/unverified_position.dart';
@@ -349,8 +350,14 @@ Future<void> _pickRating(
   // -1 distinguishes "cleared" from "dismissed" (null) — a rating of 0 is real.
   final picked = await showModalBottomSheet<int>(
     context: context,
+    // Eleven rows outgrow the default 9/16-of-screen cap on a phone, and the
+    // `Wrap` this used to be neither scrolled nor grew, so 2/10, 1/10 and Clear
+    // were clipped off a Pixel 5. Now the sheet sizes to its rows and scrolls
+    // only when even the full screen is too short.
+    isScrollControlled: true,
     builder: (context) => SafeArea(
-      child: Wrap(
+      child: ListView(
+        shrinkWrap: true,
         children: [
           for (var i = 10; i >= 1; i--)
             ListTile(
@@ -507,16 +514,30 @@ class _MovieWatchActions extends ConsumerWidget {
           TextButton.icon(
             icon: const Icon(Icons.replay),
             label: const Text('Log rewatch'),
-            onPressed: () => unawaited(
-              dao.logRewatch(
-                item.id,
-                watchedAt: clock.now(),
-                runtimeMinutes: item.runtimeMinutes,
-              ),
-            ),
+            onPressed: () => unawaited(_logRewatch(context, dao)),
           ),
       ],
     );
+  }
+
+  /// A rewatch changes nothing on screen (the count never rises), so the
+  /// SnackBar is the only sign the tap landed; without it a second tap logs a
+  /// second rewatch.
+  Future<void> _logRewatch(BuildContext context, LibraryDao dao) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await dao.logRewatch(
+        item.id,
+        watchedAt: clock.now(),
+        runtimeMinutes: item.runtimeMinutes,
+      );
+      messenger.showSnackBar(const SnackBar(content: Text('Rewatch logged.')));
+    } on Object catch (e, s) {
+      debugPrint('wn-error: log rewatch failed: $e\n$s');
+      messenger.showSnackBar(
+        const SnackBar(content: Text("Couldn't log the rewatch.")),
+      );
+    }
   }
 }
 
@@ -593,7 +614,8 @@ class _SeasonTile extends ConsumerWidget {
       title: Text(name),
       subtitle: Text(
         itemId == null
-            ? '${season.episodeCount} episodes'
+            ? '${season.episodeCount} episode'
+                  '${season.episodeCount == 1 ? '' : 's'}'
             : '$watchedHere/${season.episodeCount} watched',
       ),
       trailing: !bulkable

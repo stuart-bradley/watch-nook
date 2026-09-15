@@ -8,7 +8,8 @@ part 'search_providers.g.dart';
 /// short-circuits to an empty list (no network); otherwise it goes straight to
 /// the source's `search`. Search is **not** cached (unlike details) — it's
 /// always live. The keystroke debounce lives in the screen (a UI concern).
-@riverpod
+/// Not retried: offline, the error state shows at once ([noRetry]).
+@Riverpod(retry: noRetry)
 Future<List<MediaSearchResult>> searchResults(Ref ref, String query) async {
   final q = query.trim();
   if (q.isEmpty) return const [];
