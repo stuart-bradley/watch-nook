@@ -5,6 +5,7 @@ import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/import_export/export/export_providers.dart';
 import 'package:watch_nook/core/import_export/export/import_export_service.dart';
 import 'package:watch_nook/core/metadata/switch/backend_switch_providers.dart';
+import 'package:watch_nook/core/text/count_of.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/attribution_footer.dart';
 import 'package:watch_nook/features/library/data/tracked_show_sync.dart';
@@ -66,7 +67,8 @@ class SettingsScreen extends ConsumerWidget {
               leading: const Icon(Icons.link_off),
               title: const Text('Relink your library'),
               subtitle: Text(
-                '$stranded ${stranded == 1 ? 'title was' : 'titles were'} '
+                '${countOf(stranded, 'title')} '
+                '${stranded == 1 ? 'was' : 'were'} '
                 'added using a different metadata provider, so their details '
                 'are unavailable. Relinking matches them up again.',
               ),

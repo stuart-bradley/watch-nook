@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:watch_nook/core/text/count_of.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/features/stats/domain/stats_snapshot.dart';
@@ -78,8 +79,8 @@ class _StatsBody extends StatelessWidget {
         ),
         const SizedBox(height: WatchnookSpacing.sm),
         Text(
-          '${_plural(stats.moviesWatched, 'film')} · '
-          '${_plural(stats.rewatches, 'rewatch', 'rewatches')}',
+          '${countOf(stats.moviesWatched, 'film')} · '
+          '${countOf(stats.rewatches, 'rewatch', 'rewatches')}',
           style: text.bodySmall?.copyWith(color: cs.onSurfaceVariant),
         ),
         const SizedBox(height: WatchnookSpacing.md),
@@ -155,9 +156,6 @@ class _StatsBody extends StatelessWidget {
     ];
   }
 }
-
-String _plural(int n, String singular, [String? plural]) =>
-    '$n ${n == 1 ? singular : plural ?? '${singular}s'}';
 
 class _StatCard extends StatelessWidget {
   const _StatCard({required this.value, required this.label});

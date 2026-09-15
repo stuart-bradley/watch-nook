@@ -179,7 +179,8 @@ void main() {
     expect(find.text('Season 1'), findsOneWidget);
     expect(find.text('2 episodes'), findsOneWidget);
     // Season 2 has one episode. It read "1 episodes" on the E2E run (ticket
-    // 04 of emulator-e2e-findings); mutation: drop the `n == 1` branch.
+    // 04 of emulator-e2e-findings); mutation: drop the singular branch
+    // from `countOf`.
     expect(find.text('1 episode'), findsOneWidget);
 
     // One action, and nothing that would write to a row that doesn't exist.

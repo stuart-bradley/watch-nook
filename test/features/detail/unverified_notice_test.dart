@@ -329,4 +329,24 @@ void main() {
       reason: 'a dismissed title is indistinguishable from a healthy one',
     );
   });
+
+  // Ticket 02 of e2e-follow-ups: the dismiss used to fail silently. A real
+  // SQLite abort, not a faked DAO. Mutation: call `dismissUnverifiedPosition`
+  // bare instead of through `_writeOrSay` → no message.
+  testWidgets('a failed dismiss says so, and the title stays Unverified', (
+    tester,
+  ) async {
+    final row = await seedRow(unverified: true);
+    await pump(tester, row);
+    await db.customStatement(
+      'CREATE TRIGGER fail_writes BEFORE UPDATE ON library_items '
+      "BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+
+    await tester.tap(dismiss);
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't save your answer."), findsOneWidget);
+    expect((await db.libraryDao.getItem(row.id))!.relinkFailed, isTrue);
+  });
 }

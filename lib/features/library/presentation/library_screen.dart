@@ -9,8 +9,8 @@ import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
+import 'package:watch_nook/core/text/count_of.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
-import 'package:watch_nook/core/widgets/count_label.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
 import 'package:watch_nook/core/widgets/remote_image.dart';
 

@@ -414,6 +414,43 @@ void main() {
     expect(await db.libraryDao.watchEventsFor(id), isEmpty);
   });
 
+  // The unwatch branches are the destructive ones, so they are tested too.
+  testWidgets('a failed film unwatch says so, and keeps the watch', (
+    tester,
+  ) async {
+    final id = await insertMovie();
+    await db.libraryDao.markWatched(id, watchedAt: DateTime(2020));
+    await pumpDetail(tester, itemId: id, details: movieDetails);
+    await failLibraryWrites();
+
+    await tester.tap(find.text('Watched'));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't mark this unwatched."), findsOneWidget);
+    expect(await db.libraryDao.watchEventsFor(id), hasLength(1));
+  });
+
+  testWidgets('a failed episode unwatch says so, and keeps the watch', (
+    tester,
+  ) async {
+    final id = await insertShow();
+    await db.libraryDao.markWatched(id, season: 1, episode: 1);
+    await pumpDetail(
+      tester,
+      itemId: id,
+      details: showDetails,
+      watched: {(1, 1)},
+    );
+    await expandSeason1(tester);
+    await failLibraryWrites();
+
+    await tester.tap(find.byTooltip('Mark unwatched'));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't mark the episode unwatched."), findsOneWidget);
+    expect(await db.libraryDao.watchEventsFor(id), hasLength(1));
+  });
+
   testWidgets('a failed status change says so', (tester) async {
     final id = await insertShow();
     await pumpDetail(tester, itemId: id, details: showDetails);
@@ -425,6 +462,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text("Couldn't change the status."), findsOneWidget);
+    // DropdownMenu writes the picked label into its own field before the write
+    // runs, so a failure must put the saved status back rather than go on
+    // showing one that never landed. Mutation: drop the key bump in
+    // `_StatusDropdownState` → the field still reads "On hold".
+    expect(statusLabel(tester), 'Watching');
     expect(
       (await db.libraryDao.getItem(id))!.trackStatus,
       TrackStatus.watching,

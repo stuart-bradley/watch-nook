@@ -232,6 +232,27 @@ void main() {
     expect(find.text("Couldn't load episodes."), findsNothing);
   });
 
+  testWidgets('a cached season still renders offline', (tester) async {
+    final source = _FakeSource(details: details, episodes: episodes);
+    await pumpDetail(
+      tester,
+      active: TmdbSource(client: noNetwork(), apiKey: 'k'),
+      repoSource: source,
+    );
+    // Online once, so the season is cached; then collapse it.
+    await tester.tap(find.text('Season 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Season 1'));
+    await tester.pumpAndSettle();
+
+    source.episodesOffline = true;
+    await tester.tap(find.text('Season 1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Good News'), findsOneWidget);
+    expect(find.text("Couldn't load episodes."), findsNothing);
+  });
+
   testWidgets('attribution is not on detail (it moved to Settings)', (
     tester,
   ) async {

@@ -13,8 +13,8 @@ import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/source_ref.dart';
+import 'package:watch_nook/core/text/count_of.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
-import 'package:watch_nook/core/widgets/count_label.dart';
 import 'package:watch_nook/core/widgets/remote_image.dart';
 import 'package:watch_nook/core/widgets/track_status_ui.dart';
 import 'package:watch_nook/features/detail/data/add_to_library.dart';
@@ -390,14 +390,39 @@ Future<void> _pickRating(
 /// [DropdownMenu], not a chip. It replaced an `ActionChip` pill that read as a
 /// badge: nothing about it said "this is how you move a title between
 /// Watchlist, Watching, On hold…".
-class _StatusDropdown extends ConsumerWidget {
+class _StatusDropdown extends ConsumerStatefulWidget {
   const _StatusDropdown({required this.item});
 
   final LibraryItem item;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_StatusDropdown> createState() => _StatusDropdownState();
+}
+
+class _StatusDropdownState extends ConsumerState<_StatusDropdown> {
+  /// Bumped when a change fails to save, to rebuild the menu from the saved
+  /// status. `DropdownMenu` writes the picked label into its own field before
+  /// `onSelected` runs, and a failed write leaves the row (and so
+  /// `initialSelection`) unchanged, so nothing else would reset it: the field
+  /// would go on showing a status that never landed.
+  int _failures = 0;
+
+  Future<void> _change(TrackStatus status) async {
+    final saved = await _writeOrSay(
+      ScaffoldMessenger.of(context),
+      "Couldn't change the status.",
+      () => ref
+          .read(libraryDaoProvider)
+          .updateStatus(widget.item.id, status, now: clock.now()),
+    );
+    if (!saved && mounted) setState(() => _failures++);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
     return DropdownMenu<TrackStatus>(
+      key: ValueKey(_failures),
       initialSelection: item.trackStatus,
       label: const Text('Status'),
       leadingIcon: Icon(item.trackStatus.icon),
@@ -405,16 +430,7 @@ class _StatusDropdown extends ConsumerWidget {
       // let a stray keystroke filter the five statuses.
       requestFocusOnTap: false,
       onSelected: (status) {
-        if (status == null) return;
-        unawaited(
-          _writeOrSay(
-            ScaffoldMessenger.of(context),
-            "Couldn't change the status.",
-            () => ref
-                .read(libraryDaoProvider)
-                .updateStatus(item.id, status, now: clock.now()),
-          ),
-        );
+        if (status != null) unawaited(_change(status));
       },
       dropdownMenuEntries: [
         for (final status in TrackStatus.values)
@@ -500,8 +516,10 @@ Future<void> _addTitle(
 /// [success] is only for writes that change nothing on screen (a rewatch).
 /// The rest repaint off the live row, which is confirmation enough.
 ///
-/// Takes the messenger, not a context: capture it before any await.
-Future<void> _writeOrSay(
+/// Takes the messenger, not a context: capture it before any await. Returns
+/// whether the write landed, for a control that must undo its own optimistic
+/// display on failure (the status dropdown).
+Future<bool> _writeOrSay(
   ScaffoldMessengerState messenger,
   String failure,
   Future<void> Function() write, {
@@ -512,11 +530,12 @@ Future<void> _writeOrSay(
   } on Object catch (e, s) {
     debugPrint('wn-error: $failure $e\n$s');
     messenger.showSnackBar(SnackBar(content: Text(failure)));
-    return;
+    return false;
   }
   if (success != null) {
     messenger.showSnackBar(SnackBar(content: Text(success)));
   }
+  return true;
 }
 
 /// A movie's watched toggle + rewatch log (#19, US-2/US-4). Watched-ness is the
