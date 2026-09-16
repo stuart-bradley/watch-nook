@@ -1,10 +1,14 @@
-import 'package:drift/drift.dart' show Value;
+import 'dart:io';
+
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
@@ -15,10 +19,13 @@ import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
+import 'package:watch_nook/features/settings/data/device_cache.dart';
 import 'package:watch_nook/features/settings/data/export_share.dart';
 import 'package:watch_nook/features/settings/data/shared_preferences_provider.dart';
 import 'package:watch_nook/features/settings/data/theme_mode_provider.dart';
 import 'package:watch_nook/features/settings/presentation/settings_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// #35 / US-14 at the widget layer.
 ///
@@ -76,6 +83,18 @@ class _FakeBackupService implements AutoBackupService {
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
 
+/// Counts `emptyCache` calls. The real index is sqflite, which `flutter test`
+/// cannot open; everything else throws, so the wipe cannot quietly lean on it.
+class _FakePosterCache implements BaseCacheManager {
+  int empties = 0;
+
+  @override
+  Future<void> emptyCache() async => empties++;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
 /// Only `attribution()` is reachable from Settings — nothing here fetches.
 class _StubSource implements MetadataSource {
   @override
@@ -122,6 +141,7 @@ void main() {
           sharedPreferencesProvider.overrideWithValue(prefs),
           importExportServiceProvider.overrideWithValue(service),
           autoBackupServiceProvider.overrideWith((ref) async => backup),
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(_StubSource()),
           exportSharerProvider.overrideWithValue(
             ({
@@ -284,29 +304,45 @@ void main() {
     expect(find.text('https://www.themoviedb.org/'), findsOneWidget);
   });
 
-  // US-D1: one action erases everything, across all four surfaces a user's data
+  /// A throwaway stand-in for Android's `cacheDir`, seeded with what the E2E
+  /// run of 2026-09-14 found there after *Delete everything*: the share sheet's
+  /// copy of an export, the file picker's copy of an imported file, a poster.
+  /// Sync I/O on purpose: async `dart:io` does not settle under fake-async.
+  Directory seededCacheDir() {
+    final dir = Directory.systemTemp.createTempSync('wn_cache_');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    for (final path in [
+      'share_plus/watchnook-library.json',
+      '0b7e6f1c/watchnook-letterboxd.csv',
+      'watchnook_posters/9f1c.jpg',
+    ]) {
+      File('${dir.path}/$path')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('the user library');
+    }
+    return dir;
+  }
+
+  // US-D1: one action erases everything, across every surface a user's data
   // can hide in, and returns the app to first-run. The load-bearing step is
   // deleting the backup file — leave it and the wiped data re-restores.
+  //
+  // Ticket 01 of emulator-e2e-findings added the cache directory and the poster
+  // index. Mutation: drop the `cacheWiper` call from `_deleteAll` → the seeded
+  // export, imported copy and poster all survive, and the index is never
+  // emptied.
   testWidgets('Delete all data wipes every surface and resets first-run', (
     tester,
   ) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final dao = db.libraryDao;
+    final cacheDir = seededCacheDir();
+    final posters = _FakePosterCache();
 
     // Seed every surface: a tracked item, a watch event, and cached metadata.
     final at = DateTime(2026);
-    final id = await dao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Severance',
-        trackStatus: TrackStatus.watching,
-        addedAt: at,
-        updatedAt: at,
-        tmdbId: const Value(95396),
-      ),
-    );
+    final id = (await seed.seedShow(db, now: at)).id;
     await dao.markWatched(id, season: 1, episode: 1, watchedAt: at);
     await db.mediaCacheDao.upsertMedia(
       CachedMediaCompanion.insert(
@@ -326,7 +362,12 @@ void main() {
           sharedPreferencesProvider.overrideWithValue(prefs),
           appDatabaseProvider.overrideWithValue(db),
           autoBackupServiceProvider.overrideWith((ref) async => backup),
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(_StubSource()),
+          // Only the platform lookups are swapped; the wipe itself is real.
+          cacheWiperProvider.overrideWithValue(
+            () => wipeCaches(cacheDir: cacheDir, posters: posters),
+          ),
         ],
         child: const MaterialApp(home: SettingsScreen()),
       ),
@@ -342,10 +383,55 @@ void main() {
     expect(await db.select(db.cachedMedia).get(), isEmpty, reason: 'cache');
     expect(backup.deletes, 1, reason: 'the backup file is deleted too');
     expect(
+      cacheDir.listSync(),
+      isEmpty,
+      reason: 'no export, imported copy or poster left in the cache dir',
+    );
+    expect(cacheDir.existsSync(), isTrue, reason: "sqlite's temp dir stays");
+    expect(posters.empties, 1, reason: 'the poster index is emptied');
+    expect(
       prefs.getBool(onboardingSeenKey),
       isFalse,
       reason: 'first-run reset',
     );
+    expect(find.text('All data deleted.'), findsOneWidget);
+  });
+
+  // A failed cache wipe must not leave the library half-deleted. It runs
+  // first, so the user keeps a whole library and can simply try again.
+  // Mutation: move the wipe after `eraseEverything` → the library is gone.
+  testWidgets('a failed cache wipe reports it and leaves the library whole', (
+    tester,
+  ) async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    await seed.seedShow(db, title: 'Kept', tmdbId: 1);
+    final prefs = await prefsWith({onboardingSeenKey: true});
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          appDatabaseProvider.overrideWithValue(db),
+          autoBackupServiceProvider.overrideWith((ref) async => backup),
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
+          activeMetadataSourceProvider.overrideWithValue(_StubSource()),
+          cacheWiperProvider.overrideWithValue(
+            () async => throw const FileSystemException('busy'),
+          ),
+        ],
+        child: const MaterialApp(home: SettingsScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tapTile(tester, 'Delete all data');
+    await tester.tap(find.text('Delete everything'));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't delete your data."), findsOneWidget);
+    expect(await db.libraryDao.getAll(), hasLength(1), reason: 'not wiped');
+    expect(backup.deletes, 0, reason: 'the backup still matches the library');
+    expect(prefs.getBool(onboardingSeenKey), isTrue);
   });
 
   testWidgets('Delete all data can be cancelled without wiping anything', (
@@ -354,23 +440,14 @@ void main() {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final dao = db.libraryDao;
-    await dao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Kept',
-        trackStatus: TrackStatus.watching,
-        addedAt: DateTime(2026),
-        updatedAt: DateTime(2026),
-        tmdbId: const Value(1),
-      ),
-    );
+    await seed.seedShow(db, title: 'Kept', tmdbId: 1);
     final prefs = await prefsWith({onboardingSeenKey: true});
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           sharedPreferencesProvider.overrideWithValue(prefs),
           appDatabaseProvider.overrideWithValue(db),
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(_StubSource()),
         ],
         child: const MaterialApp(home: SettingsScreen()),

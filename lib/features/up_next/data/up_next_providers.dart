@@ -4,10 +4,11 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
-import 'package:watch_nook/core/database/library_item_ids.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 
 part 'up_next_providers.g.dart';
 
@@ -17,9 +18,10 @@ part 'up_next_providers.g.dart';
 typedef QueueEntry = ({
   int itemId,
   String showTitle,
-  String? posterPath,
+  ArtworkRef? poster,
   int season,
   int episode,
+  bool unverified,
 });
 
 /// One row of the **Upcoming** list (R4/US-5): a tracked show's next episode,
@@ -29,10 +31,17 @@ typedef QueueEntry = ({
 ///
 /// It deliberately has no "mark watched" affordance anywhere it is rendered —
 /// ticking an unaired episode would push the progress pointer past reality.
+///
+/// **It has no Unverified flag, and must not grow one.** Its coordinate is the
+/// active backend's own next-to-air episode, fetched fresh, not derived from
+/// the stored position, so the doubt the marker expresses does not apply to
+/// it. Without the field, marking an upcoming row is unrepresentable rather
+/// than merely avoided. A [QueueEntry]'s coordinate IS derived from the stored
+/// position, which is why that one carries the flag.
 typedef UpcomingEntry = ({
   int itemId,
   String showTitle,
-  String? posterPath,
+  ArtworkRef? poster,
   int season,
   int episode,
   String? episodeTitle,
@@ -156,8 +165,22 @@ bool airsBefore((int, int) a, (int, int) b) =>
     a.$1 < b.$1 || (a.$1 == b.$1 && a.$2 < b.$2);
 
 /// `S2E5`, plus the episode title when the backend supplied one.
-String episodeLabel(int season, int episode, [String? title]) {
-  final code = 'S${season}E$episode';
+///
+/// [unverified] marks the coordinate — and only the coordinate, before the
+/// episode title, so it never reads as doubt about the title text. Only the
+/// watch queue passes it; see [UpcomingEntry] for why Upcoming never does. The
+/// rule and the wording belong to `unverified_position.dart`; this only renders
+/// them.
+String episodeLabel(
+  int season,
+  int episode, {
+  String? title,
+  bool unverified = false,
+}) {
+  final code = markUnverifiedPosition(
+    'S${season}E$episode',
+    unverified: unverified,
+  );
   return title == null || title.isEmpty ? code : '$code · $title';
 }
 
@@ -202,7 +225,7 @@ UpcomingEntry? upcomingFor(
   return (
     itemId: item.id,
     showTitle: item.title,
-    posterPath: item.posterPath,
+    poster: item.posterRef,
     season: next.seasonNumber,
     episode: next.episodeNumber,
     episodeTitle: next.title,
@@ -299,7 +322,7 @@ Future<UpNextBoard> upNextBoard(Ref ref) async {
     ref.watch(activeMetadataBackendProvider),
   );
   final items = await ref.watch(libraryItemsProvider.future);
-  final repo = ref.watch(metadataRepositoryProvider);
+  final repo = ref.watch(metadataProvider);
   final now = clock.now();
 
   final shows = showsForQueue(items, backend);
@@ -307,17 +330,17 @@ Future<UpNextBoard> upNextBoard(Ref ref) async {
   // reads on a provider that recomputes on every library write. A cold show is
   // absent from [details] and skipped; the tracked-show sync warms its cache
   // and the page recomputes (via [libraryItemsProvider]) once it does.
-  final sourceIds = [
+  final refs = [
     for (final item in shows)
-      if (item.sourceIdFor(backend) case final int id) id,
+      if (item.refFor(backend) case final SourceRef r) r,
   ];
-  final details = await repo.cachedShowDetails(sourceIds);
+  final details = await repo.cachedShowDetails(refs);
 
   final queue = <QueueEntry>[];
   final upcoming = <UpcomingEntry>[];
   for (final item in shows) {
-    final sourceId = item.sourceIdFor(backend);
-    final d = sourceId == null ? null : details[sourceId];
+    final show = item.refFor(backend);
+    final d = show == null ? null : details[show.id];
     if (d == null) continue;
 
     final next = nextUnwatchedAired(
@@ -329,9 +352,12 @@ Future<UpNextBoard> upNextBoard(Ref ref) async {
       queue.add((
         itemId: item.id,
         showTitle: item.title,
-        posterPath: item.posterPath,
+        poster: item.posterRef,
         season: next.$1,
         episode: next.$2,
+        // Carried from the row, because the label builder below sees bare
+        // numbers and cannot ask. Same shape as `poster`, for the same reason.
+        unverified: hasUnverifiedPosition(item),
       ));
     }
 

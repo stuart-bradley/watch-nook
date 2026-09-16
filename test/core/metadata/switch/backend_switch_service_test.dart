@@ -1,12 +1,20 @@
 import 'package:clock/clock.dart';
 import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
+import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
+import 'package:watch_nook/core/metadata/switch/backend_switch_providers.dart';
 import 'package:watch_nook/core/metadata/switch/backend_switch_service.dart';
+
+import '../../../support/library_fixtures.dart' as seed;
 
 /// A fake `MetadataSource` for the new (TVDB) backend: only
 /// `resolveByExternalId` and `seasonEpisodes` matter to the switch service;
@@ -35,16 +43,17 @@ class _FakeTvdb implements MetadataSource {
   }
 
   @override
-  Future<List<EpisodeInfo>> seasonEpisodes(int showId, int season) =>
-      Future.value(episodes[(showId, season)] ?? const []);
+  Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) =>
+      Future.value(episodes[(show.id, season)] ?? const []);
 
   @override
   Future<List<MediaSearchResult>> search(String query, {MediaKind? kind}) =>
       throw UnimplementedError();
   @override
-  Future<MediaDetails> movieDetails(int sourceId) => throw UnimplementedError();
+  Future<MediaDetails> movieDetails(SourceRef ref) =>
+      throw UnimplementedError();
   @override
-  Future<MediaDetails> showDetails(int sourceId) => throw UnimplementedError();
+  Future<MediaDetails> showDetails(SourceRef ref) => throw UnimplementedError();
   @override
   String imageUrl(String path, ImageSize size) => throw UnimplementedError();
   @override
@@ -63,28 +72,16 @@ void main() {
     String title = 'Severance',
     int tmdbId = 95396,
     String? imdbId = 'tt11280740',
-  }) => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.tv,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: title,
-      trackStatus: TrackStatus.watching,
-      addedAt: now,
-      updatedAt: now,
-      tmdbId: Value(tmdbId),
-      imdbId: Value(imdbId),
-    ),
-  );
+  }) async => (await seed.seedShow(
+    db,
+    title: title,
+    tmdbId: tmdbId,
+    imdbId: imdbId,
+    now: now,
+  )).id;
 
-  Future<void> watch(int itemId, int season, int episode) => db
-      .into(db.watchEvents)
-      .insert(
-        WatchEventsCompanion.insert(
-          libraryItemId: itemId,
-          seasonNumber: Value(season),
-          episodeNumber: Value(episode),
-        ),
-      );
+  Future<void> watch(int itemId, int season, int episode) =>
+      db.libraryDao.markWatched(itemId, season: season, episode: episode);
 
   MediaSearchResult tvdbHit(int tvdbId) => MediaSearchResult(
     kind: MediaKind.tv,
@@ -174,23 +171,15 @@ void main() {
     });
 
     test('a movie relinks with no episode reconciliation', () async {
-      final id = await db.libraryDao.insertItem(
-        LibraryItemsCompanion.insert(
-          mediaType: MediaType.movie,
-          recordedSource: MetadataSourceKind.tmdb,
-          title: 'EEAAO',
-          trackStatus: TrackStatus.completed,
-          addedAt: now,
-          updatedAt: now,
-          tmdbId: const Value(545611),
-          imdbId: const Value('tt6710474'),
-        ),
-      );
-      await db
-          .into(db.watchEvents)
-          .insert(
-            WatchEventsCompanion.insert(libraryItemId: id),
-          );
+      final id = (await seed.seedMovie(
+        db,
+        title: 'EEAAO',
+        tmdbId: 545611,
+        imdbId: 'tt6710474',
+        now: now,
+      )).id;
+      // A movie's watched coordinate is (null, null).
+      await db.libraryDao.markWatched(id);
 
       await service(
         _FakeTvdb(
@@ -209,18 +198,78 @@ void main() {
       expect(item.relinkFailed, isFalse);
     });
 
-    test('a row already on the new backend is skipped untouched', () async {
-      final id = await db.libraryDao.insertItem(
-        LibraryItemsCompanion.insert(
-          mediaType: MediaType.tv,
-          recordedSource: MetadataSourceKind.tvdb,
-          title: 'Already TVDB',
-          trackStatus: TrackStatus.watching,
-          addedAt: now,
-          updatedAt: now,
-          tvdbId: const Value(1),
+    test("a relink drops the old backend's poster path", () async {
+      // The whole point of ticket 11, and the case its widget test cannot
+      // reach. `LibraryItem.posterRef` tags artwork with `recordedSource` —
+      // the field this very write rewrites. Keep the path and the reference
+      // starts claiming the NEW backend for a path the OLD one minted, so
+      // `RemoteImage`'s mismatch check waves it straight through to a 404 or
+      // an unrelated image. For a movie that is permanent: the daily sync only
+      // refills TV rows.
+      //
+      // Proved to fail first by restoring the carried-over path.
+      final id = (await seed.seedMovie(
+        db,
+        title: 'EEAAO',
+        tmdbId: 545611,
+        imdbId: 'tt6710474',
+        posterPath: '/tmdb-only.jpg',
+        now: now,
+      )).id;
+
+      await service(
+        _FakeTvdb(
+          resolve: {
+            'tt6710474': const MediaSearchResult(
+              kind: MediaKind.movie,
+              title: 'EEAAO',
+              tvdbId: 999,
+            ),
+          },
         ),
+      ).switchAll();
+
+      final item = await reload(id);
+      expect(item.recordedSource, MetadataSourceKind.tvdb);
+      expect(
+        item.posterPath,
+        isNull,
+        reason:
+            'a placeholder until the next fetch refills it is the honest '
+            'answer; a TMDB path labelled tvdb is not',
       );
+      expect(item.posterRef, isNull);
+    });
+
+    test(
+      'a flagged-only row keeps its poster, because it kept its backend',
+      () async {
+        // The control. `_flagOnly` leaves `recordedSource` alone, so the
+        // path is still true and dropping it would lose artwork for nothing.
+        final id = await addShow(imdbId: null);
+        await db.libraryDao.updateItem(
+          id,
+          const LibraryItemsCompanion(posterPath: Value('/still-tmdb.jpg')),
+        );
+
+        await service(_FakeTvdb()).switchAll();
+
+        final item = await reload(id);
+        expect(item.recordedSource, MetadataSourceKind.tmdb);
+        expect(item.relinkFailed, isTrue);
+        expect(item.posterPath, '/still-tmdb.jpg');
+      },
+    );
+
+    test('a row already on the new backend is skipped untouched', () async {
+      final id = (await seed.seedShow(
+        db,
+        title: 'Already TVDB',
+        source: MetadataSourceKind.tvdb,
+        tmdbId: null,
+        tvdbId: 1,
+        now: now,
+      )).id;
 
       final report = await service(_FakeTvdb()).switchAll();
 
@@ -353,6 +402,88 @@ void main() {
           },
         ),
         idsRelinked: true,
+      );
+    });
+  });
+
+  // The two ways a row becomes Unverified are NOT interchangeable, and the
+  // difference is entirely in what a *later* relink run does with them. See
+  // CONTEXT.md ("How the two interact on a relink") — the second case is the
+  // one that looks healthy, and the reason the position marker exists.
+  group('the two Unverified outcomes behave differently on a later run', () {
+    /// The Settings relink offer's number, read through the provider that
+    /// feeds it rather than a copy of its rule.
+    Future<int> relinkOfferCount() async {
+      final container = ProviderContainer(
+        overrides: [
+          appDatabaseProvider.overrideWithValue(db),
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tvdb),
+        ],
+      );
+      addTearDown(container.dispose);
+      return container.read(backendMismatchCountProvider.future);
+    }
+
+    test('could not relink at all → retried, and still counted', () async {
+      // No imdbId, so there is no way to find it on the new backend. Its ids
+      // and recordedSource are left alone, which is what keeps it eligible.
+      final id = await addShow(imdbId: null);
+
+      final first = await service(_FakeTvdb()).switchAll();
+      expect(first.flagged, 1);
+
+      final row = await reload(id);
+      expect(row.relinkFailed, isTrue);
+      expect(
+        row.recordedSource,
+        MetadataSourceKind.tmdb,
+        reason: 'nothing to point it at, so it stays on the old backend',
+      );
+
+      final second = await service(_FakeTvdb()).switchAll();
+      expect(
+        second.skipped,
+        0,
+        reason: 'a later run must not skip it — it never moved',
+      );
+      expect(second.flagged, 1, reason: 'it is tried again, and fails again');
+      expect(
+        await relinkOfferCount(),
+        1,
+        reason: 'the Settings offer must not vanish for a retryable row',
+      );
+    });
+
+    test('relinked but unreconciled → not retried, and not counted', () async {
+      final id = await addShow();
+      await watch(id, 1, 1);
+
+      // Resolves on the new backend (so the ids move) but the watched
+      // coordinate has no counterpart there.
+      final source = _FakeTvdb(resolve: {'tt11280740': tvdbHit(555)});
+      final first = await service(source).switchAll();
+      expect(first.flagged, 1);
+
+      final row = await reload(id);
+      expect(row.relinkFailed, isTrue);
+      expect(
+        row.recordedSource,
+        MetadataSourceKind.tvdb,
+        reason: 'the show was found, so the row moved to the new backend',
+      );
+
+      final second = await service(source).switchAll();
+      expect(
+        second.skipped,
+        1,
+        reason: 'already on the active backend — every later run skips it',
+      );
+      expect(second.flagged, 0);
+      expect(
+        await relinkOfferCount(),
+        0,
+        reason:
+            'not stranded, so the offer cannot reach it; only a dismiss can',
       );
     });
   });

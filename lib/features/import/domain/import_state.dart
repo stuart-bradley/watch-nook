@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/import_export/import/importers.dart';
 import 'package:watch_nook/core/import_export/import/merge_applier.dart';
 import 'package:watch_nook/core/import_export/import/resolver.dart';
@@ -62,10 +63,22 @@ class ImportConfirming extends ImportState {
     required this.pending,
     required this.choices,
     required this.parseSkipped,
+    required this.resolvedAgainst,
   });
 
   /// Which export this came from, for the header.
   final ImportSourceKind source;
+
+  /// The metadata backend every candidate below was resolved against.
+  ///
+  /// Carried, not re-read. This state outlives the resolve — the user sits on
+  /// the confirm screen for as long as they like — and ADR-2 lets an operator
+  /// flip the backend underneath them. Asking "what backend are we on now?" at
+  /// render or apply time would pair these ids with a catalogue that never
+  /// minted them: posters resolved through the wrong source, and worse,
+  /// `recordedSource` stamped with the wrong backend on rows carrying real
+  /// watch history.
+  final MetadataSourceKind resolvedAgainst;
 
   /// Everything the resolver settled on its own; applied verbatim.
   final List<Resolution> autoResolved;
@@ -90,6 +103,7 @@ class ImportConfirming extends ImportState {
         pending: pending,
         choices: next,
         parseSkipped: parseSkipped,
+        resolvedAgainst: resolvedAgainst,
       );
 }
 

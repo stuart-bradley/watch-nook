@@ -4,10 +4,10 @@ import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
-import 'package:watch_nook/core/database/library_item_ids.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 
 part 'tracked_show_sync.g.dart';
 
@@ -28,7 +28,7 @@ const lastLibrarySyncKey = 'last_library_sync';
 @Riverpod(keepAlive: true)
 TrackedShowSync trackedShowSync(Ref ref) => TrackedShowSync(
   dao: ref.watch(libraryDaoProvider),
-  repo: ref.watch(metadataRepositoryProvider),
+  repo: ref.watch(metadataProvider),
   backend: metadataSourceKindOf(ref.watch(activeMetadataBackendProvider)),
 );
 
@@ -47,7 +47,7 @@ class TrackedShowSync {
   });
 
   final LibraryDao dao;
-  final CachingMetadataRepository repo;
+  final CachingMetadataSource repo;
   final MetadataSourceKind backend;
 
   Future<void> refresh() async {
@@ -55,7 +55,6 @@ class TrackedShowSync {
     final shows = [
       for (final item in items)
         if (item.mediaType == MediaType.tv &&
-            item.recordedSource == backend &&
             item.trackStatus != TrackStatus.dropped)
           item,
     ];
@@ -70,18 +69,15 @@ class TrackedShowSync {
   }
 
   Future<(int, LibraryItemsCompanion)?> _patchFor(LibraryItem item) async {
-    final sourceId = item.sourceIdFor(backend);
-    if (sourceId == null) return null;
+    // The one pairing check: a row recorded against the other backend (or with
+    // no id for its own) has no reference, and so nothing this sync can fetch.
+    final show = item.refFor(backend);
+    if (show == null) return null;
     try {
-      // `.last`, not `.first`: this is the *refresh* path — its whole job is to
-      // pull fresh episode counts / status / next-air. The SWR stream yields the
-      // cached value first, then (only if stale) revalidates and yields fresh;
-      // `.first` would take the stale cache and cancel before the refetch ever
-      // runs, silently writing the same stale values back. `.last` consumes the
-      // revalidated value (falling back to cache on a swallowed transient
-      // error, and rethrowing on a cold-cache failure — caught below). Contrast
-      // bulk_mark, which wants `.first` for latency.
-      final d = await repo.showDetails(sourceId).last;
+      // Named, not `.last`: this is the *refresh* path, so it must be told when
+      // a refresh did not happen rather than handed back the stale values it
+      // already has. A failure lands in the catch below and skips the patch.
+      final d = await repo.revalidatedShowDetails(show);
       return (
         item.id,
         LibraryItemsCompanion(

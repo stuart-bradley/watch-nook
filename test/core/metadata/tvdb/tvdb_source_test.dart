@@ -4,8 +4,10 @@ import 'package:clock/clock.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_exception.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/metadata/tvdb/tvdb_source.dart';
 
 String _fixture(String name) =>
@@ -55,6 +57,10 @@ TvdbSource _source({http.Client? client, Clock? clock}) => TvdbSource(
   clock: clock ?? const Clock(),
 );
 
+/// This source's own ids, paired with this source's backend — the only shape
+/// the metadata interface accepts — a foreign one throws (contract suite).
+SourceRef _ref(int id) => SourceRef(MetadataSourceKind.tvdb, id);
+
 void main() {
   group('search', () {
     test('normalizes ids, title, year and drops non-title rows', () async {
@@ -84,7 +90,7 @@ void main() {
 
   group('showDetails', () {
     test('joins extended metadata with aired episodes', () async {
-      final d = await _source().showDetails(371980);
+      final d = await _source().showDetails(_ref(371980));
 
       expect(d.kind, MediaKind.tv);
       expect(d.imdbId, 'tt11280740'); // from remoteIds
@@ -95,14 +101,14 @@ void main() {
     });
 
     test('derives per-season counts from the episode list', () async {
-      final d = await _source().showDetails(371980);
+      final d = await _source().showDetails(_ref(371980));
 
       expect(d.seasons.map((s) => s.seasonNumber), [1, 2]);
       expect(d.seasons.map((s) => s.episodeCount), [3, 1]);
     });
 
     test('resolves nextAired to a real next episode', () async {
-      final d = await _source().showDetails(371980);
+      final d = await _source().showDetails(_ref(371980));
 
       expect(d.nextEpisode, isNotNull);
       expect(d.nextEpisode!.seasonNumber, 2);
@@ -113,7 +119,7 @@ void main() {
 
   group('movieDetails', () {
     test('normalizes runtime, year, imdbId and leaves seasons empty', () async {
-      final d = await _source().movieDetails(168899);
+      final d = await _source().movieDetails(_ref(168899));
 
       expect(d.kind, MediaKind.movie);
       expect(d.title, 'Everything Everywhere All at Once');
@@ -127,7 +133,7 @@ void main() {
 
   group('seasonEpisodes', () {
     test('returns one season in contiguous aired order (ADR-4)', () async {
-      final eps = await _source().seasonEpisodes(371980, 1);
+      final eps = await _source().seasonEpisodes(_ref(371980), 1);
 
       expect(eps.map((e) => e.episodeNumber), [1, 2, 3]);
       expect(eps.every((e) => e.seasonNumber == 1), isTrue);
@@ -139,7 +145,7 @@ void main() {
       final paths = <String>[];
       await _source(
         client: _okClient(spy: (r) => paths.add(r.url.path)),
-      ).seasonEpisodes(371980, 1);
+      ).seasonEpisodes(_ref(371980), 1);
 
       expect(paths, contains(endsWith('/episodes/default')));
       expect(
@@ -203,8 +209,8 @@ void main() {
       });
       final source = _source(client: client);
 
-      await source.movieDetails(168899);
-      await source.movieDetails(168899);
+      await source.movieDetails(_ref(168899));
+      await source.movieDetails(_ref(168899));
 
       expect(logins, 1);
     });
@@ -245,7 +251,7 @@ void main() {
         rejectAtLogins: {1}, // the first-issued token is stale
         onLogin: () => logins++,
       );
-      final d = await _source(client: client).showDetails(371980);
+      final d = await _source(client: client).showDetails(_ref(371980));
 
       expect(d.title, 'Severance');
       expect(logins, 2); // initial login + one refresh after the 401
@@ -257,7 +263,7 @@ void main() {
         onLogin: () {},
       );
       await expectLater(
-        _source(client: client).showDetails(371980),
+        _source(client: client).showDetails(_ref(371980)),
         throwsA(
           isA<MetadataException>().having((e) => e.statusCode, 'status', 401),
         ),
@@ -278,12 +284,12 @@ void main() {
       });
       final source = _source(client: client, clock: Clock(() => now));
 
-      await source.movieDetails(168899); // login #1
-      await source.movieDetails(168899); // token fresh — no new login
+      await source.movieDetails(_ref(168899)); // login #1
+      await source.movieDetails(_ref(168899)); // token fresh — no new login
       expect(logins, 1);
 
       now = now.add(const Duration(days: 25)); // past the 24-day TTL
-      await source.movieDetails(168899); // proactive re-login
+      await source.movieDetails(_ref(168899)); // proactive re-login
       expect(logins, 2);
     });
   });
@@ -293,7 +299,7 @@ void main() {
       // The source must surface a non-2xx (not swallow it) so the SWR wrapper
       // (#13) can fall back to cache.
       await expectLater(
-        _source().movieDetails(999),
+        _source().movieDetails(_ref(999)),
         throwsA(
           isA<MetadataException>().having((e) => e.statusCode, 'status', 404),
         ),

@@ -1,9 +1,11 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_exception.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 
 /// TheMovieDB v3 API root.
 const _apiBase = 'https://api.themoviedb.org/3';
@@ -118,7 +120,8 @@ class TmdbSource implements MetadataSource {
   };
 
   @override
-  Future<MediaDetails> movieDetails(int sourceId) async {
+  Future<MediaDetails> movieDetails(SourceRef ref) async {
+    final sourceId = ref.idFor(MetadataSourceKind.tmdb);
     final json = await _getJson('/movie/$sourceId', {
       'append_to_response': 'external_ids',
     });
@@ -138,7 +141,8 @@ class TmdbSource implements MetadataSource {
   }
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async {
+  Future<MediaDetails> showDetails(SourceRef ref) async {
+    final sourceId = ref.idFor(MetadataSourceKind.tmdb);
     final json = await _getJson('/tv/$sourceId', {
       'append_to_response': 'external_ids,next_episode_to_air',
     });
@@ -168,9 +172,10 @@ class TmdbSource implements MetadataSource {
 
   @override
   Future<List<EpisodeInfo>> seasonEpisodes(
-    int showSourceId,
+    SourceRef show,
     int seasonNumber,
   ) async {
+    final showSourceId = show.idFor(MetadataSourceKind.tmdb);
     // TMDB returns a season's episodes in aired order natively (ADR-4) — no
     // season-type parameter, unlike TVDB.
     final json = await _getJson('/tv/$showSourceId/season/$seasonNumber');

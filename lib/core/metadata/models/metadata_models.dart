@@ -35,7 +35,7 @@ enum ExternalIdKind {
 /// upcoming episodes).
 ///
 /// INVARIANT: this is the single reading of `showStatus`. Consumers are
-/// `CachingMetadataRepository._ttl` (ADR-7 TTL tier) and the upcoming filter
+/// `CachingMetadataSource._ttl` (ADR-7 TTL tier) and the upcoming filter
 /// (#21, which skips ended-`completed` shows). Add a phrasing here, not there.
 bool showHasEnded(String? showStatus) {
   final s = (showStatus ?? '').toLowerCase();

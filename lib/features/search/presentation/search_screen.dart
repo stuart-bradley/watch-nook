@@ -1,17 +1,17 @@
 import 'dart:async';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
-import 'package:watch_nook/core/widgets/poster_placeholder.dart';
+import 'package:watch_nook/core/widgets/remote_image.dart';
 import 'package:watch_nook/core/widgets/track_status_ui.dart';
 import 'package:watch_nook/features/search/data/search_providers.dart';
 
@@ -108,8 +108,13 @@ class _ResultTile extends ConsumerWidget {
     // Already tracked? Then say so on the row, rather than making the user tap
     // each hit to find out which of the six "Severance"s is the one they have.
     final tracked = ref.watch(trackedItemProvider(identityOf(result))).value;
+    final activeKind = metadataSourceKindOf(
+      ref.watch(activeMetadataBackendProvider),
+    );
     return ListTile(
-      leading: _Poster(path: result.posterPath),
+      // A hit comes from whichever source is active right now, so its poster
+      // is tagged with that backend.
+      leading: RemoteImage.thumbnail(artwork: _poster(result, activeKind)),
       title: Text(
         result.title,
         maxLines: 1,
@@ -181,41 +186,8 @@ Future<void> _openTitle(
   }
 }
 
-/// Poster thumbnail — offline-safe via the shared [PosterCacheManager], with a
-/// placeholder when there's no artwork or it hasn't been cached yet.
-class _Poster extends ConsumerWidget {
-  const _Poster({required this.path});
-
-  final String? path;
-
-  static const double _width = 40;
-  static const double _height = _width / WatchnookTokens.posterAspect;
-
-  // The row's subtitle already reads "2019 · Film", so no TypeBadge here.
-  static const _placeholder = PosterPlaceholder(
-    width: _width,
-    height: _height,
-    radius: WatchnookRadii.thumb,
-  );
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final path = this.path;
-    if (path == null) return _placeholder;
-    final url = ref
-        .read(activeMetadataSourceProvider)
-        .imageUrl(path, ImageSize.small);
-    return ClipRRect(
-      borderRadius: WatchnookRadii.thumb,
-      child: CachedNetworkImage(
-        imageUrl: url,
-        cacheManager: PosterCacheManager.instance,
-        width: _width,
-        height: _height,
-        fit: BoxFit.cover,
-        placeholder: (_, _) => _placeholder,
-        errorWidget: (_, _, _) => _placeholder,
-      ),
-    );
-  }
+/// A search hit's poster, tagged with the backend that just produced it.
+ArtworkRef? _poster(MediaSearchResult result, MetadataSourceKind kind) {
+  final path = result.posterPath;
+  return path == null ? null : ArtworkRef(kind, path);
 }

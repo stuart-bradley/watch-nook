@@ -3,9 +3,10 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/library_dao.dart';
-import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/import_export/export/import_export_service.dart';
 import 'package:watch_nook/core/import_export/import/csv_utils.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 void main() {
   late AppDatabase db;
@@ -25,20 +26,15 @@ void main() {
     String title = 'Parasite',
     int? rating,
     int? year = 2019,
-  }) => dao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.movie,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: title,
-      trackStatus: TrackStatus.completed,
-      addedAt: added,
-      updatedAt: added,
-      tmdbId: const Value(496243),
-      imdbId: const Value('tt6751668'),
-      year: Value(year),
-      rating: Value(rating),
-    ),
-  );
+  }) async => (await seed.seedMovie(
+    db,
+    title: title,
+    now: added,
+    tmdbId: 496243,
+    imdbId: 'tt6751668',
+    year: year,
+    rating: rating,
+  )).id;
 
   Future<void> seedWatch(int itemId, {DateTime? at, bool isRewatch = false}) =>
       dao.insertWatchEvent(
@@ -104,16 +100,11 @@ void main() {
   });
 
   test('TV shows never appear', () async {
-    final showId = await dao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Severance',
-        trackStatus: TrackStatus.watching,
-        addedAt: added,
-        updatedAt: added,
-      ),
-    );
+    final showId = (await seed.seedShow(
+      db,
+      tmdbId: null,
+      now: added,
+    )).id;
     await dao.insertWatchEvent(
       WatchEventsCompanion.insert(
         libraryItemId: showId,

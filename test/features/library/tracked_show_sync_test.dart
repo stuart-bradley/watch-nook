@@ -6,26 +6,30 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/features/library/data/tracked_show_sync.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// The tracked-show sync backfills the per-show metadata an import can't fetch
 /// (episode count, show status, poster) onto the library rows — the data the
 /// derived "Up to date" category and the progress labels depend on. It must be
 /// fault-tolerant: one offline show can't sink the whole pass.
-class _FakeRepo implements CachingMetadataRepository {
+class _FakeRepo implements CachingMetadataSource {
   _FakeRepo(this.byId);
 
   final Map<int, MediaDetails> byId;
   int calls = 0;
 
   @override
-  Stream<MediaDetails> showDetails(int sourceId) {
+  Future<MediaDetails> revalidatedShowDetails(SourceRef ref) async {
     calls++;
-    final d = byId[sourceId];
-    return d == null ? Stream.error(StateError('offline')) : Stream.value(d);
+    final d = byId[ref.id];
+    if (d == null) throw StateError('offline');
+    return d;
   }
 
   @override
@@ -41,7 +45,7 @@ class _FakeSource implements MetadataSource {
   int calls = 0;
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async {
+  Future<MediaDetails> showDetails(SourceRef sourceId) async {
     calls++;
     return fresh;
   }
@@ -75,17 +79,21 @@ void main() {
     int tmdbId = 100,
     MediaType type = MediaType.tv,
     TrackStatus status = TrackStatus.watching,
-  }) => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: type,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: 'Show $tmdbId',
-      trackStatus: status,
-      addedAt: DateTime(2026),
-      updatedAt: DateTime(2026),
-      tmdbId: Value(tmdbId),
-    ),
-  );
+  }) async =>
+      (type == MediaType.movie
+              ? await seed.seedMovie(
+                  db,
+                  title: 'Show $tmdbId',
+                  tmdbId: tmdbId,
+                  status: status,
+                )
+              : await seed.seedShow(
+                  db,
+                  title: 'Show $tmdbId',
+                  tmdbId: tmdbId,
+                  status: status,
+                ))
+          .id;
 
   TrackedShowSync syncWith(_FakeRepo repo) => TrackedShowSync(
     dao: db.libraryDao,
@@ -164,6 +172,33 @@ void main() {
     expect(repo.calls, 0);
   });
 
+  test('a row recorded against the other backend is never fetched', () async {
+    // The sync used to check this twice — a `recordedSource == backend` filter
+    // in `refresh()` AND `refFor` in `_patchFor` — and ticket 08 collapsed it
+    // to the one construction. That is the right shape, but it left the path
+    // that writes episodeCountTotal / showStatus / posterPath onto real rows
+    // with a single point of failure and NO test. Loosen `refFor` and, without
+    // this, another title's data lands on a user's library with nothing red.
+    await seed.seedShow(
+      db,
+      title: 'Recorded against TVDB',
+      source: MetadataSourceKind.tvdb,
+      tmdbId: null,
+      tvdbId: 371980,
+    );
+    // Answers for BOTH ids, so a fetch would succeed and be written.
+    final repo = _FakeRepo({
+      371980: details(total: 42),
+      100: details(total: 42),
+    });
+
+    await syncWith(repo).refresh();
+
+    expect(repo.calls, 0, reason: 'its ids mean nothing to the active backend');
+    final row = (await db.libraryDao.getAll()).single;
+    expect(row.episodeCountTotal, isNull);
+  });
+
   test('a stale cache is revalidated, not served back (uses .last)', () async {
     // The bug this guards: `.first` on the SWR stream takes the cached value
     // and cancels before the refetch runs, so the daily/manual refresh silently
@@ -185,7 +220,7 @@ void main() {
       ),
     );
     final source = _FakeSource(details(total: 19, status: 'Returning Series'));
-    final repo = CachingMetadataRepository(
+    final repo = CachingMetadataSource(
       source: source,
       sourceKind: MetadataSourceKind.tmdb,
       dao: db.mediaCacheDao,

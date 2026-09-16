@@ -1,4 +1,3 @@
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,12 +6,15 @@ import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/features/detail/data/add_to_library.dart';
 import 'package:watch_nook/features/up_next/data/up_next_providers.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// Adding a show must put it in the Up Next queue **immediately** — no manual
 /// refresh, no waiting for the once-a-day `TrackedShowSync`.
@@ -40,7 +42,7 @@ class _FakeSource implements MetadataSource {
   int showDetailCalls = 0;
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async {
+  Future<MediaDetails> showDetails(SourceRef ref) async {
     showDetailCalls++;
     return details;
   }
@@ -76,24 +78,23 @@ void main() {
     lastEpisode: EpisodeInfo(seasonNumber: 1, episodeNumber: 2),
   );
 
-  CachingMetadataRepository repoOver(_FakeSource source) =>
-      CachingMetadataRepository(
-        source: source,
-        sourceKind: MetadataSourceKind.tmdb,
-        dao: db.mediaCacheDao,
-      );
+  CachingMetadataSource repoOver(_FakeSource source) => CachingMetadataSource(
+    source: source,
+    sourceKind: MetadataSourceKind.tmdb,
+    dao: db.mediaCacheDao,
+  );
 
   /// The queue the Up Next tab actually renders: the REAL
   /// `upNextBoardProvider`, over the real DAO and a real
-  /// `CachingMetadataRepository`. Re-implementing its rules here would only
+  /// `CachingMetadataSource`. Re-implementing its rules here would only
   /// test the copy — a board that started hitting the network, or dropped a
   /// filter, would still pass.
-  Future<List<QueueEntry>> queue(CachingMetadataRepository repo) async {
+  Future<List<QueueEntry>> queue(CachingMetadataSource repo) async {
     final container = ProviderContainer(
       overrides: [
         appDatabaseProvider.overrideWithValue(db),
         activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
-        metadataRepositoryProvider.overrideWithValue(repo),
+        metadataProvider.overrideWithValue(repo),
       ],
     );
     addTearDown(container.dispose);
@@ -154,7 +155,9 @@ void main() {
         reason: 'fetched once, for the snapshot',
       );
       // The row the queue depends on actually exists...
-      final cached = await repo.cachedShowDetails([95396]);
+      final cached = await repo.cachedShowDetails([
+        const SourceRef(MetadataSourceKind.tmdb, 95396),
+      ]);
       expect(cached[95396]?.title, 'Severance');
       // ...and reading the queue again costs no further fetch.
       expect(source.showDetailCalls, 1);
@@ -169,17 +172,7 @@ void main() {
       // without warming the cache, is invisible to the queue. THAT is the old
       // bug — and why the add goes through the SWR repo, not the raw source.
       final now = DateTime(2026, 7, 13);
-      await db.libraryDao.insertItem(
-        LibraryItemsCompanion.insert(
-          mediaType: MediaType.tv,
-          recordedSource: MetadataSourceKind.tmdb,
-          title: 'Severance',
-          trackStatus: TrackStatus.watching,
-          addedAt: now,
-          updatedAt: now,
-          tmdbId: const Value(95396),
-        ),
-      );
+      await seed.seedShow(db, now: now);
 
       final repo = repoOver(_FakeSource(details));
       expect(

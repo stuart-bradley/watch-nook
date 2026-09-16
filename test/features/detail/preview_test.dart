@@ -1,4 +1,3 @@
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,12 +10,15 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// US-1/US-2 — the detail screen in **preview** mode: an untracked search hit,
 /// reachable before it is in the library.
@@ -41,13 +43,13 @@ class _FakeSource implements MetadataSource {
   final List<EpisodeInfo> episodes;
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async => details;
+  Future<MediaDetails> showDetails(SourceRef ref) async => details;
 
   @override
-  Future<MediaDetails> movieDetails(int sourceId) async => details;
+  Future<MediaDetails> movieDetails(SourceRef ref) async => details;
 
   @override
-  Future<List<EpisodeInfo>> seasonEpisodes(int showId, int season) async =>
+  Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) async =>
       episodes.where((e) => e.seasonNumber == season).toList();
 
   @override
@@ -125,8 +127,8 @@ void main() {
           appDatabaseProvider.overrideWithValue(db),
           activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(source),
-          metadataRepositoryProvider.overrideWithValue(
-            CachingMetadataRepository(
+          metadataProvider.overrideWithValue(
+            CachingMetadataSource(
               source: source,
               sourceKind: MetadataSourceKind.tmdb,
               dao: db.mediaCacheDao,
@@ -176,6 +178,10 @@ void main() {
     expect(find.text('Mark leads a team of office workers.'), findsOneWidget);
     expect(find.text('Season 1'), findsOneWidget);
     expect(find.text('2 episodes'), findsOneWidget);
+    // Season 2 has one episode. It read "1 episodes" on the E2E run (ticket
+    // 04 of emulator-e2e-findings); mutation: drop the singular branch
+    // from `countOf`.
+    expect(find.text('1 episode'), findsOneWidget);
 
     // One action, and nothing that would write to a row that doesn't exist.
     expect(find.text('Add to library'), findsOneWidget);
@@ -244,17 +250,14 @@ void main() {
     // you already track — and pressing it silently keeps the old status while
     // reporting the new one.
     final now = DateTime(2026, 7, 12);
-    final existing = await db.libraryDao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Severance (2022)', // ≠ the hit's title, so no title+year match
-        trackStatus: TrackStatus.completed,
-        addedAt: now,
-        updatedAt: now,
-        imdbId: const Value('tt11280740'), // the ONLY thing that can match
-      ),
-    );
+    final existing = (await seed.seedShow(
+      db,
+      title: 'Severance (2022)', // ≠ the hit's title, so no title+year match
+      tmdbId: null,
+      imdbId: 'tt11280740', // the ONLY thing that can match
+      status: TrackStatus.completed,
+      now: now,
+    )).id;
 
     await pumpPreview(tester);
 

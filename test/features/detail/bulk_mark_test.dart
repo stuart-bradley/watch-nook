@@ -6,11 +6,14 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_exception.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/features/detail/data/bulk_mark.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// Sentinel so `episode(..., airDate: null)` means "undated", distinct from
 /// "caller said nothing, use the aired default".
@@ -46,7 +49,7 @@ class _RecordingSource implements MetadataSource {
   final fetched = <int>[];
 
   @override
-  Future<List<EpisodeInfo>> seasonEpisodes(int showId, int season) async {
+  Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) async {
     fetched.add(season);
     final rows = bySeason[season];
     if (rows == null) throw onMissing;
@@ -83,17 +86,7 @@ void main() {
     airDate: identical(airDate, _defaultAirDate) ? aired : airDate as DateTime?,
   );
 
-  Future<int> insertShow() => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.tv,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: 'Severance',
-      trackStatus: TrackStatus.watching,
-      addedAt: now,
-      updatedAt: now,
-      tmdbId: const Value(showId),
-    ),
-  );
+  Future<int> insertShow() async => (await seed.seedShow(db, now: now)).id;
 
   /// Seeds a cached season. [fetchedAt] defaults to the fixed clock's now (a
   /// **fresh** cache the repository serves without touching the source); pass
@@ -163,8 +156,8 @@ void main() {
     );
   }
 
-  CachingMetadataRepository repoOver(_RecordingSource source) =>
-      CachingMetadataRepository(
+  CachingMetadataSource repoOver(_RecordingSource source) =>
+      CachingMetadataSource(
         source: source,
         sourceKind: MetadataSourceKind.tmdb,
         dao: db.mediaCacheDao,
@@ -182,7 +175,7 @@ void main() {
       dao: db.libraryDao,
       repo: repoOver(source),
       itemId: itemId,
-      showSourceId: showId,
+      showRef: const SourceRef(MetadataSourceKind.tmdb, showId),
       seasons: seasons,
       upTo: upTo,
     ),
@@ -430,7 +423,7 @@ void main() {
             dao: db.libraryDao,
             repo: repoOver(_RecordingSource({})),
             itemId: id,
-            showSourceId: showId,
+            showRef: const SourceRef(MetadataSourceKind.tmdb, showId),
             seasons: [1],
           ),
         );
@@ -461,7 +454,7 @@ void main() {
           dao: db.libraryDao,
           repo: repoOver(_RecordingSource({})),
           itemId: id,
-          showSourceId: showId,
+          showRef: const SourceRef(MetadataSourceKind.tmdb, showId),
           seasons: [1],
         ),
       );

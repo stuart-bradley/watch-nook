@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 // StreamProviderFamily lives in the misc barrel, not the main one.
@@ -7,12 +6,13 @@ import 'package:go_router/go_router.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
-import 'package:watch_nook/core/metadata/metadata_providers.dart';
+import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
+import 'package:watch_nook/core/text/count_of.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/empty_state.dart';
-import 'package:watch_nook/core/widgets/poster_placeholder.dart';
+import 'package:watch_nook/core/widgets/remote_image.dart';
 
 /// A show is **Up to date** — a *derived* category — when it is watched up to
 /// its latest aired episode but is still returning (a new season may come). It
@@ -90,6 +90,11 @@ libraryGridProvider = StreamProvider.family<List<LibraryItem>, LibraryFilter>((
 /// - TV, nothing watched: total episode count, or "Not started".
 /// - TV, in progress: `S{season}E{episode}` + " · {left} left" when the total
 ///   is known and any remain.
+///
+/// An Unverified row's position carries the marker — the rule and its wording
+/// belong to `unverified_position.dart`, not here. It qualifies the position
+/// only: the "{left} left" count is accurate either way, because the switch
+/// that raises the flag never touches watch history.
 String libraryProgressLabel(LibraryItem item) {
   if (item.mediaType == MediaType.movie) {
     return item.watchedCount > 0 ? 'Watched' : 'Unwatched';
@@ -98,9 +103,12 @@ String libraryProgressLabel(LibraryItem item) {
   final episode = item.lastWatchedEpisode;
   final total = item.episodeCountTotal;
   if (season == null || episode == null) {
-    return total != null ? '$total episodes' : 'Not started';
+    return total != null ? countOf(total, 'episode') : 'Not started';
   }
-  final position = 'S${season}E$episode';
+  final position = markUnverifiedPosition(
+    'S${season}E$episode',
+    unverified: hasUnverifiedPosition(item),
+  );
   if (total == null) return position;
   final left = total - item.watchedCount;
   return left > 0 ? '$position · $left left' : position;
@@ -303,9 +311,15 @@ class _Card extends ConsumerWidget {
           Expanded(
             child: ClipRRect(
               borderRadius: WatchnookRadii.poster,
-              child: _Poster(
-                path: item.posterPath,
-                mediaType: item.mediaType,
+              child: RemoteImage.card(
+                // The row's OWN backend, not the active one: the grid renders
+                // every row, including ones stranded by a backend switch, and
+                // a stranded poster must show the placeholder rather than a
+                // path resolved through a catalogue that never minted it.
+                artwork: item.posterRef,
+                // The card is the one place the type isn't already spelled out
+                // in a subtitle, so the placeholder carries the badge.
+                tag: item.mediaType == MediaType.movie ? 'Film' : 'TV',
               ),
             ),
           ),
@@ -326,39 +340,6 @@ class _Card extends ConsumerWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// Poster art — offline-safe. A null path (or an image not yet cached) shows a
-/// placeholder and never touches the network; only a non-null path reads the
-/// active source for its URL, so the grid renders with no source provider in
-/// tests.
-class _Poster extends ConsumerWidget {
-  const _Poster({required this.path, required this.mediaType});
-
-  final String? path;
-  final MediaType mediaType;
-
-  /// The grid card is the one place the type isn't already spelled out in a
-  /// subtitle, so the placeholder carries a [TypeBadge].
-  String get _tag => mediaType == MediaType.movie ? 'Film' : 'TV';
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final path = this.path;
-    final placeholder = PosterPlaceholder(tag: _tag);
-    if (path == null) return placeholder;
-    final url = ref
-        .read(activeMetadataSourceProvider)
-        .imageUrl(path, ImageSize.medium);
-    return CachedNetworkImage(
-      imageUrl: url,
-      cacheManager: PosterCacheManager.instance,
-      fit: BoxFit.cover,
-      width: double.infinity,
-      placeholder: (_, _) => placeholder,
-      errorWidget: (_, _, _) => placeholder,
     );
   }
 }

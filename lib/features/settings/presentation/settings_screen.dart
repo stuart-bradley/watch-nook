@@ -4,10 +4,13 @@ import 'package:go_router/go_router.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/import_export/export/export_providers.dart';
 import 'package:watch_nook/core/import_export/export/import_export_service.dart';
+import 'package:watch_nook/core/metadata/switch/backend_switch_providers.dart';
+import 'package:watch_nook/core/text/count_of.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
 import 'package:watch_nook/core/widgets/attribution_footer.dart';
 import 'package:watch_nook/features/library/data/tracked_show_sync.dart';
 import 'package:watch_nook/features/onboarding/presentation/onboarding_provider.dart';
+import 'package:watch_nook/features/settings/data/device_cache.dart';
 import 'package:watch_nook/features/settings/data/export_share.dart';
 import 'package:watch_nook/features/settings/data/theme_mode_provider.dart';
 
@@ -27,6 +30,11 @@ class SettingsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Rows recorded against a backend that is no longer active. Absent while
+    // the one-shot read is in flight, which reads as "nothing to relink" — the
+    // tile appearing a frame late is better than it flickering in and out.
+    final stranded = ref.watch(backendMismatchCountProvider).value ?? 0;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
@@ -51,6 +59,21 @@ class SettingsScreen extends ConsumerWidget {
             ),
             onTap: () => _refreshLibrary(context, ref),
           ),
+          // Only shown when there is something to relink. A backend flip is an
+          // ADR-2 config edit the user never saw, so until they act, those rows
+          // render from stored columns and fetch nothing (LibraryItem.refFor).
+          if (stranded > 0)
+            ListTile(
+              leading: const Icon(Icons.link_off),
+              title: const Text('Relink your library'),
+              subtitle: Text(
+                '${countOf(stranded, 'title')} '
+                '${stranded == 1 ? 'was' : 'were'} '
+                'added using a different metadata provider, so their details '
+                'are unavailable. Relinking matches them up again.',
+              ),
+              onTap: () => _relinkLibrary(context, ref),
+            ),
           ListTile(
             leading: const Icon(Icons.download_outlined),
             title: const Text('Export JSON'),
@@ -211,13 +234,18 @@ Future<void> _export(
   }
 }
 
-/// GDPR "delete everything" (US-D1). Wipes all four surfaces a user's data can
-/// hide in — the library + watch events, the disposable metadata cache, and the
-/// Auto Backup snapshot — then resets first-run so the app returns to a
+/// GDPR "delete everything" (US-D1). Wipes every surface a user's data can hide
+/// in — the cache directory (shared exports, imported copies, posters) and the
+/// poster index, the library + watch events, the disposable metadata cache, and
+/// the Auto Backup snapshot — then resets first-run so the app returns to a
 /// fresh-install state (the router redirect reacts and reopens onboarding).
 /// Deleting the backup file is load-bearing: the manifest allowlist backs up
 /// exactly that file, so leaving it would silently re-restore the wiped data on
 /// the next launch.
+///
+/// The file wipe runs first: if it fails, nothing the user can see has changed
+/// and they can try again, rather than being left with an erased library and
+/// its exports still on disk.
 Future<void> _deleteAll(BuildContext context, WidgetRef ref) async {
   // Captured before the await so the SnackBar doesn't reach across the gap.
   final messenger = ScaffoldMessenger.of(context);
@@ -247,7 +275,8 @@ Future<void> _deleteAll(BuildContext context, WidgetRef ref) async {
   if (confirmed != true) return;
 
   try {
-    await ref.read(libraryDaoProvider).deleteAllUserData();
+    await ref.read(cacheWiperProvider)();
+    await ref.read(libraryDaoProvider).eraseEverything();
     await ref.read(mediaCacheDaoProvider).clearAll();
     final backup = await ref.read(autoBackupServiceProvider.future);
     await backup.deleteBackup();
@@ -283,6 +312,40 @@ Future<void> _refreshLibrary(BuildContext context, WidgetRef ref) async {
     if (!context.mounted) return;
     messenger.showSnackBar(
       const SnackBar(content: Text("Couldn't refresh — you may be offline.")),
+    );
+  }
+}
+
+/// Relinks rows recorded against a previous metadata backend onto the active
+/// one, matching by IMDb id and reconciling episodes by air-date (ADR-4).
+///
+/// User-initiated by design: this rewrites ids and `recordedSource` on rows
+/// carrying watch history, and flags the ones whose episodes could not be
+/// reconciled. The report names the flagged count rather than hiding it —
+/// absolute-numbered and anime listings are exactly where reconciliation gives
+/// up, and the user is the one who knows those titles.
+Future<void> _relinkLibrary(BuildContext context, WidgetRef ref) async {
+  final messenger = ScaffoldMessenger.of(context)
+    ..showSnackBar(const SnackBar(content: Text('Relinking your library…')));
+  try {
+    final report = await ref.read(backendSwitchServiceProvider).switchAll();
+    ref.invalidate(backendMismatchCountProvider);
+    if (!context.mounted) return;
+    // Replace the in-progress message rather than queueing behind it — a
+    // queued SnackBar waits out the first one's full duration, so the result
+    // would land seconds after the work finished.
+    messenger.hideCurrentSnackBar();
+    final flagged = report.flagged == 0
+        ? ''
+        : ' ${report.flagged} need a look.';
+    messenger.showSnackBar(
+      SnackBar(content: Text('Relinked ${report.relinked}.$flagged')),
+    );
+  } on Object catch (e, s) {
+    debugPrint('wn-error: library relink failed: $e\n$s');
+    if (!context.mounted) return;
+    messenger.showSnackBar(
+      const SnackBar(content: Text("Couldn't relink — you may be offline.")),
     );
   }
 }

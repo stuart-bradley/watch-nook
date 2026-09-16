@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,14 +9,18 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/poster_cache_manager.dart';
+import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
+import 'package:watch_nook/core/text/count_of.dart';
 import 'package:watch_nook/core/theme/watchnook_tokens.dart';
+import 'package:watch_nook/core/widgets/remote_image.dart';
 import 'package:watch_nook/core/widgets/track_status_ui.dart';
 import 'package:watch_nook/features/detail/data/add_to_library.dart';
 import 'package:watch_nook/features/detail/data/bulk_mark.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
+import 'package:watch_nook/features/detail/data/detail_target.dart';
 
 /// Title detail (#18, US-6): backdrop, overview, the user's rating, the
 /// seasons→episodes list, and the per-source attribution footer.
@@ -93,26 +96,39 @@ class _Body extends ConsumerWidget {
     final entry = this.item;
     final result = this.result;
 
-    final mediaType = entry?.mediaType ?? mediaTypeOf(result!.kind);
-    // The id to fetch details with. For a tracked row that's its own
-    // `recordedSource` id; for a preview it's the active backend's id off the
-    // hit — the same choice `addToLibrary` makes, so what you preview is what
-    // gets added.
-    final sourceId = entry != null
-        ? detailSourceId(entry)
-        : addSourceId(
-            result!,
-            metadataSourceKindOf(ref.watch(activeMetadataBackendProvider)),
-          );
+    // Which title, from which backend, and is it tracked — answered once, by
+    // [detailTargetOf], rather than re-derived down the build method.
+    final activeKind = metadataSourceKindOf(
+      ref.watch(activeMetadataBackendProvider),
+    );
+    final target = detailTargetOf(
+      item: entry,
+      result: result,
+      active: activeKind,
+    );
+    // The hit itself, when this is a preview — the only case with one.
+    final previewHit = switch (target) {
+      PreviewTitle(:final result) => result,
+      _ => null,
+    };
+    final mediaType = target.mediaType;
+    if (mediaType == null) return const _Notice("Couldn't open this title.");
 
-    // ponytail: conditional watch — a row with no id for its own backend has no
-    // details to fetch, so it renders from the stored columns alone.
-    final async = sourceId == null
+    // A [StrandedTitle] or an id-less preview has no reference and so fetches
+    // nothing: it renders from what the row or the hit already carries.
+    // ponytail: conditional watch — no reference, no provider to watch.
+    final fetchRef = target.fetchRef;
+    final async = fetchRef == null
         ? null
-        : ref.watch(titleDetailsProvider(mediaType, sourceId));
+        : ref.watch(titleDetailsProvider(mediaType, fetchRef));
     final details = async?.value;
     final coldCache = async != null && !async.hasValue;
     final seasons = details?.seasons ?? const <SeasonInfo>[];
+    // The reference the season list renders against, or null when no list is
+    // on screen. This ONE value gates both the list and the Unverified notice's
+    // wording and dismiss, so the two cannot disagree. They once did, when each
+    // was computed separately.
+    final listRef = seasons.isEmpty ? null : fetchRef;
 
     // A search hit we already track is NOT a preview — it's that row's detail
     // page, and must never offer to add what's already in the library (US-3).
@@ -121,22 +137,26 @@ class _Body extends ConsumerWidget {
     // become matchable once the details land. Re-resolve here with the enriched
     // identity — `identityOf` is the same builder `addToLibrary` uses, so the
     // two cannot disagree about whether this title is tracked.
-    final trackedId = result == null
-        ? null
-        : ref.watch(trackedItemProvider(identityOf(result, details))).value?.id;
+    final trackedId = switch (target) {
+      PreviewTitle(:final result) =>
+        ref.watch(trackedItemProvider(identityOf(result, details))).value?.id,
+      _ => null,
+    };
     // Re-read the resolved row through the **live** provider, not the one-shot
     // lookup above: from here on this is an ordinary tracked detail screen, and
     // its controls must repaint off the row like any other (a watch write
     // recomputes `watchedCount`).
-    final item =
-        entry ??
-        (trackedId == null
+    final item = switch (target) {
+      TrackedTitle(:final item) || StrandedTitle(:final item) => item,
+      _ =>
+        trackedId == null
             ? null
-            : ref.watch(libraryItemProvider(trackedId)).value);
+            : ref.watch(libraryItemProvider(trackedId)).value,
+    };
 
     return ListView(
       children: [
-        _Backdrop(path: details?.backdropPath),
+        RemoteImage.backdrop(artwork: _backdrop(details, activeKind)),
         if (coldCache && async.isLoading) const LinearProgressIndicator(),
         Padding(
           padding: const EdgeInsets.all(WatchnookSpacing.screen),
@@ -144,8 +164,8 @@ class _Body extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _Header(
-                title: details?.title ?? item?.title ?? result!.title,
-                year: details?.year ?? item?.year ?? result?.year,
+                title: details?.title ?? item?.title ?? previewHit?.title ?? '',
+                year: details?.year ?? item?.year ?? previewHit?.year,
                 mediaType: mediaType,
                 showStatus: details?.showStatus ?? item?.showStatus,
               ),
@@ -153,18 +173,18 @@ class _Body extends ConsumerWidget {
               // The one adaptive line: tracked titles get the controls that
               // manage them; an untracked one gets the single action that makes
               // it trackable.
-              if (item == null)
-                _AddButton(result: result!)
-              else
+              if (item case final tracked?)
                 Wrap(
                   spacing: WatchnookSpacing.sm,
                   runSpacing: WatchnookSpacing.sm,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    _StatusDropdown(item: item),
-                    _RatingRow(item: item),
+                    _StatusDropdown(item: tracked),
+                    _RatingRow(item: tracked),
                   ],
-                ),
+                )
+              else if (previewHit case final hit?)
+                _AddButton(result: hit),
               if (item != null && item.mediaType == MediaType.movie) ...[
                 const SizedBox(height: WatchnookSpacing.md),
                 _MovieWatchActions(item: item),
@@ -185,11 +205,34 @@ class _Body extends ConsumerWidget {
             ],
           ),
         ),
+        // The marker sits directly above the seasons list, because the list is
+        // the evidence the user needs in order to answer it. What it tells the
+        // user to do depends on WHY the list is or isn't there, read off
+        // [listRef] (the list's own gate) and [fetchRef].
+        if (item != null && hasUnverifiedPosition(item))
+          _UnverifiedNotice(
+            itemId: item.id,
+            message: listRef != null
+                ? unverifiedPositionNoticeListShown
+                : switch (target) {
+                    // No reference, but on the active backend: a relink skips
+                    // it and Settings offers none, so it must not point there.
+                    StrandedTitle(reason: Unfetchable.noIdForItsBackend) =>
+                      unverifiedPositionNoticeUnlinked,
+                    // No reference: Stranded. Only a relink can bring the list.
+                    _ when fetchRef == null => unverifiedPositionNoticeStranded,
+                    // Fetchable, just not loaded. A relink skips this row, so
+                    // pointing at Settings would send the user round in a
+                    // circle.
+                    _ => unverifiedPositionNoticeNotLoaded,
+                  },
+            canDismiss: listRef != null,
+          ),
         // Seasons come from the details fetch; a movie has none. "Mark show
         // watched" is the *section action* for the list below it — it used to
         // sit up with the status control, where it read as the only thing you
         // could do with a title.
-        if (seasons.isNotEmpty)
+        if (listRef != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(
               WatchnookSpacing.screen,
@@ -215,63 +258,22 @@ class _Body extends ConsumerWidget {
                     icon: Icons.done_all,
                     label: 'Mark show watched',
                     itemId: item.id,
-                    showSourceId: sourceId!,
+                    showRef: listRef,
                     seasons: _seasonNumbers(details!),
                   ),
               ],
             ),
           ),
-        for (final season in seasons)
-          _SeasonTile(
-            itemId: item?.id,
-            showSourceId: sourceId!,
-            season: season,
-            allSeasons: _seasonNumbers(details!),
-          ),
+        if (listRef != null)
+          for (final season in seasons)
+            _SeasonTile(
+              itemId: item?.id,
+              showRef: listRef,
+              season: season,
+              allSeasons: _seasonNumbers(details!),
+            ),
         // Attribution lives in Settings → About, not on every detail page.
       ],
-    );
-  }
-}
-
-/// 16:9 backdrop. Offline-safe: a null path (or an uncached image) shows a
-/// placeholder and never blocks the screen.
-class _Backdrop extends ConsumerWidget {
-  const _Backdrop({required this.path});
-
-  final String? path;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final path = this.path;
-    return AspectRatio(
-      aspectRatio: 16 / 9,
-      child: path == null
-          ? const _BackdropPlaceholder()
-          : CachedNetworkImage(
-              imageUrl: ref
-                  .read(activeMetadataSourceProvider)
-                  .imageUrl(path, ImageSize.large),
-              cacheManager: PosterCacheManager.instance,
-              fit: BoxFit.cover,
-              placeholder: (_, _) => const _BackdropPlaceholder(),
-              errorWidget: (_, _, _) => const _BackdropPlaceholder(),
-            ),
-    );
-  }
-}
-
-class _BackdropPlaceholder extends StatelessWidget {
-  const _BackdropPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(color: scheme.surfaceContainerHighest),
-      child: Center(
-        child: Icon(Icons.movie_outlined, color: scheme.onSurfaceVariant),
-      ),
     );
   }
 }
@@ -345,11 +347,19 @@ Future<void> _pickRating(
   WidgetRef ref,
   LibraryItem item,
 ) async {
+  // Captured before the sheet's await, so no `BuildContext` crosses the gap.
+  final messenger = ScaffoldMessenger.of(context);
   // -1 distinguishes "cleared" from "dismissed" (null) — a rating of 0 is real.
   final picked = await showModalBottomSheet<int>(
     context: context,
+    // Eleven rows outgrow the default 9/16-of-screen cap on a phone, and the
+    // `Wrap` this used to be neither scrolled nor grew, so 2/10, 1/10 and Clear
+    // were clipped off a Pixel 5. Now the sheet sizes to its rows and scrolls
+    // only when even the full screen is too short.
+    isScrollControlled: true,
     builder: (context) => SafeArea(
-      child: Wrap(
+      child: ListView(
+        shrinkWrap: true,
         children: [
           for (var i = 10; i >= 1; i--)
             ListTile(
@@ -367,23 +377,52 @@ Future<void> _pickRating(
     ),
   );
   if (picked == null) return;
-  await ref
-      .read(libraryDaoProvider)
-      .updateRating(item.id, picked == -1 ? null : picked, now: clock.now());
+  await _writeOrSay(
+    messenger,
+    "Couldn't save the rating.",
+    () => ref
+        .read(libraryDaoProvider)
+        .updateRating(item.id, picked == -1 ? null : picked, now: clock.now()),
+  );
 }
 
 /// The show's track status (`LibraryItems.trackStatus`) — a labelled Material 3
 /// [DropdownMenu], not a chip. It replaced an `ActionChip` pill that read as a
 /// badge: nothing about it said "this is how you move a title between
 /// Watchlist, Watching, On hold…".
-class _StatusDropdown extends ConsumerWidget {
+class _StatusDropdown extends ConsumerStatefulWidget {
   const _StatusDropdown({required this.item});
 
   final LibraryItem item;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_StatusDropdown> createState() => _StatusDropdownState();
+}
+
+class _StatusDropdownState extends ConsumerState<_StatusDropdown> {
+  /// Bumped when a change fails to save, to rebuild the menu from the saved
+  /// status. `DropdownMenu` writes the picked label into its own field before
+  /// `onSelected` runs, and a failed write leaves the row (and so
+  /// `initialSelection`) unchanged, so nothing else would reset it: the field
+  /// would go on showing a status that never landed.
+  int _failures = 0;
+
+  Future<void> _change(TrackStatus status) async {
+    final saved = await _writeOrSay(
+      ScaffoldMessenger.of(context),
+      "Couldn't change the status.",
+      () => ref
+          .read(libraryDaoProvider)
+          .updateStatus(widget.item.id, status, now: clock.now()),
+    );
+    if (!saved && mounted) setState(() => _failures++);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
     return DropdownMenu<TrackStatus>(
+      key: ValueKey(_failures),
       initialSelection: item.trackStatus,
       label: const Text('Status'),
       leadingIcon: Icon(item.trackStatus.icon),
@@ -391,12 +430,7 @@ class _StatusDropdown extends ConsumerWidget {
       // let a stray keystroke filter the five statuses.
       requestFocusOnTap: false,
       onSelected: (status) {
-        if (status == null) return;
-        unawaited(
-          ref
-              .read(libraryDaoProvider)
-              .updateStatus(item.id, status, now: clock.now()),
-        );
+        if (status != null) unawaited(_change(status));
       },
       dropdownMenuEntries: [
         for (final status in TrackStatus.values)
@@ -441,7 +475,7 @@ Future<void> _addTitle(
   final router = GoRouter.of(context);
   try {
     final (:item, :created) = await addToLibrary(
-      repo: ref.read(metadataRepositoryProvider),
+      repo: ref.read(metadataProvider),
       sourceKind: metadataSourceKindOf(ref.read(activeMetadataBackendProvider)),
       dao: ref.read(libraryDaoProvider),
       result: result,
@@ -473,6 +507,37 @@ Future<void> _addTitle(
   }
 }
 
+/// Runs a library write from a tap, and says so when it fails: a write that
+/// landed nothing must not look like one still on its way. Every library write
+/// on this screen goes through here, apart from the two flows with their own
+/// reporting ([_addTitle], [_runBulk]); a new control reaches for this, not a
+/// bare `unawaited(dao…)`.
+///
+/// [success] is only for writes that change nothing on screen (a rewatch).
+/// The rest repaint off the live row, which is confirmation enough.
+///
+/// Takes the messenger, not a context: capture it before any await. Returns
+/// whether the write landed, for a control that must undo its own optimistic
+/// display on failure (the status dropdown).
+Future<bool> _writeOrSay(
+  ScaffoldMessengerState messenger,
+  String failure,
+  Future<void> Function() write, {
+  String? success,
+}) async {
+  try {
+    await write();
+  } on Object catch (e, s) {
+    debugPrint('wn-error: $failure $e\n$s');
+    messenger.showSnackBar(SnackBar(content: Text(failure)));
+    return false;
+  }
+  if (success != null) {
+    messenger.showSnackBar(SnackBar(content: Text(success)));
+  }
+  return true;
+}
+
 /// A movie's watched toggle + rewatch log (#19, US-2/US-4). Watched-ness is the
 /// denormalized `watchedCount` on the live row — no cross-domain join, and a
 /// rewatch (which never raises the count) leaves the button as it was.
@@ -493,24 +558,38 @@ class _MovieWatchActions extends ConsumerWidget {
           icon: Icon(watched ? Icons.check_circle : Icons.check_circle_outline),
           label: Text(watched ? 'Watched' : 'Mark watched'),
           onPressed: () => unawaited(
-            watched
-                ? dao.unwatch(item.id)
-                : dao.markWatched(
-                    item.id,
-                    watchedAt: clock.now(),
-                    runtimeMinutes: item.runtimeMinutes,
-                  ),
+            _writeOrSay(
+              ScaffoldMessenger.of(context),
+              watched
+                  ? "Couldn't mark this unwatched."
+                  : "Couldn't mark this watched.",
+              () => watched
+                  ? dao.unwatch(item.id)
+                  : dao.markWatched(
+                      item.id,
+                      watchedAt: clock.now(),
+                      runtimeMinutes: item.runtimeMinutes,
+                    ),
+            ),
           ),
         ),
         if (watched)
           TextButton.icon(
             icon: const Icon(Icons.replay),
             label: const Text('Log rewatch'),
+            // A rewatch changes nothing on screen (the count never rises), so
+            // the SnackBar is the only sign the tap landed; without it a second
+            // tap logs a second rewatch.
             onPressed: () => unawaited(
-              dao.logRewatch(
-                item.id,
-                watchedAt: clock.now(),
-                runtimeMinutes: item.runtimeMinutes,
+              _writeOrSay(
+                ScaffoldMessenger.of(context),
+                "Couldn't log the rewatch.",
+                () => dao.logRewatch(
+                  item.id,
+                  watchedAt: clock.now(),
+                  runtimeMinutes: item.runtimeMinutes,
+                ),
+                success: 'Rewatch logged.',
               ),
             ),
           ),
@@ -551,7 +630,7 @@ class _NextEpisode extends StatelessWidget {
 class _SeasonTile extends ConsumerWidget {
   const _SeasonTile({
     required this.itemId,
-    required this.showSourceId,
+    required this.showRef,
     required this.season,
     required this.allSeasons,
   });
@@ -559,7 +638,7 @@ class _SeasonTile extends ConsumerWidget {
   /// The tracked row, or null in preview mode — where there is nothing to mark.
   final int? itemId;
 
-  final int showSourceId;
+  final SourceRef showRef;
   final SeasonInfo season;
 
   /// Every season number of the show — "watch up to here" spans the seasons
@@ -592,7 +671,7 @@ class _SeasonTile extends ConsumerWidget {
       title: Text(name),
       subtitle: Text(
         itemId == null
-            ? '${season.episodeCount} episodes'
+            ? countOf(season.episodeCount, 'episode')
             : '$watchedHere/${season.episodeCount} watched',
       ),
       trailing: !bulkable
@@ -609,7 +688,7 @@ class _SeasonTile extends ConsumerWidget {
                         context,
                         ref,
                         itemId: itemId,
-                        showSourceId: showSourceId,
+                        showRef: showRef,
                         seasons: [season.seasonNumber],
                       ),
                     ),
@@ -617,7 +696,7 @@ class _SeasonTile extends ConsumerWidget {
       children: [
         _SeasonEpisodes(
           itemId: itemId,
-          showSourceId: showSourceId,
+          showRef: showRef,
           seasonNumber: season.seasonNumber,
           allSeasons: allSeasons,
         ),
@@ -633,14 +712,14 @@ class _BulkButton extends ConsumerWidget {
     required this.icon,
     required this.label,
     required this.itemId,
-    required this.showSourceId,
+    required this.showRef,
     required this.seasons,
   });
 
   final IconData icon;
   final String label;
   final int itemId;
-  final int showSourceId;
+  final SourceRef showRef;
   final List<int> seasons;
 
   @override
@@ -652,7 +731,7 @@ class _BulkButton extends ConsumerWidget {
         context,
         ref,
         itemId: itemId,
-        showSourceId: showSourceId,
+        showRef: showRef,
         seasons: seasons,
       ),
     ),
@@ -667,7 +746,7 @@ Future<void> _runBulk(
   BuildContext context,
   WidgetRef ref, {
   required int itemId,
-  required int showSourceId,
+  required SourceRef showRef,
   required List<int> seasons,
   (int, int)? upTo,
 }) async {
@@ -675,9 +754,9 @@ Future<void> _runBulk(
   try {
     final result = await bulkMarkWatched(
       dao: ref.read(libraryDaoProvider),
-      repo: ref.read(metadataRepositoryProvider),
+      repo: ref.read(metadataProvider),
       itemId: itemId,
-      showSourceId: showSourceId,
+      showRef: showRef,
       seasons: seasons,
       upTo: upTo,
     );
@@ -695,9 +774,8 @@ Future<void> _runBulk(
             // skips plenty and is also genuinely already watched.
             (marked: 0, airedCandidates: 0) => 'Nothing has aired yet.',
             (marked: 0, airedCandidates: _) => 'Already watched.',
-            (marked: 1, airedCandidates: _) => 'Marked 1 episode watched.',
             (marked: final n, airedCandidates: _) =>
-              'Marked $n episodes watched.',
+              'Marked ${countOf(n, 'episode')} watched.',
           },
         ),
       ),
@@ -723,7 +801,7 @@ List<int> _seasonNumbers(MediaDetails details) =>
 class _SeasonEpisodes extends ConsumerWidget {
   const _SeasonEpisodes({
     required this.itemId,
-    required this.showSourceId,
+    required this.showRef,
     required this.seasonNumber,
     required this.allSeasons,
   });
@@ -731,7 +809,7 @@ class _SeasonEpisodes extends ConsumerWidget {
   /// Null in preview mode — the episode rows then carry no watch controls.
   final int? itemId;
 
-  final int showSourceId;
+  final SourceRef showRef;
   final int seasonNumber;
   final List<int> allSeasons;
 
@@ -739,7 +817,7 @@ class _SeasonEpisodes extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final itemId = this.itemId;
     final episodes = ref.watch(
-      seasonEpisodesProvider(showSourceId, seasonNumber),
+      seasonEpisodesProvider(showRef, seasonNumber),
     );
     // Before the first emission nothing is known to be watched — an unwatched
     // toggle that marks is the safe default (marking is idempotent; unwatching
@@ -771,7 +849,7 @@ class _SeasonEpisodes extends ConsumerWidget {
                         context,
                         ref,
                         itemId: itemId,
-                        showSourceId: showSourceId,
+                        showRef: showRef,
                         seasons: allSeasons,
                         upTo: (e.seasonNumber, e.episodeNumber),
                       ),
@@ -814,19 +892,109 @@ class _EpisodeToggle extends ConsumerWidget {
       icon: Icon(watched ? Icons.check_circle : Icons.check_circle_outline),
       tooltip: watched ? 'Mark unwatched' : 'Mark watched',
       onPressed: () => unawaited(
-        watched
-            ? dao.unwatch(
-                itemId,
-                season: episode.seasonNumber,
-                episode: episode.episodeNumber,
-              )
-            : dao.markWatched(
-                itemId,
-                season: episode.seasonNumber,
-                episode: episode.episodeNumber,
-                watchedAt: clock.now(),
-                runtimeMinutes: episode.runtimeMinutes,
+        _writeOrSay(
+          ScaffoldMessenger.of(context),
+          watched
+              ? "Couldn't mark the episode unwatched."
+              : "Couldn't mark the episode watched.",
+          () => watched
+              ? dao.unwatch(
+                  itemId,
+                  season: episode.seasonNumber,
+                  episode: episode.episodeNumber,
+                )
+              : dao.markWatched(
+                  itemId,
+                  season: episode.seasonNumber,
+                  episode: episode.episodeNumber,
+                  watchedAt: clock.now(),
+                  runtimeMinutes: episode.runtimeMinutes,
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The Unverified marker on the detail screen: the one surface with room to
+/// say what the doubt actually is, and the one place a user can end it.
+///
+/// A **dismiss**, not a re-check. Re-checking would re-run the same air-date
+/// comparison against the same data and fail the same way — the flag is not set
+/// by a transient error. The only thing that truthfully resolves it is a person
+/// reading the list below and saying so.
+class _UnverifiedNotice extends ConsumerWidget {
+  const _UnverifiedNotice({
+    required this.itemId,
+    required this.message,
+    required this.canDismiss,
+  });
+
+  final int itemId;
+
+  /// One of the notice variants in `unverified_position.dart`, chosen by why
+  /// the episode list is or isn't on screen.
+  final String message;
+
+  /// Whether the season/episode list is actually on screen below this. When it
+  /// is not, the dismiss is withheld: confirming a position against evidence
+  /// the screen cannot show is not a question the user can honestly answer.
+  final bool canDismiss;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        WatchnookSpacing.screen,
+        WatchnookSpacing.sm,
+        WatchnookSpacing.screen,
+        WatchnookSpacing.sm,
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(WatchnookSpacing.md),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(WatchnookRadii.sm),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.help_outline,
+                  size: 20,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: WatchnookSpacing.sm),
+                Expanded(
+                  child: Text(message, style: theme.textTheme.bodyMedium),
+                ),
+              ],
+            ),
+            if (canDismiss)
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: TextButton(
+                  // Clears the flag for THIS row only. The library stream
+                  // re-emits, so the grid caption and the Up Next label drop
+                  // their markers without a reload.
+                  onPressed: () => unawaited(
+                    _writeOrSay(
+                      ScaffoldMessenger.of(context),
+                      "Couldn't save your answer.",
+                      () => ref
+                          .read(libraryDaoProvider)
+                          .dismissUnverifiedPosition(itemId),
+                    ),
+                  ),
+                  child: const Text(unverifiedPositionDismissLabel),
+                ),
               ),
+          ],
+        ),
       ),
     );
   }
@@ -849,3 +1017,11 @@ String _isoDate(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-'
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
+
+/// The detail backdrop, tagged with the backend that fetched it. Details only
+/// ever come from the active source (a stranded row fetches nothing at all),
+/// so this is that backend by construction.
+ArtworkRef? _backdrop(MediaDetails? details, MetadataSourceKind kind) {
+  final path = details?.backdropPath;
+  return path == null ? null : ArtworkRef(kind, path);
+}

@@ -1,20 +1,24 @@
 import 'dart:async';
 
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// #19 acceptance, from the UI in: tapping an episode toggle (or the movie
 /// button) must produce exactly the `WatchEvents` rows the watched invariant
@@ -36,13 +40,13 @@ class _FakeSource implements MetadataSource {
   final List<EpisodeInfo> episodes;
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async => details;
+  Future<MediaDetails> showDetails(SourceRef ref) async => details;
 
   @override
-  Future<MediaDetails> movieDetails(int sourceId) async => details;
+  Future<MediaDetails> movieDetails(SourceRef ref) async => details;
 
   @override
-  Future<List<EpisodeInfo>> seasonEpisodes(int showId, int season) async =>
+  Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) async =>
       episodes.where((e) => e.seasonNumber == season).toList();
 
   @override
@@ -91,30 +95,10 @@ void main() {
     EpisodeInfo(seasonNumber: 1, episodeNumber: 2, title: 'Half Loop'),
   ];
 
-  Future<int> insertShow() => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.tv,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: 'Severance',
-      trackStatus: TrackStatus.watching,
-      addedAt: now,
-      updatedAt: now,
-      tmdbId: const Value(95396),
-    ),
-  );
+  Future<int> insertShow() async => (await seed.seedShow(db, now: now)).id;
 
-  Future<int> insertMovie() => db.libraryDao.insertItem(
-    LibraryItemsCompanion.insert(
-      mediaType: MediaType.movie,
-      recordedSource: MetadataSourceKind.tmdb,
-      title: 'Dune',
-      trackStatus: TrackStatus.completed,
-      addedAt: now,
-      updatedAt: now,
-      tmdbId: const Value(438631),
-      runtimeMinutes: const Value(155),
-    ),
-  );
+  Future<int> insertMovie() async =>
+      (await seed.seedMovie(db, now: now, runtimeMinutes: 155)).id;
 
   /// Mounts the detail screen over the real in-memory DB.
   ///
@@ -139,11 +123,12 @@ void main() {
       ProviderScope(
         overrides: [
           appDatabaseProvider.overrideWithValue(db),
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(source),
           // Overridden directly: the real one watches remote config for the
           // backend, which a widget test has no business booting.
-          metadataRepositoryProvider.overrideWithValue(
-            CachingMetadataRepository(
+          metadataProvider.overrideWithValue(
+            CachingMetadataSource(
               source: source,
               sourceKind: MetadataSourceKind.tmdb,
               dao: db.mediaCacheDao,
@@ -177,6 +162,24 @@ void main() {
       )
       .controller
       ?.text;
+
+  // Ticket 04 of emulator-e2e-findings singularised the preview's
+  // "N episodes"; a tracked season must keep its progress subtitle. Mutation:
+  // render the episode count on the tracked branch too → fails.
+  testWidgets('a tracked season still reads its x/y watched progress', (
+    tester,
+  ) async {
+    final id = await insertShow();
+    await pumpDetail(
+      tester,
+      itemId: id,
+      details: showDetails,
+      watched: {(1, 1)},
+    );
+
+    expect(find.text('1/2 watched'), findsOneWidget);
+    expect(find.textContaining('episode'), findsNothing);
+  });
 
   testWidgets('tapping an episode toggle marks it watched, once', (
     tester,
@@ -265,6 +268,76 @@ void main() {
     // The first watch's date survives, and a rewatch is not a second watch.
     expect(rows.where((e) => !e.isRewatch).single.watchedAt, DateTime(2020));
     expect((await db.libraryDao.getItem(id))!.watchedCount, 1);
+    // A rewatch leaves the button as it was, so without this the tap looked
+    // like it did nothing and invited a second, unintended rewatch (ticket 05
+    // of emulator-e2e-findings). Mutation: drop the SnackBar → fails.
+    expect(find.text('Rewatch logged.'), findsOneWidget);
+  });
+
+  testWidgets('a rewatch that fails to write says so, not that it logged', (
+    tester,
+  ) async {
+    final id = await insertMovie();
+    await db.libraryDao.markWatched(id, watchedAt: DateTime(2020));
+    await pumpDetail(tester, itemId: id, details: movieDetails);
+    // The screen still holds its snapshot of the row; the insert now violates
+    // the foreign key, which is a real write failure, not a faked one.
+    await db.libraryDao.deleteItem(id);
+
+    await tester.tap(find.text('Log rewatch'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rewatch logged.'), findsNothing);
+    expect(find.text("Couldn't log the rewatch."), findsOneWidget);
+  });
+
+  /// Ticket 02 of emulator-e2e-findings: on a Pixel 5-sized screen the rating
+  /// sheet stopped after 3/10, so 1/10 and *Clear rating* were unreachable.
+  /// Pumped at that size (1080×2340 @ 2.75). Mutation: put the sheet's `Wrap`
+  /// back (non-scrolling, capped at 9/16 of the screen) → the taps miss and
+  /// the rating is unchanged.
+  Future<int> pumpPhoneWithRating(WidgetTester tester, int? rating) async {
+    final id = await insertMovie();
+    await db.libraryDao.updateRating(id, rating, now: now);
+    await pumpDetail(tester, itemId: id, details: movieDetails);
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 2.75;
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(ActionChip));
+    await tester.pumpAndSettle();
+    return id;
+  }
+
+  testWidgets('on a phone, Clear rating is reachable and clears it', (
+    tester,
+  ) async {
+    final id = await pumpPhoneWithRating(tester, 7);
+
+    await tester.tap(find.text('Clear rating'));
+    await tester.pumpAndSettle();
+
+    expect((await db.libraryDao.getItem(id))!.rating, isNull);
+  });
+
+  testWidgets('on a phone, 1/10 is reachable and sets the rating', (
+    tester,
+  ) async {
+    final id = await pumpPhoneWithRating(tester, null);
+
+    await tester.tap(find.text('1/10'));
+    await tester.pumpAndSettle();
+
+    expect((await db.libraryDao.getItem(id))!.rating, 1);
+  });
+
+  testWidgets('dismissing the rating sheet changes nothing', (tester) async {
+    final id = await pumpPhoneWithRating(tester, 7);
+
+    await tester.tapAt(const Offset(10, 10)); // the barrier, above the sheet
+    await tester.pumpAndSettle();
+
+    expect(find.text('Clear rating'), findsNothing);
+    expect((await db.libraryDao.getItem(id))!.rating, 7);
   });
 
   testWidgets('a movie shows no episode toggle and no seasons', (tester) async {
@@ -303,6 +376,114 @@ void main() {
     expect((await db.libraryDao.getItem(id))!.trackStatus, TrackStatus.dropped);
   });
 
+  /// Ticket 02 of e2e-follow-ups: these writes failed silently, so a tap that
+  /// wrote nothing looked like one that hadn't landed yet. A real SQLite
+  /// failure, not a faked DAO: the trigger aborts every update to the library
+  /// row, which each of these writes performs (the watch toggles through their
+  /// denormalized recompute). Mutation: call the DAO bare, as before, instead
+  /// of through `_writeOrSay` → no message, and each test fails.
+  Future<void> failLibraryWrites() => db.customStatement(
+    'CREATE TRIGGER fail_writes BEFORE UPDATE ON library_items '
+    "BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+  );
+
+  testWidgets('a failed episode toggle says so, and writes nothing', (
+    tester,
+  ) async {
+    final id = await insertShow();
+    await pumpDetail(tester, itemId: id, details: showDetails);
+    await expandSeason1(tester);
+    await failLibraryWrites();
+
+    await tester.tap(find.byTooltip('Mark watched').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't mark the episode watched."), findsOneWidget);
+    expect(await db.libraryDao.watchEventsFor(id), isEmpty);
+  });
+
+  testWidgets('a failed film Mark watched says so', (tester) async {
+    final id = await insertMovie();
+    await pumpDetail(tester, itemId: id, details: movieDetails);
+    await failLibraryWrites();
+
+    await tester.tap(find.text('Mark watched'));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't mark this watched."), findsOneWidget);
+    expect(await db.libraryDao.watchEventsFor(id), isEmpty);
+  });
+
+  // The unwatch branches are the destructive ones, so they are tested too.
+  testWidgets('a failed film unwatch says so, and keeps the watch', (
+    tester,
+  ) async {
+    final id = await insertMovie();
+    await db.libraryDao.markWatched(id, watchedAt: DateTime(2020));
+    await pumpDetail(tester, itemId: id, details: movieDetails);
+    await failLibraryWrites();
+
+    await tester.tap(find.text('Watched'));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't mark this unwatched."), findsOneWidget);
+    expect(await db.libraryDao.watchEventsFor(id), hasLength(1));
+  });
+
+  testWidgets('a failed episode unwatch says so, and keeps the watch', (
+    tester,
+  ) async {
+    final id = await insertShow();
+    await db.libraryDao.markWatched(id, season: 1, episode: 1);
+    await pumpDetail(
+      tester,
+      itemId: id,
+      details: showDetails,
+      watched: {(1, 1)},
+    );
+    await expandSeason1(tester);
+    await failLibraryWrites();
+
+    await tester.tap(find.byTooltip('Mark unwatched'));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't mark the episode unwatched."), findsOneWidget);
+    expect(await db.libraryDao.watchEventsFor(id), hasLength(1));
+  });
+
+  testWidgets('a failed status change says so', (tester) async {
+    final id = await insertShow();
+    await pumpDetail(tester, itemId: id, details: showDetails);
+    await failLibraryWrites();
+
+    await tester.tap(find.byType(DropdownMenu<TrackStatus>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('On hold').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't change the status."), findsOneWidget);
+    // DropdownMenu writes the picked label into its own field before the write
+    // runs, so a failure must put the saved status back rather than go on
+    // showing one that never landed. Mutation: drop the key bump in
+    // `_StatusDropdownState` → the field still reads "On hold".
+    expect(statusLabel(tester), 'Watching');
+    expect(
+      (await db.libraryDao.getItem(id))!.trackStatus,
+      TrackStatus.watching,
+    );
+  });
+
+  testWidgets('a failed rating says so', (tester) async {
+    final id = await pumpPhoneWithRating(tester, 7);
+    await failLibraryWrites();
+
+    await tester.tap(find.text('Clear rating'));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't save the rating."), findsOneWidget);
+    expect((await db.libraryDao.getItem(id))!.rating, 7);
+  });
+
   testWidgets('an out-of-band status change repaints the status control', (
     tester,
   ) async {
@@ -330,9 +511,10 @@ void main() {
       ProviderScope(
         overrides: [
           appDatabaseProvider.overrideWithValue(db), // so updateStatus persists
+          activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(source),
-          metadataRepositoryProvider.overrideWithValue(
-            CachingMetadataRepository(
+          metadataProvider.overrideWithValue(
+            CachingMetadataSource(
               source: source,
               sourceKind: MetadataSourceKind.tmdb,
               dao: db.mediaCacheDao,

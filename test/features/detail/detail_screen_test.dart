@@ -9,12 +9,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:watch_nook/core/config/remote_config.dart';
+import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/metadata/tmdb/tmdb_source.dart';
 import 'package:watch_nook/features/detail/data/detail_providers.dart';
 import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
@@ -27,7 +30,7 @@ import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
 ///   `attribution()`, not a fake's — a fake would only prove the fake. Each
 ///   test also asserts the *other* source's credit is absent, so a hardcoded
 ///   footer fails.
-/// - The screen is wired to a **real** `CachingMetadataRepository`, so the
+/// - The screen is wired to a **real** `CachingMetadataSource`, so the
 ///   offline tests drive the SWR path end-to-end: a **stale** cache (the fresh
 ///   case never calls the source, proving nothing) plus a throwing source still
 ///   renders, and a **cold** cache degrades to a notice rather than a crash.
@@ -38,26 +41,38 @@ import 'package:watch_nook/features/detail/presentation/detail_screen.dart';
 /// A source that serves [details]/[episodes], or throws every call when
 /// [offline] — never the network.
 class _FakeSource implements MetadataSource {
-  _FakeSource({this.details, this.episodes = const [], this.offline = false});
+  _FakeSource({
+    this.details,
+    this.episodes = const [],
+    this.offline = false,
+    this.episodesOffline = false,
+  });
 
   final MediaDetails? details;
   final List<EpisodeInfo> episodes;
   final bool offline;
 
-  @override
-  Future<MediaDetails> showDetails(int sourceId) async => _details();
+  /// Serves details but fails every episode fetch. Mutable, so a test can
+  /// bring the network back and try again.
+  bool episodesOffline;
 
   @override
-  Future<MediaDetails> movieDetails(int sourceId) async => _details();
+  Future<MediaDetails> showDetails(SourceRef ref) async => _details();
 
   @override
-  Future<List<EpisodeInfo>> seasonEpisodes(int showId, int season) async {
-    if (offline) throw StateError('offline');
+  Future<MediaDetails> movieDetails(SourceRef ref) async => _details();
+
+  // An Exception, as package:http throws with no network. Not a StateError:
+  // Riverpod never retries an `Error`, so a fake throwing one hides the retry
+  // behaviour ticket 03 is about.
+  @override
+  Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) async {
+    if (offline || episodesOffline) throw http.ClientException('offline');
     return episodes.where((e) => e.seasonNumber == season).toList();
   }
 
   MediaDetails _details() {
-    if (offline) throw StateError('offline');
+    if (offline) throw http.ClientException('offline');
     return details!;
   }
 
@@ -115,7 +130,7 @@ void main() {
   );
 
   /// Mounts the detail screen with [active] as the attribution source and a
-  /// **real** `CachingMetadataRepository` over [repoSource] + the in-memory
+  /// **real** `CachingMetadataSource` over [repoSource] + the in-memory
   /// cache — so the SWR path (and its offline fallback) is exercised for real.
   ///
   /// `libraryItemProvider` is DB-backed, so it is overridden with a synchronous
@@ -126,9 +141,10 @@ void main() {
     required MetadataSource repoSource,
   }) => ProviderScope(
     overrides: [
+      activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
       activeMetadataSourceProvider.overrideWithValue(active),
-      metadataRepositoryProvider.overrideWithValue(
-        CachingMetadataRepository(
+      metadataProvider.overrideWithValue(
+        CachingMetadataSource(
           source: repoSource,
           sourceKind: MetadataSourceKind.tmdb,
           dao: db.mediaCacheDao,
@@ -178,6 +194,63 @@ void main() {
     expect(find.text('Good News'), findsOneWidget);
     expect(find.text('Half Loop'), findsOneWidget);
     expect(find.text('Hello, Ms.'), findsNothing);
+  });
+
+  // Ticket 03 of e2e-follow-ups: offline, expanding an uncached season spun
+  // for about a minute, because Riverpod 3 retries a failed provider and
+  // reports loading in between. Bounded pumps, NOT `pumpAndSettle`, which would
+  // wait out the retries and pass anyway. Mutation: drop `retry: noRetry` from
+  // `seasonEpisodes` → still spinning.
+  testWidgets('an uncached season offline says so at once, and retries on '
+      're-expand', (tester) async {
+    final source = _FakeSource(
+      details: details,
+      episodes: episodes,
+      episodesOffline: true,
+    );
+    await pumpDetail(
+      tester,
+      active: TmdbSource(client: noNetwork(), apiKey: 'k'),
+      repoSource: source,
+    );
+
+    await tester.tap(find.text('Season 1'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text("Couldn't load episodes."), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    // The network comes back: collapsing and re-expanding fetches again.
+    source.episodesOffline = false;
+    await tester.tap(find.text('Season 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Season 1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Good News'), findsOneWidget);
+    expect(find.text("Couldn't load episodes."), findsNothing);
+  });
+
+  testWidgets('a cached season still renders offline', (tester) async {
+    final source = _FakeSource(details: details, episodes: episodes);
+    await pumpDetail(
+      tester,
+      active: TmdbSource(client: noNetwork(), apiKey: 'k'),
+      repoSource: source,
+    );
+    // Online once, so the season is cached; then collapse it.
+    await tester.tap(find.text('Season 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Season 1'));
+    await tester.pumpAndSettle();
+
+    source.episodesOffline = true;
+    await tester.tap(find.text('Season 1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Good News'), findsOneWidget);
+    expect(find.text("Couldn't load episodes."), findsNothing);
   });
 
   testWidgets('attribution is not on detail (it moved to Settings)', (
@@ -237,5 +310,29 @@ void main() {
     // The stored row still renders; the details region says so.
     expect(find.text('Severance'), findsWidgets);
     expect(find.text("Couldn't load details. You're offline."), findsOneWidget);
+  });
+
+  // Ticket 03 of emulator-e2e-findings: offline, the notice showed while the
+  // loading bar kept animating, because Riverpod 3 retries the failed provider
+  // and reports loading between attempts. Bounded pumps, NOT `pumpAndSettle`,
+  // which would wait out the retries and pass anyway. Mutation: drop
+  // `retry: noRetry` from `titleDetails` → the bar is still there.
+  testWidgets('a cold cache offline shows the notice with no loading bar', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      harness(
+        active: TmdbSource(client: noNetwork(), apiKey: 'k'),
+        repoSource: _FakeSource(offline: true),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text("Couldn't load details. You're offline."), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
   });
 }

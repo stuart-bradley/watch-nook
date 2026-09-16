@@ -1,4 +1,6 @@
+import 'package:clock/clock.dart';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
 
@@ -8,6 +10,23 @@ part 'library_dao.g.dart';
 /// (the stats invariant). A record, not a metadata model — the DAO stays
 /// unaware of the metadata layer.
 typedef EpisodeMark = ({int season, int episode, int? runtimeMinutes});
+
+/// One watch event to restore, verbatim. A record rather than a companion so
+/// the caller never has to know the `libraryItemId` — [LibraryDao.restore]
+/// owns that, because only the insert it performs knows the new id.
+typedef RestoreWatch = ({
+  int? season,
+  int? episode,
+  DateTime? watchedAt,
+  int? runtimeMinutes,
+  bool isRewatch,
+});
+
+/// One item to restore: its row plus the history that belongs to it.
+typedef RestoreItem = ({
+  LibraryItemsCompanion item,
+  List<RestoreWatch> watches,
+});
 
 /// Data access for [LibraryItems] (+ read of its [WatchEvents]) and the
 /// denormalized-progress maintenance the whole M2 grid relies on.
@@ -171,6 +190,13 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
 
   /// Insert a library item, returning the generated id. Low-level — most
   /// callers want [addOrGetItem], which dedupes.
+  ///
+  /// Not part of the DAO's advertised interface: its one production caller was
+  /// the restore, which now lives in [restore] and inserts through here itself.
+  /// It stays reachable only so `seedRawItem` can fabricate the malformed rows
+  /// the repair tests need — which is precisely the bypass this annotation
+  /// makes visible at the call site.
+  @visibleForTesting
   Future<int> insertItem(LibraryItemsCompanion entry) =>
       into(libraryItems).insert(entry);
 
@@ -223,6 +249,17 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
 
   /// Patch one item by id. Used by the backend-switch service to relink ids /
   /// set `relinkFailed` without rewriting the whole row.
+  ///
+  /// **Deliberately does not stamp `updatedAt`** — unlike the watch writes,
+  /// which always do. Whether a patch counts as "the user touched this title"
+  /// is the caller's call, and the callers legitimately disagree: the backend
+  /// relink is a real modification and stamps by hand, while the import merge
+  /// (`MergeApplier`, filling null columns) does not.
+  ///
+  /// The same applies to [updateManyItems], whose one caller is the daily
+  /// tracked-show sync: auto-stamping there would rewrite every tracked show's
+  /// recency once a day and leave the grid's most-recently-updated order
+  /// meaning nothing.
   Future<void> updateItem(int id, LibraryItemsCompanion patch) =>
       (update(libraryItems)..where((t) => t.id.equals(id))).write(patch);
 
@@ -269,19 +306,77 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   /// Insert one watch event verbatim. Bypasses the idempotent [markWatched]
   /// semantics, so it is **only** for the restore path, which is rebuilding
   /// history the user already owns rather than recording a new viewing.
+  ///
+  /// [restore] is now that path and calls this internally; nothing outside the
+  /// DAO may assemble a restore out of raw inserts and skip the recompute.
+  @visibleForTesting
   Future<int> insertWatchEvent(WatchEventsCompanion entry) =>
       into(watchEvents).insert(entry);
 
-  /// Wipe **both user-owned tables**. The restore-vs-import invariant
-  /// (CLAUDE.md): a restore *replaces* (this), an import *merges* (never calls
-  /// this). Callers wrap it with their inserts in one transaction so a failed
-  /// restore rolls back to the library it started with.
+  /// **Erase everything the user owns** — the library and its whole watch
+  /// history, both user-owned tables emptied. This is the DAO's half of
+  /// Settings → *Delete everything*, a real operation the app offers, not a
+  /// low-level write that leaked out of [restore]. The Settings flow adds what
+  /// this deliberately does not touch: the cache directory and poster index,
+  /// the disposable media cache, the on-device backup, and the first-run flag
+  /// that sends the app back to onboarding.
+  ///
+  /// [restore] calls it as its own first step, because a restore *replaces*.
+  /// That is the same erasure, not a different primitive — the two operations
+  /// share a first step and diverge immediately after it (a restore keeps the
+  /// cache and the backup on purpose). An import *merges* and never comes here
+  /// (the restore-vs-import invariant, CLAUDE.md).
   ///
   /// Events are deleted explicitly rather than left to the FK cascade, so the
   /// method stays correct even if `foreign_keys` is off.
-  Future<void> deleteAllUserData() => transaction(() async {
+  Future<void> eraseEverything() => transaction(() async {
     await delete(watchEvents).go();
     await delete(libraryItems).go();
+  });
+
+  /// **Restore a backup** — the whole replace protocol as one call: wipe both
+  /// user tables, insert each item, insert its watch events verbatim, and
+  /// recompute that item's denormalized progress. One transaction, so a
+  /// failure anywhere rolls back to the library the user started with.
+  ///
+  /// This exists because the ordering *is* the contract and it used to live in
+  /// prose. Assembled by hand from [eraseEverything] + [insertItem] +
+  /// [insertWatchEvent], a caller that forgot the final recompute would leave
+  /// every restored row reading "0 watched" over a full history — the grid and
+  /// the stats read only the denormalized columns, so nothing would look wrong
+  /// until the user noticed their progress had vanished. Now there is no
+  /// ordering left to get wrong.
+  ///
+  /// Restore **replaces**; import **merges** and never comes here (the
+  /// restore-vs-import invariant, CLAUDE.md).
+  ///
+  /// Returns what was written, for the caller to report.
+  Future<({int items, int watchEvents})> restore(
+    List<RestoreItem> restored,
+  ) => transaction(() async {
+    await eraseEverything();
+    var events = 0;
+    for (final entry in restored) {
+      final id = await insertItem(entry.item);
+      for (final w in entry.watches) {
+        await insertWatchEvent(
+          WatchEventsCompanion.insert(
+            libraryItemId: id,
+            seasonNumber: Value(w.season),
+            episodeNumber: Value(w.episode),
+            watchedAt: Value(w.watchedAt),
+            runtimeMinutes: Value(w.runtimeMinutes),
+            isRewatch: Value(w.isRewatch),
+          ),
+        );
+        events++;
+      }
+      // Deliberately unstamped: a restore rebuilds the library the user
+      // already had, so it must not rewrite every row's `updatedAt` to now and
+      // reorder the grid by the moment they happened to reinstall.
+      await recomputeDenormalized(id);
+    }
+    return (items: restored.length, watchEvents: events);
   });
 
   /// Cheap `LIMIT 1` existence probe — is the library empty?
@@ -329,7 +424,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
         runtimeMinutes: Value(runtimeMinutes),
       ),
     );
-    await recomputeDenormalized(itemId);
+    await recomputeDenormalized(itemId, touchedAt: clock.now());
   });
 
   /// **Bulk mark watched** (#20) — the whole set in **one** transaction, ending
@@ -370,7 +465,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
     if (fresh.isEmpty) return 0;
 
     await batch((b) => b.insertAll(watchEvents, fresh));
-    await recomputeDenormalized(itemId);
+    await recomputeDenormalized(itemId, touchedAt: clock.now());
     return fresh.length;
   });
 
@@ -395,7 +490,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
         isRewatch: const Value(true),
       ),
     );
-    await recomputeDenormalized(itemId);
+    await recomputeDenormalized(itemId, touchedAt: clock.now());
   });
 
   /// **Unwatch** — deletes **all** rows for `(itemId, season, episode)`,
@@ -406,8 +501,34 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
         await (delete(
           watchEvents,
         )..where((t) => _sameEpisode(t, itemId, season, episode))).go();
-        await recomputeDenormalized(itemId);
+        await recomputeDenormalized(itemId, touchedAt: clock.now());
       });
+
+  /// **Dismiss the Unverified marker** on one row — the user has checked the
+  /// episode list and says the stored position is right.
+  ///
+  /// The first and only way this flag has ever been cleared by a person. The
+  /// relink sets it; later relink runs skip the row that most needs clearing
+  /// (it already matches the active backend), and the import only restores
+  /// whatever a backup recorded. Without this the marker is a warning the user
+  /// can never dismiss, which is worse than not showing it.
+  ///
+  /// **One row.** There is no bulk dismiss: the whole meaning of the state is
+  /// that a human looked at a specific title.
+  ///
+  /// Its own named method rather than callers reaching for [updateItem], so the
+  /// operation is visible in this interface and testable on its own.
+  ///
+  /// Touches **nothing else** — not the ids, not `recordedSource`, not a single
+  /// [WatchEvents] row. The promise this state makes is that the user's history
+  /// was never modified, and clearing the marker must not start modifying it.
+  /// It deliberately does not stamp `updatedAt` either: acknowledging a
+  /// question is not watching something, and stamping would jump the title to
+  /// the top of the grid's most-recently-updated order for a no-op.
+  Future<void> dismissUnverifiedPosition(int itemId) =>
+      (update(libraryItems)..where((t) => t.id.equals(itemId))).write(
+        const LibraryItemsCompanion(relinkFailed: Value(false)),
+      );
 
   /// Matches one item's rows at one aired coordinate. A movie's null
   /// season/episode needs `IS NULL`, not `= NULL` (which matches nothing in
@@ -432,7 +553,19 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   /// coordinate among non-rewatch rows (null for a movie or an empty history).
   /// Called in the same transaction after each watch write; grid stays
   /// join-free.
-  Future<void> recomputeDenormalized(int itemId) async {
+  ///
+  /// [touchedAt] also stamps `updatedAt`, which is what keeps [watchLibrary]'s
+  /// most-recently-updated ordering honest — the watch writes pass it. The
+  /// restore path deliberately does **not**: it is rebuilding history the user
+  /// already owns, and stamping would rewrite every row's recency to the moment
+  /// of the restore and flatten the grid's order.
+  ///
+  /// **Not part of the DAO's advertised interface.** Every watch write already
+  /// ends in it and [restore] owns the restore path, so no production caller
+  /// outside this class needs it; it stays reachable only for the repair tests,
+  /// which point it at deliberately damaged rows.
+  @visibleForTesting
+  Future<void> recomputeDenormalized(int itemId, {DateTime? touchedAt}) async {
     final watched =
         await (select(watchEvents)..where(
               (t) => t.libraryItemId.equals(itemId) & t.isRewatch.equals(false),
@@ -458,6 +591,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
         watchedCount: Value(watched.length),
         lastWatchedSeason: Value(lastSeason),
         lastWatchedEpisode: Value(lastEpisode),
+        updatedAt: touchedAt == null ? const Value.absent() : Value(touchedAt),
       ),
     );
   }

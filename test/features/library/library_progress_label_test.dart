@@ -3,7 +3,10 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
+import 'package:watch_nook/core/library/unverified_position.dart';
 import 'package:watch_nook/features/library/presentation/library_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// Unit-tests the denormalized progress caption (#17). Built from a real row so
 /// the field wiring (which column feeds which part of the string) is exercised,
@@ -22,8 +25,13 @@ void main() {
     int? lastSeason,
     int? lastEpisode,
     int? episodeCountTotal,
+    bool relinkFailed = false,
   }) async {
-    final id = await db.libraryDao.insertItem(
+    // Raw on purpose: this exercises the label formatter across the column
+    // space, including combinations the app would never write, so seeding
+    // through markWatched would defeat the point.
+    final id = await seed.seedRawItem(
+      db,
       LibraryItemsCompanion.insert(
         mediaType: type,
         recordedSource: MetadataSourceKind.tmdb,
@@ -35,6 +43,7 @@ void main() {
         lastWatchedSeason: Value(lastSeason),
         lastWatchedEpisode: Value(lastEpisode),
         episodeCountTotal: Value(episodeCountTotal),
+        relinkFailed: Value(relinkFailed),
       ),
     );
     return (await db.libraryDao.getItem(id))!;
@@ -73,6 +82,16 @@ void main() {
     },
   );
 
+  // Ticket 01 of e2e-follow-ups: a one-episode show read "1 episodes".
+  // Mutation: drop the singular branch from `countOf` → the first expectation
+  // fails.
+  test('a one-episode show reads "1 episode"; zero is plural', () async {
+    final one = await row(type: MediaType.tv, episodeCountTotal: 1);
+    expect(libraryProgressLabel(one), '1 episode');
+    final none = await row(type: MediaType.tv, episodeCountTotal: 0);
+    expect(libraryProgressLabel(none), '0 episodes');
+  });
+
   test('TV with no total and nothing watched → Not started', () async {
     final item = await row(type: MediaType.tv);
     expect(libraryProgressLabel(item), 'Not started');
@@ -94,5 +113,56 @@ void main() {
       libraryProgressLabel(await row(type: MediaType.movie, watchedCount: 1)),
       'Watched',
     );
+  });
+
+  // The caption is the first place a user can learn the app cannot vouch for
+  // where they are in a show. The marker qualifies the POSITION only — the
+  // "3 left" count is as accurate as ever, because the backend switch that
+  // raises the flag never touches watch history.
+  group('an Unverified position is marked', () {
+    test('the marker sits on the position, not on the count', () async {
+      final item = await row(
+        type: MediaType.tv,
+        watchedCount: 7,
+        lastSeason: 2,
+        lastEpisode: 4,
+        episodeCountTotal: 10,
+        relinkFailed: true,
+      );
+      expect(
+        libraryProgressLabel(item),
+        '${markUnverifiedPosition('S2E4', unverified: true)} · 3 left',
+      );
+    });
+
+    test('a healthy row with the same position is untouched', () async {
+      final item = await row(
+        type: MediaType.tv,
+        watchedCount: 7,
+        lastSeason: 2,
+        lastEpisode: 4,
+        episodeCountTotal: 10,
+      );
+      expect(libraryProgressLabel(item), 'S2E4 · 3 left');
+    });
+
+    test('an Unverified show with nothing watched is not marked', () async {
+      // "10 episodes" is not a position, so there is nothing to doubt.
+      final item = await row(
+        type: MediaType.tv,
+        episodeCountTotal: 10,
+        relinkFailed: true,
+      );
+      expect(libraryProgressLabel(item), '10 episodes');
+    });
+
+    test('an Unverified movie is not marked', () async {
+      final item = await row(
+        type: MediaType.movie,
+        watchedCount: 1,
+        relinkFailed: true,
+      );
+      expect(libraryProgressLabel(item), 'Watched');
+    });
   });
 }

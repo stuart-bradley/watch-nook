@@ -10,10 +10,11 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/library_identity.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/core/routing/app_router.dart';
 
 /// The `/preview` route itself — mounted from the **real** `appRoutes`.
@@ -38,10 +39,10 @@ class _FakeSource implements MetadataSource {
   final MediaDetails details;
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async => details;
+  Future<MediaDetails> showDetails(SourceRef ref) async => details;
 
   @override
-  Future<List<EpisodeInfo>> seasonEpisodes(int show, int season) async =>
+  Future<List<EpisodeInfo>> seasonEpisodes(SourceRef show, int season) async =>
       const [];
 
   @override
@@ -97,8 +98,8 @@ void main() {
           appDatabaseProvider.overrideWithValue(db),
           activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
           activeMetadataSourceProvider.overrideWithValue(source),
-          metadataRepositoryProvider.overrideWithValue(
-            CachingMetadataRepository(
+          metadataProvider.overrideWithValue(
+            CachingMetadataSource(
               source: source,
               sourceKind: MetadataSourceKind.tmdb,
               dao: db.mediaCacheDao,

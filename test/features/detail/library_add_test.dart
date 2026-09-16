@@ -2,9 +2,10 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 import 'package:watch_nook/features/detail/data/add_to_library.dart';
 
 /// #16 AD-3 snapshot-at-add. Adversarial: prove the snapshot actually lands on
@@ -33,10 +34,10 @@ class _FakeSource implements MetadataSource {
   int detailCalls = 0;
 
   @override
-  Future<MediaDetails> showDetails(int sourceId) async => _detail();
+  Future<MediaDetails> showDetails(SourceRef ref) async => _detail();
 
   @override
-  Future<MediaDetails> movieDetails(int sourceId) async => _detail();
+  Future<MediaDetails> movieDetails(SourceRef ref) async => _detail();
 
   MediaDetails _detail() {
     detailCalls++;
@@ -56,12 +57,11 @@ void main() {
 
   /// The add goes through the SWR cache (not the bare source) so it warms the
   /// cache Up Next reads — see `up_next_after_add_test.dart`.
-  CachingMetadataRepository repoOver(_FakeSource source) =>
-      CachingMetadataRepository(
-        source: source,
-        sourceKind: source.kind,
-        dao: db.mediaCacheDao,
-      );
+  CachingMetadataSource repoOver(_FakeSource source) => CachingMetadataSource(
+    source: source,
+    sourceKind: source.kind,
+    dao: db.mediaCacheDao,
+  );
 
   const severance = MediaSearchResult(
     kind: MediaKind.tv,

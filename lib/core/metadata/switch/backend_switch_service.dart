@@ -4,6 +4,7 @@ import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
 
 /// Re-resolves the library when the active metadata backend changes (ADR-4).
 ///
@@ -103,6 +104,16 @@ class BackendSwitchService {
             ? Value(newId)
             : const Value.absent(),
         recordedSource: Value(_newKind),
+        // Dropped, not kept. `posterPath` is backend-relative and only the
+        // backend that minted it can resolve it — and this write is the moment
+        // `recordedSource` starts claiming the NEW backend, which is the field
+        // `LibraryItem.posterRef` reads. Carried over, the path would look
+        // native to a catalogue that never produced it, and `RemoteImage`'s
+        // mismatch check would wave it through to a 404 or an unrelated image,
+        // permanently for a movie (the daily sync only refills TV rows).
+        // A null poster is the placeholder, which is the honest answer until
+        // the next detail view or sync refills it.
+        posterPath: const Value(null),
         relinkFailed: Value(!reconciled),
         updatedAt: Value(_clock.now()),
       ),
@@ -146,7 +157,10 @@ class BackendSwitchService {
     for (final season in watched.map((c) => c.$1).toSet()) {
       final List<EpisodeInfo> eps;
       try {
-        eps = await _newSource.seasonEpisodes(newShowId, season);
+        eps = await _newSource.seasonEpisodes(
+          SourceRef(_newKind, newShowId),
+          season,
+        );
       } on Object {
         return false; // can't fetch → can't verify → flag, don't scramble
       }

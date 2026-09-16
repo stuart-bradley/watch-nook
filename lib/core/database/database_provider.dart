@@ -24,7 +24,7 @@ AppDatabase appDatabase(Ref ref) {
 LibraryDao libraryDao(Ref ref) => ref.watch(appDatabaseProvider).libraryDao;
 
 /// The [MediaCacheDao] for the singleton database — backs the SWR metadata
-/// cache (`CachingMetadataRepository`, #13). `keepAlive` to match the DB.
+/// cache (`CachingMetadataSource`, #13). `keepAlive` to match the DB.
 @Riverpod(keepAlive: true)
 MediaCacheDao mediaCacheDao(Ref ref) =>
     ref.watch(appDatabaseProvider).mediaCacheDao;

@@ -1,13 +1,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// StreamProviderFamily lives in the misc barrel, not the main one.
 import 'package:flutter_riverpod/misc.dart' show StreamProviderFamily;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:watch_nook/core/database/app_database.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
-import 'package:watch_nook/core/database/library_item_ids.dart';
 import 'package:watch_nook/core/database/tables.dart';
 import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
+import 'package:watch_nook/core/metadata/source_ref.dart';
+// StreamProviderFamily lives in the misc barrel, not the main one.
 
 part 'detail_providers.g.dart';
 
@@ -30,35 +30,25 @@ final StreamProviderFamily<Set<(int, int)>, int> watchedEpisodesProvider =
           ref.watch(libraryDaoProvider).watchWatchedEpisodes(itemId),
     );
 
-/// The backend id to fetch this row's metadata with — **this row's own**
-/// `recordedSource` id, never the other backend's (the episode-identity
-/// invariant). Null for a row with no id for its source (offline add / import):
-/// the detail screen then renders the stored row alone. Delegates to the
-/// canonical [LibraryItemSourceId.sourceIdFor].
-int? detailSourceId(LibraryItem item) => item.sourceIdFor(item.recordedSource);
-
 /// Cache-first details for the detail screen (#18). Goes through
-/// `metadataRepositoryProvider` (SWR), so it emits the cached value instantly
+/// `metadataProvider` (SWR), so it emits the cached value instantly
 /// and a stale-cache refetch failure never blanks the screen (US-13).
-@riverpod
-Stream<MediaDetails> titleDetails(Ref ref, MediaType type, int sourceId) {
-  final repo = ref.watch(metadataRepositoryProvider);
-  return type == MediaType.movie
-      ? repo.movieDetails(sourceId)
-      : repo.showDetails(sourceId);
+/// Not retried: a cold-cache failure shows the offline notice at once, without
+/// a loading bar beside it ([noRetry]).
+@Riverpod(retry: noRetry)
+Stream<MediaDetails> titleDetails(Ref ref, MediaType type, SourceRef target) {
+  // The streaming form: paint from cache immediately, update in place when a
+  // revalidation lands. A screen is the one consumer that wants both emissions.
+  return ref.watch(metadataProvider).watchDetails(type, target);
 }
 
 /// Cache-first aired-order episodes for one season (ADR-4). Watched lazily —
 /// only when its season tile is expanded — so opening a 20-season show doesn't
-/// fan out 20 fetches.
-@riverpod
+/// fan out 20 fetches. Not retried: offline, an uncached season shows its error
+/// at once ([noRetry]); collapsing and re-expanding the tile fetches again.
+@Riverpod(retry: noRetry)
 Stream<List<EpisodeInfo>> seasonEpisodes(
   Ref ref,
-  int showSourceId,
+  SourceRef show,
   int seasonNumber,
-) => ref
-    .watch(metadataRepositoryProvider)
-    .seasonEpisodes(
-      showSourceId,
-      seasonNumber,
-    );
+) => ref.watch(metadataProvider).watchSeasonEpisodes(show, seasonNumber);

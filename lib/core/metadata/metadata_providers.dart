@@ -4,7 +4,7 @@ import 'package:watch_nook/core/config/remote_config.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/database_provider.dart';
 import 'package:watch_nook/core/database/tables.dart';
-import 'package:watch_nook/core/metadata/cache/caching_metadata_repository.dart';
+import 'package:watch_nook/core/metadata/cache/caching_metadata_source.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/core/metadata/tmdb/tmdb_source.dart';
@@ -16,6 +16,19 @@ part 'metadata_providers.g.dart';
 // providers only: never an HTTP client or a concrete source directly (the
 // provider-agnostic rule in CLAUDE.md). All `keepAlive` (app-lifetime).
 
+/// Retry policy for a provider whose failure the screen should show at once:
+/// `@Riverpod(retry: noRetry)`.
+///
+/// Riverpod 3 retries every failed provider by default (backoff 200 ms → 6.4 s)
+/// and reports *loading* between attempts, so offline a search spun for about a
+/// minute and an uncached detail page showed its offline notice beside a moving
+/// loading bar. The request fails fast; the retries were what stretched it. The
+/// metadata layer already falls back to cache, so a retry rarely buys anything.
+///
+/// ponytail: applied per provider (search + details), not app-wide. Set
+/// `ProviderScope(retry:)` in `main.dart` if every provider should behave so.
+Duration? noRetry(int retryCount, Object error) => null;
+
 /// Shared HTTP client for every metadata call. Closed when the container tears
 /// down so sockets don't leak.
 @Riverpod(keepAlive: true)
@@ -25,8 +38,16 @@ http.Client httpClient(Ref ref) {
   return client;
 }
 
-/// The concrete [MetadataSource] for the active backend, built from the current
+/// The **raw**, uncached source for the active backend, built from the current
 /// config keys (AD-2). Rebuilds if the backend or its keys change.
+///
+/// Not for app code: it is the thing [metadataProvider] wraps, and reading it
+/// directly is how a caller silently opts out of the offline guarantee (ADR-7,
+/// US-13) — a screen fed from here blanks when the network does. Every
+/// consumer takes [metadataProvider], which satisfies the same interface. A
+/// lint-as-test (`test/core/metadata/one_metadata_provider_test.dart`) holds
+/// `lib/` to that; tests override this one to inject a fake backend, which is
+/// exactly what it is still public for.
 @Riverpod(keepAlive: true)
 MetadataSource activeMetadataSource(Ref ref) {
   final config = ref.watch(remoteConfigServiceProvider).current();
@@ -44,20 +65,37 @@ MetadataSource activeMetadataSource(Ref ref) {
   };
 }
 
-/// The SWR cache over [activeMetadataSourceProvider] (AD-2). Detail screens
-/// read through this (cache-first); search and relink hit the source directly.
+/// **The** metadata gateway for app code (AD-2, ADR-7): a [MetadataSource]
+/// whose three detail lookups are stale-while-revalidate over the local cache
+/// and whose search/relink pass straight through.
+///
+/// One provider and one interface, so no call site has to know whether it is
+/// holding the cached thing or the raw thing — the difference used to be a
+/// convention about which of two stream emissions to take.
 @Riverpod(keepAlive: true)
-CachingMetadataRepository metadataRepository(Ref ref) {
-  final backend = ref.watch(activeMetadataBackendProvider);
-  return CachingMetadataRepository(
-    source: ref.watch(activeMetadataSourceProvider),
-    sourceKind: metadataSourceKindOf(backend),
-    dao: ref.watch(mediaCacheDaoProvider),
-  );
-}
+CachingMetadataSource metadata(Ref ref) => CachingMetadataSource(
+  source: ref.watch(activeMetadataSourceProvider),
+  // The cache keys every row by this value and `RemoteImage` compares against
+  // it, so they must be the same answer — which is what [metadataSourceKindOf]
+  // over the single backend provider buys.
+  sourceKind: metadataSourceKindOf(ref.watch(activeMetadataBackendProvider)),
+  dao: ref.watch(mediaCacheDaoProvider),
+);
 
-/// Bridges the config's [MetadataBackend] to the DB's per-row
-/// [MetadataSourceKind] (stamped onto `LibraryItems.recordedSource`).
+/// The active backend as the DB's per-row [MetadataSourceKind] — the value a
+/// stored row's `recordedSource` must match for its ids and artwork to mean
+/// anything (see `SourceRef` / `ArtworkRef`).
+///
+/// The two enums are **one concept with two representations** and stay two
+/// types for a layering reason (ADR-9). This is the only converter between
+/// them.
+///
+/// Deliberately a **function, not a provider** (ADR-9). It used to be a derived
+/// provider, which meant two overridable answers to "what backend are we on?" —
+/// and a harness that overrode only one got rows cached under one backend and
+/// compared against another. A function cannot be overridden, so
+/// [activeMetadataBackendProvider] is the single injection point and the
+/// split-brain is unrepresentable.
 MetadataSourceKind metadataSourceKindOf(MetadataBackend backend) =>
     switch (backend) {
       MetadataBackend.tmdb => MetadataSourceKind.tmdb,

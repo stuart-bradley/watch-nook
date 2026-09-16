@@ -1,12 +1,12 @@
 import 'dart:async';
 
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:watch_nook/core/config/remote_config.dart';
 import 'package:watch_nook/core/config/remote_config_provider.dart';
 import 'package:watch_nook/core/database/app_database.dart';
@@ -17,6 +17,8 @@ import 'package:watch_nook/core/metadata/metadata_providers.dart';
 import 'package:watch_nook/core/metadata/metadata_source.dart';
 import 'package:watch_nook/core/metadata/models/metadata_models.dart';
 import 'package:watch_nook/features/search/presentation/search_screen.dart';
+
+import '../../support/library_fixtures.dart' as seed;
 
 /// #16 acceptance — the search→**detail** flow at the widget layer, via a
 /// `ProviderScope` with a fake source + in-memory DB (never the real net/DB).
@@ -29,15 +31,21 @@ import 'package:watch_nook/features/search/presentation/search_screen.dart';
 /// point: this file's whole claim is that a tap neither fetches details nor
 /// writes, so any detail fetch must blow up rather than be quietly served.
 class _FakeSource implements MetadataSource {
-  _FakeSource({required this.results});
+  _FakeSource({required this.results, this.offline = false});
 
   final List<MediaSearchResult> results;
+  final bool offline;
 
   @override
   Future<List<MediaSearchResult>> search(
     String query, {
     MediaKind? kind,
-  }) async => results;
+  }) async {
+    // An Exception, as package:http throws with no network. Not a StateError:
+    // Riverpod never retries an `Error`, which would hide what ticket 03 fixes.
+    if (offline) throw http.ClientException('offline');
+    return results;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
@@ -72,11 +80,13 @@ void main() {
   /// observable. `/preview` and `/title/:id` render a stub — this file is about
   /// where the tap goes and what it does (or doesn't) write, not about the
   /// detail screen (see `preview_test.dart` for that).
-  Widget harness() {
+  Widget harness({bool offline = false}) {
     // NOT broadcast: a broadcast controller drops events sent before anyone is
     // listening, and the seed below is added before the provider subscribes.
     revisions = StreamController<int>();
-    addTearDown(revisions.close);
+    // Not awaited: `close()` on a single-subscription controller completes only
+    // once a listener drains it, and a search with no results never listens.
+    addTearDown(() => unawaited(revisions.close()));
     revisions.add(0);
     router = GoRouter(
       initialLocation: '/search',
@@ -100,7 +110,7 @@ void main() {
         appDatabaseProvider.overrideWithValue(db),
         activeMetadataBackendProvider.overrideWithValue(MetadataBackend.tmdb),
         activeMetadataSourceProvider.overrideWithValue(
-          _FakeSource(results: results),
+          _FakeSource(results: results, offline: offline),
         ),
         libraryRevisionProvider.overrideWith((ref) => revisions.stream),
       ],
@@ -128,6 +138,24 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400)); // fire debounce
     await tester.pumpAndSettle(); // resolve the search future + build the list
   }
+
+  // Ticket 03 of emulator-e2e-findings: offline, the spinner ran for about a
+  // minute because Riverpod 3 retries a failed provider with backoff and
+  // reports loading in between. Pumped for one second, NOT `pumpAndSettle` —
+  // the spinner animates, so that would wait out every retry and pass anyway.
+  // Mutation: drop `retry: noRetry` from `searchResults` → still spinning.
+  testWidgets('offline, search says so straight away', (tester) async {
+    await tester.pumpWidget(harness(offline: true));
+    await tester.enterText(find.byType(TextField), 'severance');
+    await tester.pump(const Duration(milliseconds: 400)); // fire debounce
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(
+      find.text("Couldn't search. Check your connection and try again."),
+      findsOneWidget,
+    );
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
 
   testWidgets('tapping a result opens its detail page and adds nothing', (
     tester,
@@ -167,17 +195,7 @@ void main() {
     // Six films called "Severance" come back from a search; without this you
     // have to open each one to find out which is the one you already track.
     final now = DateTime(2026, 7, 13);
-    await db.libraryDao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Severance',
-        trackStatus: TrackStatus.onHold,
-        addedAt: now,
-        updatedAt: now,
-        tmdbId: const Value(95396),
-      ),
-    );
+    await seed.seedShow(db, now: now, status: TrackStatus.onHold);
 
     await tester.pumpWidget(harness());
     await tester.pumpAndSettle();
@@ -206,17 +224,7 @@ void main() {
     // So drive the writes the badge is supposed to follow, and assert it moves.
     // Nothing here calls the add path, and nothing invalidates anything.
     final now = DateTime(2026, 7, 13);
-    final id = await db.libraryDao.insertItem(
-      LibraryItemsCompanion.insert(
-        mediaType: MediaType.tv,
-        recordedSource: MetadataSourceKind.tmdb,
-        title: 'Severance',
-        trackStatus: TrackStatus.watching,
-        addedAt: now,
-        updatedAt: now,
-        tmdbId: const Value(95396),
-      ),
-    );
+    final id = (await seed.seedShow(db, now: now)).id;
 
     await tester.pumpWidget(harness());
     await tester.pumpAndSettle();
@@ -248,17 +256,7 @@ void main() {
       // so a regression there (e.g. matching a tmdbId across mediaTypes) lands
       // here too.
       final now = DateTime(2026, 7, 12);
-      final id = await db.libraryDao.insertItem(
-        LibraryItemsCompanion.insert(
-          mediaType: MediaType.tv,
-          recordedSource: MetadataSourceKind.tmdb,
-          title: 'Severance',
-          trackStatus: TrackStatus.watching,
-          addedAt: now,
-          updatedAt: now,
-          tmdbId: const Value(95396),
-        ),
-      );
+      final id = (await seed.seedShow(db, now: now)).id;
 
       await tester.pumpWidget(harness());
       await tester.pumpAndSettle();
